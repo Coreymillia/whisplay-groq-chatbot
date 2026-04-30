@@ -1,5 +1,5 @@
 {
-  "name": "whisplay-ai-chatbot",
+  "name": "whisplay-groq-hat",
   "version": "1.0.0",
   "main": "index.js",
   "bin": {
@@ -15,7 +15,7 @@
   },
   "author": "",
   "license": "ISC",
-  "description": "",
+  "description": "Groq-backed Whisplay chatbot profile for Raspberry Pi Zero 2 W bring-up",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.55.1",
     "@google-cloud/text-to-speech": "^6.3.1",

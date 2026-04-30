@@ -2,6 +2,7 @@ import { purifyTextForTTS, splitSentences } from "../utils";
 import dotenv from "dotenv";
 import { playAudioData, stopPlaying } from "../device/audio";
 import { TTSResult } from "../type";
+import { getRuntimeSettings } from "../config/runtime-settings";
 
 dotenv.config();
 
@@ -32,6 +33,7 @@ export class StreamResponser {
   private isPlaying: boolean = false;
   private ttsChain: Promise<void> = Promise.resolve();
   private hasStartedTTS: boolean = false;
+  private streamEnded: boolean = false;
 
   constructor(
     ttsFunc: TTSFunc,
@@ -56,6 +58,22 @@ export class StreamResponser {
     }
     return this.displaySentences.slice(0, sentenceIndex + 1).join(" ").length;
   }
+
+  private isTextOnlyMode = (): boolean => {
+    return getRuntimeSettings().voiceMode === "text-only";
+  };
+
+  private finishResponse = (): void => {
+    console.log(
+      `Play all audio completed. Total: ${this.speakQueue.length}`
+    );
+    this.isPlaying = false;
+    this.playEndResolve();
+    this.speakQueue.length = 0;
+    this.speakQueue = [];
+    this.displaySentences.length = 0;
+    this.hasStartedTTS = false;
+  };
 
   private playAudioInOrder = async (): Promise<void> => {
     // Prevent multiple concurrent calls
@@ -90,16 +108,11 @@ export class StreamResponser {
       } else if (this.partialContent) {
         await new Promise((resolve) => setTimeout(resolve, 1000));
         playNext();
+      } else if (!this.streamEnded) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        playNext();
       } else {
-        console.log(
-          `Play all audio completed. Total: ${this.speakQueue.length}`
-        );
-        this.isPlaying = false;
-        this.playEndResolve();
-        this.speakQueue.length = 0;
-        this.speakQueue = [];
-        this.displaySentences.length = 0;
-        this.hasStartedTTS = false;
+        this.finishResponse();
       }
     };
     playNext();
@@ -119,6 +132,7 @@ export class StreamResponser {
   };
 
   partial = (text: string): void => {
+    this.streamEnded = false;
     this.partialContent += text;
     // replace newlines with spaces
     this.partialContent = this.partialContent.replace(/\n/g, " ");
@@ -128,6 +142,10 @@ export class StreamResponser {
       const startIndex = this.displaySentences.length;
       this.displaySentences.push(...sentences);
       this.sentencesCallback?.(this.displaySentences);
+      if (this.isTextOnlyMode()) {
+        this.partialContent = remaining;
+        return;
+      }
       // remove emoji
       const length = this.speakQueue.length;
       const queueItems: {
@@ -158,31 +176,39 @@ export class StreamResponser {
   };
 
   endPartial = (): void => {
+    this.streamEnded = true;
     if (this.partialContent) {
       this.parsedSentences.push(this.partialContent);
       this.displaySentences.push(this.partialContent);
       this.sentencesCallback?.(this.displaySentences);
+      if (this.isTextOnlyMode()) {
+        this.partialContent = "";
+      } else {
       // remove emoji
-      this.partialContent = this.partialContent.replace(
-        /[\u{1F600}-\u{1F64F}]/gu,
-        ""
-      );
-      if (this.partialContent.trim() !== "") {
-        const text = purifyTextForTTS(this.partialContent);
-        const length = this.speakQueue.length;
-        this.speakQueue.push({
-          sentenceIndex: this.displaySentences.length - 1,
-          sentence: this.displaySentences[this.displaySentences.length - 1],
-          ttsPromise: this.enqueueTTS(text),
-        });
-        if (length === 0 && !this.isPlaying) {
-          this.playAudioInOrder();
+        this.partialContent = this.partialContent.replace(
+          /[\u{1F600}-\u{1F64F}]/gu,
+          ""
+        );
+        if (this.partialContent.trim() !== "") {
+          const text = purifyTextForTTS(this.partialContent);
+          const length = this.speakQueue.length;
+          this.speakQueue.push({
+            sentenceIndex: this.displaySentences.length - 1,
+            sentence: this.displaySentences[this.displaySentences.length - 1],
+            ttsPromise: this.enqueueTTS(text),
+          });
+          if (length === 0 && !this.isPlaying) {
+            this.playAudioInOrder();
+          }
         }
+        this.partialContent = "";
       }
-      this.partialContent = "";
     }
     this.textCallback?.(this.displaySentences.join(" "));
     this.parsedSentences.length = 0;
+    if (this.isTextOnlyMode()) {
+      this.finishResponse();
+    }
   };
 
   getPlayEndPromise = (): Promise<void> => {
@@ -200,6 +226,7 @@ export class StreamResponser {
     this.isPlaying = false;
     this.ttsChain = Promise.resolve();
     this.hasStartedTTS = false;
+    this.streamEnded = true;
     this.playEndResolve();
     stopPlaying();
   };

@@ -15,6 +15,13 @@ const led = document.getElementById("led");
 const ledText = document.getElementById("ledText");
 const btn = document.getElementById("btn");
 const btnText = document.getElementById("btnText");
+const groqKeyInput = document.getElementById("groqKeyInput");
+const groqKeyHint = document.getElementById("groqKeyHint");
+const personalityInput = document.getElementById("personalityInput");
+const voiceModeSelect = document.getElementById("voiceModeSelect");
+const saveSettingsBtn = document.getElementById("saveSettingsBtn");
+const clearKeyBtn = document.getElementById("clearKeyBtn");
+const settingsStatus = document.getElementById("settingsStatus");
 const dim = document.getElementById("dim");
 const imageLayer = document.getElementById("imageLayer");
 const imageDisplay = document.getElementById("imageDisplay");
@@ -31,6 +38,7 @@ let lastText = "";
 let lastImageRevision = -1;
 let isPressed = false;
 let activePointerId = null;
+let settingsLoaded = false;
 
 function setIconVisible(iconEl, visible) {
   iconEl.style.display = visible ? "block" : "none";
@@ -284,7 +292,87 @@ function sendButton(action) {
   ws.send(JSON.stringify({ type: "button", action }));
 }
 
+function setSettingsStatus(message, isError = false) {
+  if (!settingsStatus) return;
+  settingsStatus.textContent = message;
+  settingsStatus.style.color = isError ? "#ff8a8a" : "";
+}
+
+function applySettings(settings) {
+  if (!settings) return;
+  if (personalityInput) {
+    personalityInput.value = settings.personalityPrompt || "";
+  }
+  if (voiceModeSelect) {
+    voiceModeSelect.value = settings.voiceMode || "text-only";
+  }
+  if (groqKeyHint) {
+    groqKeyHint.textContent = settings.groqApiKeyConfigured
+      ? "Groq key stored"
+      : "No key stored";
+  }
+  if (groqKeyInput) {
+    groqKeyInput.value = "";
+  }
+}
+
+async function loadSettings() {
+  try {
+    const response = await fetch("/api/settings", { cache: "no-store" });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    const payload = await response.json();
+    applySettings(payload.settings || {});
+    settingsLoaded = true;
+    setSettingsStatus("Settings ready.");
+  } catch (error) {
+    console.error("Failed to load settings:", error);
+    setSettingsStatus("Failed to load settings.", true);
+  }
+}
+
+async function saveSettings({ clearGroqApiKey = false } = {}) {
+  if (!settingsLoaded) {
+    setSettingsStatus("Settings are still loading.", true);
+    return;
+  }
+
+  const body = {
+    groqApiKey: clearGroqApiKey ? "" : (groqKeyInput?.value || "").trim(),
+    clearGroqApiKey,
+    personalityPrompt: (personalityInput?.value || "").trim(),
+    voiceMode: voiceModeSelect?.value || "text-only",
+  };
+
+  setSettingsStatus(clearGroqApiKey ? "Clearing key..." : "Saving settings...");
+
+  try {
+    const response = await fetch("/api/settings", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    const payload = await response.json();
+    applySettings(payload.settings || {});
+    setSettingsStatus(
+      clearGroqApiKey
+        ? "Stored Groq key cleared."
+        : "Settings saved. New replies will use the updated personality and key.",
+    );
+  } catch (error) {
+    console.error("Failed to save settings:", error);
+    setSettingsStatus("Failed to save settings.", true);
+  }
+}
+
 connectWebSocket();
+loadSettings();
 requestAnimationFrame(animateScroll);
 
 function setPressed(value) {
@@ -334,6 +422,18 @@ window.addEventListener("pointerup", (event) => {
   release();
   activePointerId = null;
 });
+
+if (saveSettingsBtn) {
+  saveSettingsBtn.addEventListener("click", () => {
+    saveSettings();
+  });
+}
+
+if (clearKeyBtn) {
+  clearKeyBtn.addEventListener("click", () => {
+    saveSettings({ clearGroqApiKey: true });
+  });
+}
 
 // ── Web Audio Recording ──────────────────────────────────────────────────────
 // When WEB_AUDIO_ENABLED=true on the server, it sends "start_record" /
@@ -714,4 +814,3 @@ updateTextInputState(false, "");
 // Unlock AudioContext on first user interaction (required by browsers).
 document.addEventListener("click", () => { try { ensureAudioContext(); } catch {} }, { once: true });
 document.addEventListener("touchstart", () => { try { ensureAudioContext(); } catch {} }, { once: true });
-

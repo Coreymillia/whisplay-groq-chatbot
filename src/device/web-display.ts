@@ -4,10 +4,15 @@ import http from "http";
 import { Socket } from "net";
 import Koa from "koa";
 import Router from "@koa/router";
+import bodyParser from "koa-bodyparser";
 import serve from "koa-static";
 import { WebSocketServer, WebSocket, RawData } from "ws";
 import { dataDir, cameraFeedDir } from "../utils/dir";
 import { getImageMimeType } from "../utils/image";
+import {
+  getPublicRuntimeSettings,
+  saveRuntimeSettings,
+} from "../config/runtime-settings";
 import {
   webAudioBridge,
   FRAME_AUDIO_CHUNK,
@@ -56,6 +61,7 @@ export class WebDisplayServer implements WebAudioBridgeServer {
 
     const staticRoot = this.resolveWebRoot();
     this.registerRoutes(staticRoot);
+    this.app.use(bodyParser());
     this.app.use(this.router.routes());
     this.app.use(this.router.allowedMethods());
     this.app.use(serve(staticRoot));
@@ -178,6 +184,37 @@ export class WebDisplayServer implements WebAudioBridgeServer {
       }
       ctx.type = getImageMimeType(this.cameraFramePath);
       ctx.body = fs.createReadStream(this.cameraFramePath);
+    });
+
+    this.router.get("/api/settings", (ctx) => {
+      ctx.set("Cache-Control", "no-store");
+      ctx.body = {
+        settings: getPublicRuntimeSettings(),
+      };
+    });
+
+    this.router.post("/api/settings", (ctx) => {
+      const body = ((ctx.request as any).body || {}) as Record<string, unknown>;
+      const settings = saveRuntimeSettings({
+        groqApiKey:
+          typeof body.groqApiKey === "string" ? body.groqApiKey : undefined,
+        clearGroqApiKey: body.clearGroqApiKey === true,
+        personalityPrompt:
+          typeof body.personalityPrompt === "string"
+            ? body.personalityPrompt
+            : undefined,
+        voiceMode:
+          typeof body.voiceMode === "string" ? body.voiceMode : undefined,
+      });
+
+      ctx.body = {
+        ok: true,
+        settings: {
+          groqApiKeyConfigured: Boolean(settings.groqApiKey),
+          personalityPrompt: settings.personalityPrompt,
+          voiceMode: settings.voiceMode,
+        },
+      };
     });
 
   }

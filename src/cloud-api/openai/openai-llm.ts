@@ -5,12 +5,12 @@ import { isEmpty } from "lodash";
 import moment from "moment";
 import {
   shouldResetChatHistory,
-  systemPrompt,
+  getSystemPrompt,
   updateLastMessageTime,
 } from "../../config/llm-config";
 import { FunctionCall, Message, ToolReturnTag } from "../../type";
 import { combineFunction } from "../../utils";
-import { openai } from "./openai"; // Assuming openai is exported from openai.ts
+import { getOpenAIClient, getOpenAILLMModel } from "./openai";
 import { llmFuncMap, llmTools } from "../../config/llm-tools";
 import {
   ChatWithLLMStreamFunction,
@@ -25,7 +25,6 @@ import {
 
 dotenv.config();
 // OpenAI LLM
-const openaiLLMModel = process.env.OPENAI_LLM_MODEL || "gpt-4o"; // Default model
 const openaiEnableTools =
   (process.env.OPENAI_ENABLE_TOOLS || "true").toLowerCase() === "true";
 const shouldIncludeTools = openaiEnableTools;
@@ -53,15 +52,27 @@ const chatHistoryFileName = `openai_chat_history_${moment().format(
 const messages: Message[] = [
   {
     role: "system",
-    content: systemPrompt,
+    content: getSystemPrompt(),
   },
 ];
+
+const syncSystemPrompt = (): void => {
+  const currentSystemPrompt = getSystemPrompt();
+  if (messages[0]?.role === "system") {
+    messages[0].content = currentSystemPrompt;
+    return;
+  }
+  messages.unshift({
+    role: "system",
+    content: currentSystemPrompt,
+  });
+};
 
 const resetChatHistory = (): void => {
   messages.length = 0;
   messages.push({
     role: "system",
-    content: systemPrompt,
+    content: getSystemPrompt(),
   });
 };
 
@@ -72,13 +83,17 @@ const chatWithLLMStream: ChatWithLLMStreamFunction = async (
   partialThinkingCallback?: (partialThinking: string) => void,
   invokeFunctionCallback?: (functionName: string, result?: string) => void,
 ): Promise<void> => {
+  const openai = getOpenAIClient();
   if (!openai) {
     console.error("OpenAI API key is not set.");
     return;
   }
   if (shouldResetChatHistory()) {
     resetChatHistory();
+  } else {
+    syncSystemPrompt();
   }
+  const openaiLLMModel = getOpenAILLMModel();
   updateLastMessageTime();
   let endResolve: () => void = () => {};
   const promise = new Promise<void>((resolve) => {
@@ -262,10 +277,12 @@ const summaryTextWithLLM: SummaryTextWithLLMFunction = async (
   text: string,
   promptPrefix: string,
 ): Promise<string> => {
+  const openai = getOpenAIClient();
   if (!openai) {
     console.error("OpenAI API key is not set. Using original text.");
     return text;
   }
+  const openaiLLMModel = getOpenAILLMModel();
   const chatCompletion = await openai.chat.completions
     .create({
       model: openaiLLMModel,

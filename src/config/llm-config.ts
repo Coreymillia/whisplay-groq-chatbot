@@ -1,8 +1,8 @@
 require("dotenv").config();
+import { getRuntimeSettings } from "./runtime-settings";
 
-const baseSystemPrompt =
-  process.env.SYSTEM_PROMPT ||
-  "You are a young and cheerful girl who loves to talk, chat, help others, and learn new things. You enjoy using emoji expressions. Never answer longer than 200 words. Always keep your answers concise and to the point.";
+export const DEFAULT_SYSTEM_PROMPT =
+  "You are WhisplayGroqHat, a concise and helpful voice assistant for Raspberry Pi Zero 2 W. Speak naturally, stay practical, and keep replies short enough to feel fast on a handheld device. Use emoji sparingly and only when they add clarity.";
 
 const wakeWordEnabled =
   (process.env.WAKE_WORD_ENABLED || "").toLowerCase() === "true";
@@ -24,5 +24,11 @@ export const shouldResetChatHistory = (): boolean => {
   return Date.now() - lastMessageTime > CHAT_HISTORY_RESET_TIME;
 }
 
-export const systemPrompt = `${baseSystemPrompt}${wakeWordConversationToolPrompt}`;
+export const getSystemPrompt = (): string => {
+  const runtimePrompt = getRuntimeSettings().personalityPrompt;
+  const baseSystemPrompt =
+    runtimePrompt || process.env.SYSTEM_PROMPT || DEFAULT_SYSTEM_PROMPT;
+  return `${baseSystemPrompt}${wakeWordConversationToolPrompt}`;
+};
 
+export const systemPrompt = getSystemPrompt();

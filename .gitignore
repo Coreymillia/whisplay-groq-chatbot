@@ -3,6 +3,7 @@ data
 knowledge
 tts_temp
 /.env
+.whisplay-groqhat-settings.json
 emoji_svg
 NotoSansSC-Bold.ttf
 cloud-api/speech.mp3

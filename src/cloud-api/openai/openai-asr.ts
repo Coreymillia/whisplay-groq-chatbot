@@ -1,9 +1,10 @@
 import fs from "fs";
-import { openai } from "./openai"; // Assuming openai is exported from openai.ts
+import { getOpenAIClient } from "./openai";
 
 export const recognizeAudio = async (
   audioFilePath: string
 ): Promise<string> => {
+  const openai = getOpenAIClient();
   if (!openai) {
     console.error("OpenAI API key is not set.");
     return "";

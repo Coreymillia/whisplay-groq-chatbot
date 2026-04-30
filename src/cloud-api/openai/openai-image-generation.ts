@@ -7,10 +7,11 @@ import {
 import path from "path";
 import { imageDir } from "../../utils/dir";
 import { readFileSync, writeFileSync } from "fs";
-import { openai, openaiImageModel } from "./openai";
+import { getOpenAIClient, getOpenAIImageModel } from "./openai";
 import { ImageGenerateParamsNonStreaming } from "openai/resources/images";
 
 export const addOpenaiGenerationTool = (imageGenerationTools: LLMTool[]) => {
+  const openai = getOpenAIClient();
   if (!openai) return;
   imageGenerationTools.push({
     type: "function",
@@ -34,6 +35,11 @@ export const addOpenaiGenerationTool = (imageGenerationTools: LLMTool[]) => {
       },
     },
     func: async (params: { prompt: string; withImageContext: boolean }) => {
+      const openai = getOpenAIClient();
+      const openaiImageModel = getOpenAIImageModel();
+      if (!openai) {
+        return `${ToolReturnTag.Error}Image generation failed.`;
+      }
       console.log(`Generating image with openai model: ${openaiImageModel}`);
       const { prompt, withImageContext } = params;
       if (["dall-e-2", "dall-e-3"].includes(openaiImageModel)) {
@@ -52,7 +58,7 @@ export const addOpenaiGenerationTool = (imageGenerationTools: LLMTool[]) => {
           requestParams.response_format = "b64_json";
         }
         try {
-          const response = await openai!.images.generate(requestParams);
+          const response = await openai.images.generate(requestParams);
           if (response.data && response.data.length > 0) {
             const imageData = response.data[0].b64_json;
             const buffer = Buffer.from(imageData!, "base64");
@@ -84,7 +90,7 @@ export const addOpenaiGenerationTool = (imageGenerationTools: LLMTool[]) => {
           }
         }
         try {
-          const response = await openai!.responses.create({
+          const response = await openai.responses.create({
             model: openaiImageModel,
             input: [
               {

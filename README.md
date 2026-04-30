@@ -1,10 +1,51 @@
-# Whisplay-AI-Chatbot
+# WhisplayGroqHat
 
 <img src="https://docs.pisugar.com/img/whisplay_logo@4x-8.png" alt="Whisplay AI Chatbot" width="200" />
 
 [![Discord](https://img.shields.io/discord/1483017948305297501?logo=discord&logoColor=white&label=Discord&color=5865F2)](https://discord.gg/znGrZmTk)
 
-This is a pocket-sized AI chatbot device built using a Raspberry Pi Zero 2w / 5. Just press the button, speak, and it talks back—like a futuristic walkie-talkie with a mind of its own.
+This project starts from the official PiSugar Whisplay chatbot, but is being tailored for a **Raspberry Pi Zero 2 W** with a **Groq-backed LLM path** and a cleaner bring-up flow for a device that has not received the HAT yet.
+
+## Current project direction
+
+- **LLM:** Groq through the OpenAI-compatible client path
+- **Bring-up mode:** browser simulator first, physical HAT second
+- **Power:** wall-powered is fine; the PiSugar battery is optional
+- **Mesh scope:** no Meshtastic integration in v1
+- **Scope:** build the chatbot first, keep future RaspyJack integration possible, but out of scope for now
+
+## Quick start for this fork
+
+1. Clone this project and enter it:
+   ```bash
+   git clone <your-repo-url> /home/coreymillia/Documents/complete-projects/WhisplayGroqHat
+   cd /home/coreymillia/Documents/complete-projects/WhisplayGroqHat
+   ```
+2. Install dependencies:
+   ```bash
+   bash install_dependencies.sh
+   source ~/.bashrc
+   ```
+3. Create your env file and add your Groq key:
+   ```bash
+   cp .env.template .env
+   ```
+   Then edit `.env` and set `OPENAI_API_KEY` to your Groq key.
+4. Build and run:
+   ```bash
+   bash build.sh
+   bash run_chatbot.sh
+   ```
+5. Open the browser simulator:
+   ```text
+   http://<host-or-pi-ip>:17880
+   ```
+
+The default template in this fork enables the **web simulator** and disables the physical HAT device path until the hardware arrives, so you can start on prompt, flow, and Groq integration now.
+
+## Upstream base
+
+This project is based on [PiSugar/whisplay-ai-chatbot](https://github.com/PiSugar/whisplay-ai-chatbot). Most of the upstream documentation below still applies unless this fork says otherwise.
 
 Test Video Playlist:
 [https://www.youtube.com/watch?v=lOVA0Gui-4Q](https://www.youtube.com/playlist?list=PLpTS9YM-tG_mW5H7Xs2EO0qvlAI-Jm1e_)
