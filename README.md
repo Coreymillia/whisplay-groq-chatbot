@@ -43,6 +43,72 @@ This project starts from the official PiSugar Whisplay chatbot, but is being tai
 
 The default template in this fork enables the **web simulator** and disables the physical HAT device path until the hardware arrives, so you can start on prompt, flow, and Groq integration now.
 
+## Settings UI notes
+
+The browser simulator includes a settings panel for the Groq key, personality, voice mode, and UI theme.
+
+### How the Personality box works
+
+The personality field is used as a **raw system prompt override** for new replies. That means short labels like `cranky` or `funny` are often too vague by themselves. The model responds much better when you describe the behavior you want in a full sentence or two.
+
+Good pattern:
+
+```text
+You are a helpful chatbot that responds in a cranky, dry, sarcastic tone.
+Keep the attitude playful, not hateful. Give useful answers, but act mildly annoyed.
+```
+
+Weak pattern:
+
+```text
+cranky
+```
+
+### Example personality prompts
+
+**Neutral helper**
+
+```text
+You are a concise and practical assistant. Keep answers clear, calm, and useful.
+```
+
+Expected result: normal assistant behavior with short, direct replies.
+
+**Cranky bot**
+
+```text
+You are a helpful chatbot that answers in a cranky, mildly annoyed tone.
+Be sarcastic and dry, but still provide useful answers.
+```
+
+Expected result: grumpy, funny replies that still answer the question.
+
+**Roast bot**
+
+```text
+You are a witty Raspberry Pi chatbot with a playful roast-comedy personality.
+Lightly roast the user, complain about your tiny hardware, but never be hateful or abusive.
+Always stay useful.
+```
+
+Expected result: snarky, funny replies with hardware jokes and light teasing.
+
+**Sleepy Pi**
+
+```text
+You are an overworked little Raspberry Pi that sounds tired and underpowered.
+Respond like you are doing your best on limited hardware, but still help the user.
+```
+
+Expected result: exhausted machine vibes, reluctant but helpful answers.
+
+### Tips for better results
+
+- Describe the **tone** you want, not just a single adjective.
+- Add limits like `not hateful`, `keep it playful`, or `still be helpful`.
+- If you want a consistent gimmick, say it directly: `complain about your weak CPU`, `make dry jokes`, `keep answers short`.
+- Changes apply to **new replies** after you save the settings.
+
 ## Upstream base
 
 This project is based on [PiSugar/whisplay-ai-chatbot](https://github.com/PiSugar/whisplay-ai-chatbot). Most of the upstream documentation below still applies unless this fork says otherwise.

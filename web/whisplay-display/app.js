@@ -19,6 +19,7 @@ const groqKeyInput = document.getElementById("groqKeyInput");
 const groqKeyHint = document.getElementById("groqKeyHint");
 const personalityInput = document.getElementById("personalityInput");
 const voiceModeSelect = document.getElementById("voiceModeSelect");
+const uiThemeSelect = document.getElementById("uiThemeSelect");
 const saveSettingsBtn = document.getElementById("saveSettingsBtn");
 const clearKeyBtn = document.getElementById("clearKeyBtn");
 const settingsStatus = document.getElementById("settingsStatus");
@@ -39,6 +40,7 @@ let lastImageRevision = -1;
 let isPressed = false;
 let activePointerId = null;
 let settingsLoaded = false;
+const DEFAULT_UI_THEME = "default";
 
 function setIconVisible(iconEl, visible) {
   iconEl.style.display = visible ? "block" : "none";
@@ -292,6 +294,11 @@ function sendButton(action) {
   ws.send(JSON.stringify({ type: "button", action }));
 }
 
+function applyTheme(theme) {
+  const nextTheme = theme || DEFAULT_UI_THEME;
+  document.documentElement.dataset.theme = nextTheme;
+}
+
 function setSettingsStatus(message, isError = false) {
   if (!settingsStatus) return;
   settingsStatus.textContent = message;
@@ -306,6 +313,10 @@ function applySettings(settings) {
   if (voiceModeSelect) {
     voiceModeSelect.value = settings.voiceMode || "text-only";
   }
+  if (uiThemeSelect) {
+    uiThemeSelect.value = settings.uiTheme || DEFAULT_UI_THEME;
+  }
+  applyTheme(settings.uiTheme || DEFAULT_UI_THEME);
   if (groqKeyHint) {
     groqKeyHint.textContent = settings.groqApiKeyConfigured
       ? "Groq key stored"
@@ -343,6 +354,7 @@ async function saveSettings({ clearGroqApiKey = false } = {}) {
     clearGroqApiKey,
     personalityPrompt: (personalityInput?.value || "").trim(),
     voiceMode: voiceModeSelect?.value || "text-only",
+    uiTheme: uiThemeSelect?.value || DEFAULT_UI_THEME,
   };
 
   setSettingsStatus(clearGroqApiKey ? "Clearing key..." : "Saving settings...");
@@ -426,6 +438,12 @@ window.addEventListener("pointerup", (event) => {
 if (saveSettingsBtn) {
   saveSettingsBtn.addEventListener("click", () => {
     saveSettings();
+  });
+}
+
+if (uiThemeSelect) {
+  uiThemeSelect.addEventListener("change", () => {
+    applyTheme(uiThemeSelect.value || DEFAULT_UI_THEME);
   });
 }
 

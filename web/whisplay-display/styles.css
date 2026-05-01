@@ -1,12 +1,115 @@
 :root {
   --bg: #0b1016;
+  --bg-glow: #1c2a3d;
   --panel: #0f1724;
   --accent: #44f28a;
   --text: #e4ecf4;
   --muted: #7f8a99;
+  --border: rgba(255, 255, 255, 0.08);
+  --wrap-bg: rgba(10, 15, 22, 0.85);
+  --screen-frame: #000;
+  --screen-border: #0e1523;
+  --screen-surface: #000;
+  --screen-backdrop: radial-gradient(circle at 50% 0%, rgba(68, 242, 138, 0.12), transparent 45%);
+  --screen-overlay: linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent 35%);
+  --body-overlay:
+    radial-gradient(circle at 20% 0%, rgba(68, 242, 138, 0.08), transparent 25%),
+    radial-gradient(circle at 80% 20%, rgba(94, 173, 255, 0.12), transparent 30%);
+  --font-ui: "Space Grotesk", sans-serif;
+  --font-screen: "Space Grotesk", sans-serif;
+  --text-glow: none;
+  --button-grad-1: #243145;
+  --button-grad-2: #0e141f;
+  --button-secondary-1: #1b2534;
+  --button-secondary-2: #0b1018;
+  --button-text: var(--text);
   --screen-w: 240px;
   --screen-h: 280px;
   --scale: 2.2;
+}
+
+:root[data-theme="matrix"] {
+  --bg: #030705;
+  --bg-glow: #10311d;
+  --panel: rgba(8, 18, 11, 0.9);
+  --accent: #39ff88;
+  --text: #b6ffd7;
+  --muted: #6ea887;
+  --border: rgba(57, 255, 136, 0.18);
+  --wrap-bg: rgba(2, 7, 4, 0.86);
+  --screen-frame: #010403;
+  --screen-border: #0a1b0f;
+  --screen-surface: #010403;
+  --screen-backdrop:
+    linear-gradient(180deg, rgba(57, 255, 136, 0.14), transparent 40%),
+    repeating-linear-gradient(90deg, rgba(57, 255, 136, 0.12) 0 1px, transparent 1px 14px);
+  --screen-overlay: repeating-linear-gradient(180deg, rgba(57, 255, 136, 0.08) 0 1px, transparent 1px 4px);
+  --body-overlay:
+    repeating-linear-gradient(90deg, rgba(57, 255, 136, 0.05) 0 1px, transparent 1px 18px),
+    radial-gradient(circle at 15% 10%, rgba(57, 255, 136, 0.18), transparent 22%),
+    radial-gradient(circle at 85% 60%, rgba(12, 110, 56, 0.28), transparent 30%);
+  --font-screen: "Courier New", monospace;
+  --text-glow: 0 0 12px rgba(57, 255, 136, 0.28);
+  --button-grad-1: #12311f;
+  --button-grad-2: #08110a;
+  --button-secondary-1: #0d2415;
+  --button-secondary-2: #07100a;
+}
+
+:root[data-theme="plasma"] {
+  --bg: #0d1020;
+  --bg-glow: #2b1d52;
+  --panel: rgba(18, 18, 40, 0.88);
+  --accent: #7efff5;
+  --text: #f7efff;
+  --muted: #baacd7;
+  --border: rgba(164, 143, 255, 0.22);
+  --wrap-bg: rgba(13, 12, 29, 0.84);
+  --screen-frame: #110b22;
+  --screen-border: #28144c;
+  --screen-surface: #100a1f;
+  --screen-backdrop:
+    radial-gradient(circle at 20% 20%, rgba(255, 83, 171, 0.22), transparent 35%),
+    radial-gradient(circle at 80% 30%, rgba(126, 255, 245, 0.18), transparent 38%),
+    radial-gradient(circle at 50% 80%, rgba(152, 96, 255, 0.2), transparent 42%);
+  --screen-overlay: linear-gradient(135deg, rgba(255, 255, 255, 0.05), transparent 45%);
+  --body-overlay:
+    radial-gradient(circle at 12% 15%, rgba(255, 83, 171, 0.28), transparent 24%),
+    radial-gradient(circle at 88% 18%, rgba(126, 255, 245, 0.2), transparent 22%),
+    radial-gradient(circle at 65% 78%, rgba(152, 96, 255, 0.22), transparent 26%);
+  --font-screen: "Trebuchet MS", "Segoe UI", sans-serif;
+  --text-glow: 0 0 18px rgba(126, 255, 245, 0.18);
+  --button-grad-1: #46206f;
+  --button-grad-2: #170f34;
+  --button-secondary-1: #2c1a53;
+  --button-secondary-2: #120d28;
+}
+
+:root[data-theme="amber-terminal"] {
+  --bg: #120c05;
+  --bg-glow: #3a240d;
+  --panel: rgba(27, 18, 9, 0.9);
+  --accent: #ffb347;
+  --text: #ffd59c;
+  --muted: #b89663;
+  --border: rgba(255, 179, 71, 0.18);
+  --wrap-bg: rgba(18, 11, 5, 0.88);
+  --screen-frame: #050301;
+  --screen-border: #39210a;
+  --screen-surface: #080503;
+  --screen-backdrop:
+    linear-gradient(180deg, rgba(255, 179, 71, 0.16), transparent 38%),
+    radial-gradient(circle at 50% 60%, rgba(255, 144, 43, 0.12), transparent 48%);
+  --screen-overlay: repeating-linear-gradient(180deg, rgba(255, 179, 71, 0.07) 0 1px, transparent 1px 3px);
+  --body-overlay:
+    radial-gradient(circle at 20% 12%, rgba(255, 179, 71, 0.2), transparent 20%),
+    radial-gradient(circle at 78% 24%, rgba(255, 120, 50, 0.16), transparent 24%);
+  --font-screen: "Courier New", monospace;
+  --text-glow: 0 0 14px rgba(255, 179, 71, 0.2);
+  --button-grad-1: #593114;
+  --button-grad-2: #1e1208;
+  --button-secondary-1: #422510;
+  --button-secondary-2: #140d06;
 }
 
 * {
@@ -15,14 +118,26 @@
 
 body {
   margin: 0;
-  font-family: "Space Grotesk", sans-serif;
-  background: radial-gradient(circle at 20% 0%, #1c2a3d, #0b1016 60%);
+  font-family: var(--font-ui);
+  background: radial-gradient(circle at 20% 0%, var(--bg-glow), var(--bg) 60%);
   color: var(--text);
   color-scheme: dark;
   min-height: 100vh;
   display: flex;
   align-items: center;
   justify-content: center;
+  position: relative;
+  overflow-x: hidden;
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background: var(--body-overlay);
+  opacity: 0.85;
+  pointer-events: none;
+  animation: drift 18s ease-in-out infinite alternate;
 }
 
 .wrap {
@@ -30,11 +145,13 @@ body {
   grid-template-columns: auto 220px;
   gap: 26px;
   padding: 24px;
-  background: rgba(10, 15, 22, 0.85);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--wrap-bg);
+  border: 1px solid var(--border);
   border-radius: 22px;
   box-shadow: 0 30px 70px rgba(0, 0, 0, 0.45);
   backdrop-filter: blur(10px);
+  position: relative;
+  z-index: 1;
 }
 
 .screen {
@@ -42,11 +159,30 @@ body {
   width: calc(var(--screen-w) * var(--scale));
   height: calc(var(--screen-h) * var(--scale));
   border-radius: 20px;
-  background: #000;
-  border: 8px solid #0e1523;
+  background: var(--screen-frame);
+  border: 8px solid var(--screen-border);
   position: relative;
   overflow: hidden;
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+}
+
+.screen::before,
+.screen::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.screen::before {
+  background: var(--screen-backdrop);
+  opacity: 0.95;
+  animation: drift 14s ease-in-out infinite alternate;
+}
+
+.screen::after {
+  background: var(--screen-overlay);
+  opacity: 0.85;
 }
 
 .screen-inner {
@@ -63,10 +199,9 @@ body {
   display: grid;
   grid-template-rows: auto 1fr;
   gap: 6px;
-  background: #000;
+  background: var(--screen-surface);
   position: relative;
   z-index: 1;
-  /* border-bottom: 1px solid rgba(255, 255, 255, 0.06); */
 }
 
 .status-bar {
@@ -80,6 +215,8 @@ body {
   font-size: 18px;
   font-weight: 600;
   color: var(--text);
+  font-family: var(--font-screen);
+  text-shadow: var(--text-glow);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -89,6 +226,7 @@ body {
   font-size: 40px;
   text-align: center;
   line-height: 1;
+  text-shadow: var(--text-glow);
 }
 
 .status-icons {
@@ -105,7 +243,6 @@ body {
   object-fit: contain;
   filter: brightness(0.9);
 }
-
 
 .battery {
   display: flex;
@@ -145,7 +282,7 @@ body {
 .body {
   height: calc(280px - 98px);
   padding: 10px 10px 12px;
-  background: #000;
+  background: var(--screen-surface);
   position: relative;
   z-index: 1;
 }
@@ -153,7 +290,7 @@ body {
 .music-progress {
   display: none;
   padding: 0 10px 2px;
-  background: #000;
+  background: var(--screen-surface);
   position: relative;
   z-index: 1;
 }
@@ -168,7 +305,7 @@ body {
 
 .music-progress-track {
   height: 4px;
-  background: #3c3c3c;
+  background: rgba(255, 255, 255, 0.14);
   border-radius: 2px;
   overflow: hidden;
 }
@@ -176,7 +313,7 @@ body {
 .music-progress-fill {
   height: 100%;
   width: 0%;
-  background: #0066aa;
+  background: var(--accent);
   border-radius: 2px;
   transition: width 0.5s linear;
 }
@@ -185,7 +322,7 @@ body {
   display: flex;
   justify-content: space-between;
   font-size: 9px;
-  color: #b4b4b4;
+  color: var(--muted);
   line-height: 1;
   margin-bottom: 2px;
 }
@@ -203,6 +340,8 @@ body {
   right: 0;
   font-size: 16px;
   line-height: 1.5;
+  font-family: var(--font-screen);
+  text-shadow: var(--text-glow);
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -242,7 +381,7 @@ body {
   background: var(--panel);
   border-radius: 16px;
   padding: 16px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border);
 }
 
 .title {
@@ -260,16 +399,16 @@ body {
   margin: 8px auto 0;
   background: #16202e;
   box-shadow: 0 0 20px rgba(68, 242, 138, 0.3);
-  border: 2px solid rgba(255, 255, 255, 0.08);
+  border: 2px solid var(--border);
 }
 
 .button {
   width: 120px;
   height: 120px;
   border-radius: 28px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: linear-gradient(145deg, #243145, #0e141f);
-  color: var(--text);
+  border: 1px solid var(--border);
+  background: linear-gradient(145deg, var(--button-grad-1), var(--button-grad-2));
+  color: var(--button-text);
   font-size: 14px;
   text-transform: uppercase;
   letter-spacing: 0.1em;
@@ -291,7 +430,7 @@ body {
 }
 
 .button.secondary {
-  background: linear-gradient(145deg, #1b2534, #0b1018);
+  background: linear-gradient(145deg, var(--button-secondary-1), var(--button-secondary-2));
 }
 
 .button:active {
@@ -306,7 +445,6 @@ body {
   margin-top: 6px;
 }
 
-/* ── Text Input Card ─────────────────────────────────────────────── */
 .text-input-wrap {
   position: relative;
 }
@@ -319,7 +457,7 @@ body {
   resize: vertical;
   padding: 10px 44px 10px 10px;
   border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid var(--border);
   background-color: rgba(255, 255, 255, 0.06);
   background-image: none;
   color: var(--text);
@@ -357,7 +495,7 @@ body {
   -webkit-appearance: none;
   width: 100%;
   border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid var(--border);
   background-color: rgba(255, 255, 255, 0.06);
   color: var(--text);
   font-family: inherit;
@@ -384,17 +522,13 @@ body {
 .settings-textarea:focus,
 .settings-select:focus,
 #textInput:focus {
-  border-color: rgba(68, 242, 138, 0.65);
+  border-color: var(--accent);
 }
 
 .settings-actions {
   display: flex;
   gap: 10px;
   margin-top: 16px;
-}
-
-#textInput:focus {
-  border-color: var(--accent);
 }
 
 #textInput:disabled {
@@ -411,7 +545,7 @@ body {
   width: 36px;
   height: 36px;
   border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border);
   background-color: var(--accent);
   background-image: none;
   color: #000;
@@ -444,5 +578,14 @@ body {
     flex-direction: row;
     flex-wrap: wrap;
     justify-content: center;
+  }
+}
+
+@keyframes drift {
+  from {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  to {
+    transform: translate3d(1.2%, -1.2%, 0) scale(1.04);
   }
 }

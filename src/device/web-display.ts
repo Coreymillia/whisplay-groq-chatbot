@@ -205,6 +205,8 @@ export class WebDisplayServer implements WebAudioBridgeServer {
             : undefined,
         voiceMode:
           typeof body.voiceMode === "string" ? body.voiceMode : undefined,
+        uiTheme:
+          typeof body.uiTheme === "string" ? body.uiTheme : undefined,
       });
 
       ctx.body = {
@@ -213,6 +215,7 @@ export class WebDisplayServer implements WebAudioBridgeServer {
           groqApiKeyConfigured: Boolean(settings.groqApiKey),
           personalityPrompt: settings.personalityPrompt,
           voiceMode: settings.voiceMode,
+          uiTheme: settings.uiTheme,
         },
       };
     });

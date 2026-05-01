@@ -2,11 +2,13 @@ import fs from "fs";
 import path from "path";
 
 export type VoiceMode = "text-only" | "speak-on-demand" | "voice-chat";
+export type UITheme = "default" | "matrix" | "plasma" | "amber-terminal";
 
 export interface RuntimeSettings {
   groqApiKey: string;
   personalityPrompt: string;
   voiceMode: VoiceMode;
+  uiTheme: UITheme;
 }
 
 export interface RuntimeSettingsUpdate {
@@ -14,6 +16,7 @@ export interface RuntimeSettingsUpdate {
   clearGroqApiKey?: boolean;
   personalityPrompt?: string;
   voiceMode?: string;
+  uiTheme?: string;
 }
 
 const SETTINGS_PATH = path.resolve(
@@ -23,10 +26,17 @@ const SETTINGS_PATH = path.resolve(
 );
 
 const DEFAULT_VOICE_MODE: VoiceMode = "text-only";
+const DEFAULT_UI_THEME: UITheme = "default";
 const VALID_VOICE_MODES = new Set<VoiceMode>([
   "text-only",
   "speak-on-demand",
   "voice-chat",
+]);
+const VALID_UI_THEMES = new Set<UITheme>([
+  "default",
+  "matrix",
+  "plasma",
+  "amber-terminal",
 ]);
 
 function normalizeVoiceMode(value: unknown): VoiceMode {
@@ -34,6 +44,13 @@ function normalizeVoiceMode(value: unknown): VoiceMode {
     return value as VoiceMode;
   }
   return DEFAULT_VOICE_MODE;
+}
+
+function normalizeUITheme(value: unknown): UITheme {
+  if (typeof value === "string" && VALID_UI_THEMES.has(value as UITheme)) {
+    return value as UITheme;
+  }
+  return DEFAULT_UI_THEME;
 }
 
 function sanitizeSettings(input: Partial<RuntimeSettings> | null | undefined): RuntimeSettings {
@@ -45,6 +62,7 @@ function sanitizeSettings(input: Partial<RuntimeSettings> | null | undefined): R
         ? input.personalityPrompt.trim()
         : "",
     voiceMode: normalizeVoiceMode(input?.voiceMode),
+    uiTheme: normalizeUITheme(input?.uiTheme),
   };
 }
 
@@ -92,6 +110,10 @@ export function saveRuntimeSettings(
     next.voiceMode = normalizeVoiceMode(update.voiceMode);
   }
 
+  if (typeof update.uiTheme === "string") {
+    next.uiTheme = normalizeUITheme(update.uiTheme);
+  }
+
   writeSettingsFile(next);
   return next;
 }
@@ -100,11 +122,13 @@ export function getPublicRuntimeSettings(): {
   groqApiKeyConfigured: boolean;
   personalityPrompt: string;
   voiceMode: VoiceMode;
+  uiTheme: UITheme;
 } {
   const settings = loadSettingsFile();
   return {
     groqApiKeyConfigured: Boolean(settings.groqApiKey),
     personalityPrompt: settings.personalityPrompt,
     voiceMode: settings.voiceMode,
+    uiTheme: settings.uiTheme,
   };
 }
