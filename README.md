@@ -11,8 +11,7 @@ This project starts from the official PiSugar Whisplay chatbot, but is being tai
 - **LLM:** Groq through the OpenAI-compatible client path
 - **Bring-up mode:** browser simulator first, physical HAT now working
 - **Power:** wall-powered is fine; the PiSugar battery is optional
-- **Mesh scope:** no Meshtastic integration in v1
-- **Scope:** build the chatbot first, keep future RaspyJack integration possible, but out of scope for now
+- **Scope:** build the chatbot first as a dedicated Whisplay + Groq device
 
 ## Current hardware status
 
@@ -87,7 +86,41 @@ Why this matters:
 
 ## Settings UI notes
 
-The browser simulator includes a settings panel for the Groq key, personality, voice mode, and UI theme.
+The browser simulator includes a settings panel for the Groq key, preset personalities, freeform personality editing, voice mode, record time, and UI theme.
+
+## HAT settings controls
+
+The Whisplay HAT now has a basic on-device settings menu.
+
+- Say **"open settings"** to open it by voice
+- Or use the fallback hold flow: **15 seconds of recording + 3 more seconds** to open settings
+- In the HAT settings menu:
+  - **short press** = next item
+  - **3-second hold** = select current item
+
+Current HAT settings items:
+
+- Preset personality
+- Record time
+- Voice mode
+- UI theme
+- Exit
+
+The browser UI and HAT menu share the same stored settings.
+
+## Preset personalities
+
+This fork now includes a small set of preset personalities in both the browser UI and the HAT settings menu:
+
+- **Neutral**
+- **Friendly**
+- **Cranky**
+- **Roast Bot**
+- **Sleepy Pi**
+
+The current **Cranky** preset is especially funny on simple questions because it stays helpful while sounding mildly offended that it had to answer at all.
+
+More preset personalities are planned later.
 
 ### How the Personality box works
 

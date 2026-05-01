@@ -18,6 +18,12 @@ import { ChatFlowContext, FlowName } from "./chat-flow/types";
 import { playWakeupChime } from "../device/audio";
 import { stopMusicPlayback, isMusicPlaying } from "../device/music-player";
 import type { Status } from "../device/display";
+import { getRuntimeSettings } from "../config/runtime-settings";
+import {
+  applySettingsMenuAction,
+  buildSettingsMenuItems,
+  renderSettingsMenu as renderSettingsMenuText,
+} from "./chat-flow/settings-menu";
 
 dotEnv.config();
 
@@ -55,6 +61,8 @@ class ChatFlow implements ChatFlowContext {
   isFromWakeListening: boolean = false;
   enterMusicAfterAnswer: boolean = false;
   musicDisplayText: string = "";
+  settingsMenuIndex: number = 0;
+  private ignoreNextSettingsRelease = false;
 
   constructor(options: { enableCamera?: boolean } = {}) {
     console.log(`[${getCurrentTimeTag()}] ChatBot started.`);
@@ -271,6 +279,74 @@ class ChatFlow implements ChatFlowContext {
     return this.wakeEndKeywords.some(
       (keyword) => keyword && lower.includes(keyword),
     );
+  };
+
+  shouldOpenSettingsMenu = (text: string): boolean => {
+    const lower = text.trim().toLowerCase();
+    return (
+      lower === "settings" ||
+      lower.includes("open settings") ||
+      lower.includes("settings menu")
+    );
+  };
+
+  getManualRecordMaxSec = (): number => {
+    return getRuntimeSettings().manualRecordMaxSec;
+  };
+
+  openSettingsMenu = (ignoreNextRelease: boolean = false): void => {
+    this.answerId += 1;
+    this.streamResponser.stop();
+    stopMusicPlayback();
+    this.endWakeSession();
+    this.settingsMenuIndex = 0;
+    this.ignoreNextSettingsRelease = ignoreNextRelease;
+    display({
+      image: "",
+      image_icon_visible: false,
+      rag_icon_visible: false,
+    });
+    this.transitionTo("settings");
+  };
+
+  closeSettingsMenu = (): void => {
+    this.transitionTo("sleep");
+  };
+
+  renderSettingsMenu = (message: string = ""): void => {
+    display({
+      status: "settings",
+      emoji: "⚙️",
+      RGB: "#6048ff",
+      text: renderSettingsMenuText(this.settingsMenuIndex, message),
+      text_input_enabled: false,
+      rag_icon_visible: false,
+      image_icon_visible: false,
+      image: "",
+    });
+  };
+
+  moveSettingsSelection = (): void => {
+    const items = buildSettingsMenuItems();
+    this.settingsMenuIndex = (this.settingsMenuIndex + 1) % items.length;
+    this.renderSettingsMenu();
+  };
+
+  activateSettingsSelection = (): void => {
+    const items = buildSettingsMenuItems();
+    const selected = items[this.settingsMenuIndex];
+    const result = applySettingsMenuAction(selected.id);
+    if (result.shouldExit) {
+      this.closeSettingsMenu();
+      return;
+    }
+    this.renderSettingsMenu(result.message);
+  };
+
+  consumeSettingsReleaseGuard = (): boolean => {
+    const shouldIgnore = this.ignoreNextSettingsRelease;
+    this.ignoreNextSettingsRelease = false;
+    return shouldIgnore;
   };
 }
 

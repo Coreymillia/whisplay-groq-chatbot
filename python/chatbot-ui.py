@@ -63,6 +63,21 @@ clients = {}
 status_icon_factories = []
 
 
+def resolve_font_path(custom_font_path=None):
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    repo_root = os.path.dirname(script_dir)
+    candidates = [
+        custom_font_path,
+        os.path.join(script_dir, "NotoSansSC-Bold.ttf"),
+        os.path.join(repo_root, "NotoSansSC-Bold.ttf"),
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    ]
+    for font_path in candidates:
+        if font_path and os.path.exists(font_path):
+            return font_path
+    raise FileNotFoundError("No usable font file found for chatbot UI rendering.")
+
+
 def register_status_icon_factory(factory, priority=100):
     status_icon_factories.append({"priority": priority, "factory": factory})
 
@@ -687,7 +702,7 @@ if __name__ == "__main__":
     custom_font_path = os.getenv("CUSTOM_FONT_PATH", None)
     
     # start render thread
-    render_thread = RenderThread(whisplay, custom_font_path or "NotoSansSC-Bold.ttf", fps=30)
+    render_thread = RenderThread(whisplay, resolve_font_path(custom_font_path), fps=30)
     render_thread.start()
     start_socket_server(render_thread, host='0.0.0.0', port=12345)
     

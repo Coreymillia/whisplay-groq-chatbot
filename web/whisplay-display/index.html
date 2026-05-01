@@ -89,6 +89,11 @@
         />
         <div class="field-hint" id="groqKeyHint">No key stored</div>
 
+        <label class="field-label" for="personalityPresetSelect">Preset Personality</label>
+        <select class="settings-select" id="personalityPresetSelect">
+          <option value="custom">Custom</option>
+        </select>
+
         <label class="field-label" for="personalityInput">Personality</label>
         <textarea
           class="settings-textarea"
@@ -103,6 +108,12 @@
           <option value="speak-on-demand">Speak on demand</option>
           <option value="voice-chat">Voice chat</option>
         </select>
+
+        <label class="field-label" for="recordTimeSelect">Button Record Time</label>
+        <select class="settings-select" id="recordTimeSelect"></select>
+        <div class="field-hint">
+          Hold for this long to finish recording. Keep holding 3 more seconds to open HAT settings.
+        </div>
 
         <label class="field-label" for="uiThemeSelect">UI Theme</label>
         <select class="settings-select" id="uiThemeSelect">

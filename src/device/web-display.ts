@@ -13,6 +13,8 @@ import {
   getPublicRuntimeSettings,
   saveRuntimeSettings,
 } from "../config/runtime-settings";
+import { PERSONALITY_PRESETS } from "../config/personality-presets";
+import { RECORD_TIMEOUT_OPTIONS } from "../config/runtime-settings";
 import {
   webAudioBridge,
   FRAME_AUDIO_CHUNK,
@@ -190,6 +192,8 @@ export class WebDisplayServer implements WebAudioBridgeServer {
       ctx.set("Cache-Control", "no-store");
       ctx.body = {
         settings: getPublicRuntimeSettings(),
+        presets: PERSONALITY_PRESETS,
+        recordTimeoutOptions: RECORD_TIMEOUT_OPTIONS,
       };
     });
 
@@ -207,6 +211,10 @@ export class WebDisplayServer implements WebAudioBridgeServer {
           typeof body.voiceMode === "string" ? body.voiceMode : undefined,
         uiTheme:
           typeof body.uiTheme === "string" ? body.uiTheme : undefined,
+        manualRecordMaxSec:
+          typeof body.manualRecordMaxSec === "number"
+            ? body.manualRecordMaxSec
+            : undefined,
       });
 
       ctx.body = {
@@ -214,9 +222,13 @@ export class WebDisplayServer implements WebAudioBridgeServer {
         settings: {
           groqApiKeyConfigured: Boolean(settings.groqApiKey),
           personalityPrompt: settings.personalityPrompt,
+          personalityPresetId: getPublicRuntimeSettings().personalityPresetId,
           voiceMode: settings.voiceMode,
           uiTheme: settings.uiTheme,
+          manualRecordMaxSec: settings.manualRecordMaxSec,
         },
+        presets: PERSONALITY_PRESETS,
+        recordTimeoutOptions: RECORD_TIMEOUT_OPTIONS,
       };
     });
 

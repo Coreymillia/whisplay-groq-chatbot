@@ -5,6 +5,7 @@ export type FlowName =
   | "camera"
   | "music"
   | "listening"
+  | "settings"
   | "wake_listening"
   | "asr"
   | "answer"
@@ -38,6 +39,7 @@ export interface ChatFlowContext {
   isFromWakeListening: boolean;
   enterMusicAfterAnswer: boolean;
   musicDisplayText: string;
+  settingsMenuIndex: number;
 
   transitionTo: (flowName: FlowName) => void;
   recognizeAudio: (path: string, isFromAutoListening?: boolean) => Promise<string>;
@@ -46,5 +48,13 @@ export interface ChatFlowContext {
   endWakeSession: () => void;
   shouldContinueWakeSession: () => boolean;
   shouldEndAfterAnswer: (text: string) => boolean;
+  shouldOpenSettingsMenu: (text: string) => boolean;
   streamExternalReply: (text: string, emoji?: string) => Promise<void>;
+  openSettingsMenu: (ignoreNextRelease?: boolean) => void;
+  closeSettingsMenu: () => void;
+  renderSettingsMenu: (message?: string) => void;
+  moveSettingsSelection: () => void;
+  activateSettingsSelection: () => void;
+  consumeSettingsReleaseGuard: () => boolean;
+  getManualRecordMaxSec: () => number;
 }

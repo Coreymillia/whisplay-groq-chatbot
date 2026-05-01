@@ -173,7 +173,14 @@ export class WhisplayDisplay {
     if (this.pythonProcess) {
       console.log("Killing Python process...", this.pythonProcess.pid);
       this.pythonProcess.kill();
-      process.kill(this.pythonProcess.pid, "SIGKILL");
+      try {
+        process.kill(this.pythonProcess.pid, "SIGKILL");
+      } catch (error) {
+        const nodeError = error as NodeJS.ErrnoException;
+        if (nodeError.code !== "ESRCH") {
+          throw error;
+        }
+      }
       this.pythonProcess = null;
     }
   }

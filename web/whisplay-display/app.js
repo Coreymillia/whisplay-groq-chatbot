@@ -17,8 +17,10 @@ const btn = document.getElementById("btn");
 const btnText = document.getElementById("btnText");
 const groqKeyInput = document.getElementById("groqKeyInput");
 const groqKeyHint = document.getElementById("groqKeyHint");
+const personalityPresetSelect = document.getElementById("personalityPresetSelect");
 const personalityInput = document.getElementById("personalityInput");
 const voiceModeSelect = document.getElementById("voiceModeSelect");
+const recordTimeSelect = document.getElementById("recordTimeSelect");
 const uiThemeSelect = document.getElementById("uiThemeSelect");
 const saveSettingsBtn = document.getElementById("saveSettingsBtn");
 const clearKeyBtn = document.getElementById("clearKeyBtn");
@@ -41,6 +43,9 @@ let isPressed = false;
 let activePointerId = null;
 let settingsLoaded = false;
 const DEFAULT_UI_THEME = "default";
+const CUSTOM_PERSONALITY_PRESET_ID = "custom";
+let personalityPresets = [];
+let recordTimeoutOptions = [];
 
 function setIconVisible(iconEl, visible) {
   iconEl.style.display = visible ? "block" : "none";
@@ -305,11 +310,55 @@ function setSettingsStatus(message, isError = false) {
   settingsStatus.style.color = isError ? "#ff8a8a" : "";
 }
 
+function populatePersonalityPresets(selectedId) {
+  if (!personalityPresetSelect) return;
+  personalityPresetSelect.innerHTML = "";
+  const customOption = document.createElement("option");
+  customOption.value = CUSTOM_PERSONALITY_PRESET_ID;
+  customOption.textContent = "Custom";
+  personalityPresetSelect.appendChild(customOption);
+  personalityPresets.forEach((preset) => {
+    const option = document.createElement("option");
+    option.value = preset.id;
+    option.textContent = preset.label;
+    personalityPresetSelect.appendChild(option);
+  });
+  personalityPresetSelect.value = selectedId || CUSTOM_PERSONALITY_PRESET_ID;
+}
+
+function populateRecordTimeoutOptions(selectedValue) {
+  if (!recordTimeSelect) return;
+  recordTimeSelect.innerHTML = "";
+  recordTimeoutOptions.forEach((value) => {
+    const option = document.createElement("option");
+    option.value = String(value);
+    option.textContent = `${value} seconds`;
+    recordTimeSelect.appendChild(option);
+  });
+  const fallbackValue = String(selectedValue || 15);
+  if (![...recordTimeSelect.options].some((option) => option.value === fallbackValue)) {
+    const option = document.createElement("option");
+    option.value = fallbackValue;
+    option.textContent = `${fallbackValue} seconds`;
+    recordTimeSelect.appendChild(option);
+  }
+  recordTimeSelect.value = fallbackValue;
+}
+
+function syncPresetSelectionFromPrompt(prompt) {
+  if (!personalityPresetSelect) return;
+  const match = personalityPresets.find((preset) => preset.prompt === prompt);
+  personalityPresetSelect.value = match?.id || CUSTOM_PERSONALITY_PRESET_ID;
+}
+
 function applySettings(settings) {
   if (!settings) return;
+  populatePersonalityPresets(settings.personalityPresetId);
+  populateRecordTimeoutOptions(settings.manualRecordMaxSec || 15);
   if (personalityInput) {
     personalityInput.value = settings.personalityPrompt || "";
   }
+  syncPresetSelectionFromPrompt(settings.personalityPrompt || "");
   if (voiceModeSelect) {
     voiceModeSelect.value = settings.voiceMode || "text-only";
   }
@@ -334,6 +383,10 @@ async function loadSettings() {
       throw new Error(`HTTP ${response.status}`);
     }
     const payload = await response.json();
+    personalityPresets = Array.isArray(payload.presets) ? payload.presets : [];
+    recordTimeoutOptions = Array.isArray(payload.recordTimeoutOptions)
+      ? payload.recordTimeoutOptions
+      : [];
     applySettings(payload.settings || {});
     settingsLoaded = true;
     setSettingsStatus("Settings ready.");
@@ -354,6 +407,7 @@ async function saveSettings({ clearGroqApiKey = false } = {}) {
     clearGroqApiKey,
     personalityPrompt: (personalityInput?.value || "").trim(),
     voiceMode: voiceModeSelect?.value || "text-only",
+    manualRecordMaxSec: parseInt(recordTimeSelect?.value || "15", 10),
     uiTheme: uiThemeSelect?.value || DEFAULT_UI_THEME,
   };
 
@@ -386,6 +440,23 @@ async function saveSettings({ clearGroqApiKey = false } = {}) {
 connectWebSocket();
 loadSettings();
 requestAnimationFrame(animateScroll);
+
+personalityPresetSelect?.addEventListener("change", () => {
+  const selectedId = personalityPresetSelect.value;
+  if (selectedId === CUSTOM_PERSONALITY_PRESET_ID) {
+    return;
+  }
+  const preset = personalityPresets.find((item) => item.id === selectedId);
+  if (!preset || !personalityInput) {
+    return;
+  }
+  personalityInput.value = preset.prompt;
+  setSettingsStatus(`${preset.label} preset loaded. Save to apply.`);
+});
+
+personalityInput?.addEventListener("input", () => {
+  syncPresetSelectionFromPrompt(personalityInput.value.trim());
+});
 
 function setPressed(value) {
   isPressed = value;

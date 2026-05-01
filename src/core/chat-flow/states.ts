@@ -40,6 +40,10 @@ import {
 import { DEFAULT_EMOJI } from "../../utils";
 import { isMusicPlaying, getCurrentTrackTitle, stopMusicPlayback, startPendingMusicPlayback, onMusicTrackChange, onMusicPlaybackEnd } from "../../device/music-player";
 import { autoSaveExchange } from "../../config/mempalace";
+import {
+  SETTINGS_OPEN_GRACE_MS,
+  SETTINGS_SELECT_HOLD_MS,
+} from "./settings-menu";
 
 export const flowStates: Record<FlowName, FlowStateHandler> = {
   sleep: (ctx: ChatFlowContext) => {
@@ -163,6 +167,14 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
       }/user-${Date.now()}.${recordFileFormat}`;
     onButtonPressed(noop);
     const listeningStartedAt = Date.now();
+    const manualRecordMaxMs = ctx.getManualRecordMaxSec() * 1000;
+    let recordLimitReached = false;
+    let waitingForReleaseAfterLimit = false;
+    let recordingCompleted = false;
+    let released = false;
+    let settingsTriggered = false;
+    let recordLimitTimer: NodeJS.Timeout | null = null;
+    let settingsTimer: NodeJS.Timeout | null = null;
     // If button was already released before we entered this state, go back to sleep
     if (!isButtonDown()) {
       console.log("[listening] Button already released, returning to sleep");
@@ -170,12 +182,54 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
       return;
     }
     const { result, stop } = recordAudioManually(ctx.currentRecordFilePath);
+    recordLimitTimer = setTimeout(() => {
+      if (ctx.currentFlowName !== "listening") {
+        return;
+      }
+      recordLimitReached = true;
+      waitingForReleaseAfterLimit = true;
+      stop();
+      display({
+        status: "listening",
+        emoji: DEFAULT_EMOJI,
+        RGB: "#6048ff",
+        text: `Release to send.\nKeep holding ${SETTINGS_OPEN_GRACE_MS / 1000}s for settings...`,
+        rag_icon_visible: false,
+      });
+      settingsTimer = setTimeout(() => {
+        if (ctx.currentFlowName !== "listening" || released) {
+          return;
+        }
+        settingsTriggered = true;
+        ctx.openSettingsMenu(true);
+      }, SETTINGS_OPEN_GRACE_MS);
+    }, manualRecordMaxMs);
+
     const handleRelease = () => {
+      released = true;
+      if (recordLimitTimer) {
+        clearTimeout(recordLimitTimer);
+        recordLimitTimer = null;
+      }
+      if (settingsTimer) {
+        clearTimeout(settingsTimer);
+        settingsTimer = null;
+      }
       if (Date.now() - listeningStartedAt < 500) {
         // Too short to be meaningful — stop recording and return to sleep
         console.log("[listening] Button released too quickly, returning to sleep");
         stop();
         ctx.transitionTo("sleep");
+        return;
+      }
+      if (settingsTriggered) {
+        return;
+      }
+      if (recordLimitReached) {
+        waitingForReleaseAfterLimit = false;
+        if (recordingCompleted && ctx.currentFlowName === "listening") {
+          ctx.transitionTo("asr");
+        }
         return;
       }
       stop();
@@ -187,6 +241,13 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
     onButtonReleased(handleRelease);
     result
       .then(() => {
+        recordingCompleted = true;
+        if (settingsTriggered || ctx.currentFlowName !== "listening") {
+          return;
+        }
+        if (waitingForReleaseAfterLimit && !released) {
+          return;
+        }
         ctx.transitionTo("asr");
       })
       .catch((err) => {
@@ -259,6 +320,10 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
       }
       if (result) {
         console.log("Audio recognized result:", result);
+        if (ctx.shouldOpenSettingsMenu(result)) {
+          ctx.openSettingsMenu();
+          return;
+        }
         ctx.asrText = result;
         ctx.endAfterAnswer = ctx.shouldEndAfterAnswer(result);
         if (ctx.wakeSessionActive) {
@@ -279,6 +344,39 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
       }
       ctx.transitionTo("sleep");
     });
+  },
+  settings: (ctx: ChatFlowContext) => {
+    onButtonDoubleClick(null);
+    let selectTimer: NodeJS.Timeout | null = null;
+    let holdTriggered = false;
+    onButtonPressed(() => {
+      holdTriggered = false;
+      selectTimer = setTimeout(() => {
+        if (ctx.currentFlowName !== "settings") {
+          return;
+        }
+        holdTriggered = true;
+        ctx.activateSettingsSelection();
+      }, SETTINGS_SELECT_HOLD_MS);
+    });
+    onButtonReleased(() => {
+      if (selectTimer) {
+        clearTimeout(selectTimer);
+        selectTimer = null;
+      }
+      if (ctx.consumeSettingsReleaseGuard()) {
+        return;
+      }
+      if (ctx.currentFlowName !== "settings") {
+        return;
+      }
+      if (holdTriggered) {
+        holdTriggered = false;
+        return;
+      }
+      ctx.moveSettingsSelection();
+    });
+    ctx.renderSettingsMenu();
   },
   answer: (ctx: ChatFlowContext) => {
     ctx.enterMusicAfterAnswer = false;
