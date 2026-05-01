@@ -4,15 +4,24 @@
 
 [![Discord](https://img.shields.io/discord/1483017948305297501?logo=discord&logoColor=white&label=Discord&color=5865F2)](https://discord.gg/znGrZmTk)
 
-This project starts from the official PiSugar Whisplay chatbot, but is being tailored for a **Raspberry Pi Zero 2 W** with a **Groq-backed LLM path** and a cleaner bring-up flow for a device that has not received the HAT yet.
+This project starts from the official PiSugar Whisplay chatbot, but is being tailored for a **Raspberry Pi Zero 2 W** with a **Groq-backed LLM path** and a cleaner bring-up flow for the PiSugar **Whisplay HAT**.
 
 ## Current project direction
 
 - **LLM:** Groq through the OpenAI-compatible client path
-- **Bring-up mode:** browser simulator first, physical HAT second
+- **Bring-up mode:** browser simulator first, physical HAT now working
 - **Power:** wall-powered is fine; the PiSugar battery is optional
 - **Mesh scope:** no Meshtastic integration in v1
 - **Scope:** build the chatbot first, keep future RaspyJack integration possible, but out of scope for now
+
+## Current hardware status
+
+- **Whisplay HAT display:** working on Raspberry Pi Zero 2 W
+- **Bot on HAT:** working
+- **Microphone:** working
+- **Speaker / WM8960 audio path:** working
+- **Web simulator/debug UI:** still available at `http://<host-or-pi-ip>:17880`
+- **Touchscreen:** not wired into the app UX yet; touching the screen currently does not trigger app behavior
 
 ## Quick start for this fork
 
@@ -41,7 +50,7 @@ This project starts from the official PiSugar Whisplay chatbot, but is being tai
    http://<host-or-pi-ip>:17880
    ```
 
-The default template in this fork enables the **web simulator** and disables the physical HAT device path until the hardware arrives, so you can start on prompt, flow, and Groq integration now.
+The default template in this fork was originally set up for **web simulator first** bring-up. The project has now also been validated on a real Whisplay HAT, while keeping the web UI available for debugging and settings.
 
 ## Settings UI notes
 
