@@ -1,5 +1,5 @@
 import fs from "fs";
-import { getOpenAIClient } from "./openai";
+import { getOpenAIASRModel, getOpenAIClient } from "./openai";
 
 export const recognizeAudio = async (
   audioFilePath: string
@@ -17,7 +17,7 @@ export const recognizeAudio = async (
   try {
     const transcription = await openai.audio.transcriptions.create({
       file: fs.createReadStream(audioFilePath),
-      model: "whisper-1",
+      model: getOpenAIASRModel(),
     });
     console.log("Transcription result:", transcription.text);
     return transcription.text;

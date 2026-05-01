@@ -22,6 +22,16 @@ export const getOpenAIVoiceModel = (): string =>
 export const getOpenAIVoiceType = (): string =>
   process.env.OPENAI_VOICE_TYPE || "nova";
 
+export const getOpenAIASRModel = (): string => {
+  if (process.env.OPENAI_ASR_MODEL) {
+    return process.env.OPENAI_ASR_MODEL;
+  }
+  if ((openAiBaseURL || "").includes("api.groq.com")) {
+    return "whisper-large-v3-turbo";
+  }
+  return "whisper-1";
+};
+
 export const getOpenAIApiKey = (): string => {
   const runtimeSettings = getRuntimeSettings();
   return runtimeSettings.groqApiKey || process.env.OPENAI_API_KEY || "";

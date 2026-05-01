@@ -52,6 +52,39 @@ This project starts from the official PiSugar Whisplay chatbot, but is being tai
 
 The default template in this fork was originally set up for **web simulator first** bring-up. The project has now also been validated on a real Whisplay HAT, while keeping the web UI available for debugging and settings.
 
+## Getting a Groq API key
+
+1. Sign in or create an account at [Groq Console](https://console.groq.com/).
+2. Open the API keys page at [console.groq.com/keys](https://console.groq.com/keys).
+3. Create a new key and copy it.
+4. Put that value in `.env` as `OPENAI_API_KEY=...`.
+
+This fork uses Groq through the **OpenAI-compatible** API path, so the important settings are:
+
+```env
+LLM_SERVER=openai
+OPENAI_API_BASE_URL=https://api.groq.com/openai/v1
+OPENAI_API_KEY=your_groq_api_key
+```
+
+## Speech recognition notes for this fork
+
+Speech recognition is now configured to use the same OpenAI-compatible path against Groq for ASR as well as chat.
+
+Important settings:
+
+```env
+ASR_SERVER=openai
+OPENAI_ASR_MODEL=whisper-large-v3-turbo
+OPENAI_API_BASE_URL=https://api.groq.com/openai/v1
+```
+
+Why this matters:
+
+- The original OpenAI ASR code path used `whisper-1`.
+- That model name failed against the Groq endpoint in live testing.
+- This fork now defaults to `whisper-large-v3-turbo` when using the Groq OpenAI-compatible base URL, which restored speech recognition on the Pi.
+
 ## Settings UI notes
 
 The browser simulator includes a settings panel for the Groq key, personality, voice mode, and UI theme.
