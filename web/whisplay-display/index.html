@@ -77,6 +77,23 @@
           <button id="textSendBtn" title="Send">➤</button>
         </div>
       </div>
+      <div class="card" id="visionCard">
+        <div class="title">Vision Test</div>
+        <label class="field-label" for="visionImageInput">Upload Image</label>
+        <input class="settings-input" id="visionImageInput" type="file" accept="image/*" />
+        <div class="field-hint">
+          Pick a photo from your PC, upload it, then ask the bot what it sees.
+        </div>
+        <div class="settings-actions">
+          <button class="button compact" id="visionUploadBtn" type="button">Use for Vision</button>
+        </div>
+        <img
+          id="visionPreview"
+          alt="Vision preview"
+          style="display:none;width:100%;border-radius:12px;margin-top:10px;border:1px solid rgba(255,255,255,0.12);"
+        />
+        <div class="status-text" id="visionStatus">No image uploaded.</div>
+      </div>
       <div class="card" id="settingsCard">
         <div class="title">Settings</div>
         <label class="field-label" for="groqKeyInput">Groq API Key</label>

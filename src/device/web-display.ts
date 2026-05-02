@@ -8,7 +8,11 @@ import bodyParser from "koa-bodyparser";
 import serve from "koa-static";
 import { WebSocketServer, WebSocket, RawData } from "ws";
 import { dataDir, cameraFeedDir } from "../utils/dir";
-import { getImageMimeType } from "../utils/image";
+import {
+  getImageMimeType,
+  getLatestShowedImage,
+  setLatestCapturedImg,
+} from "../utils/image";
 import {
   getPublicRuntimeSettings,
   IDLE_TIMEOUT_OPTIONS,
@@ -38,6 +42,7 @@ interface WebDisplayOptions {
   onButtonRelease: ButtonHandler;
   onTextInput?: TextInputHandler;
   onSettingsSaved?: (settings: RuntimeSettings) => void;
+  onImageUploaded?: (imagePath: string) => void;
 }
 
 function normalizeBodyKey(key: string): string {
@@ -101,6 +106,7 @@ export class WebDisplayServer implements WebAudioBridgeServer {
   private wsServer: WebSocketServer | null = null;
   private wsClients = new Set<WebSocket>();
   private onSettingsSaved: (settings: RuntimeSettings) => void;
+  private onImageUploaded: (imagePath: string) => void;
 
   constructor(options: WebDisplayOptions) {
     this.host = options.host;
@@ -109,13 +115,14 @@ export class WebDisplayServer implements WebAudioBridgeServer {
     this.onButtonRelease = options.onButtonRelease;
     this.onTextInput = options.onTextInput || (() => {});
     this.onSettingsSaved = options.onSettingsSaved || (() => {});
+    this.onImageUploaded = options.onImageUploaded || (() => {});
     this.app = new Koa();
     this.router = new Router();
     this.cameraFramePath = this.resolveCameraFramePath();
 
     const staticRoot = this.resolveWebRoot();
     this.registerRoutes(staticRoot);
-    this.app.use(bodyParser());
+    this.app.use(bodyParser({ jsonLimit: "15mb", formLimit: "15mb", textLimit: "15mb" }));
     this.app.use(this.router.routes());
     this.app.use(this.router.allowedMethods());
     this.app.use(serve(staticRoot));
@@ -238,6 +245,72 @@ export class WebDisplayServer implements WebAudioBridgeServer {
       }
       ctx.type = getImageMimeType(this.cameraFramePath);
       ctx.body = fs.createReadStream(this.cameraFramePath);
+    });
+
+    this.router.get("/api/vision/image", (ctx) => {
+      ctx.set("Cache-Control", "no-store");
+      const latestImagePath = getLatestShowedImage();
+      if (!latestImagePath) {
+        ctx.status = 404;
+        ctx.body = "No image";
+        return;
+      }
+      const safePath = this.resolveSafeImagePath(latestImagePath);
+      if (!safePath || !fs.existsSync(safePath)) {
+        ctx.status = 404;
+        ctx.body = "Image not found";
+        return;
+      }
+      ctx.type = getImageMimeType(safePath);
+      ctx.body = fs.createReadStream(safePath);
+    });
+
+    this.router.post("/api/vision/upload", (ctx) => {
+      const body = normalizeRequestBody((ctx.request as any).body);
+      const fileName = getBodyString(body, "fileName") || "upload.jpg";
+      const contentType = getBodyString(body, "contentType") || "image/jpeg";
+      const dataUrl = getBodyString(body, "dataUrl") || "";
+      const match = /^data:(image\/[a-z0-9.+-]+);base64,(.+)$/i.exec(dataUrl);
+      if (!match) {
+        ctx.status = 400;
+        ctx.body = { ok: false, error: "Invalid image payload." };
+        return;
+      }
+      const mimeType = match[1].toLowerCase();
+      const supportedMimeTypes: Record<string, string> = {
+        "image/jpeg": ".jpg",
+        "image/jpg": ".jpg",
+        "image/png": ".png",
+        "image/webp": ".webp",
+        "image/gif": ".gif",
+      };
+      const extension =
+        supportedMimeTypes[mimeType] ||
+        supportedMimeTypes[contentType.toLowerCase()] ||
+        path.extname(fileName).toLowerCase();
+      if (!extension || !Object.values(supportedMimeTypes).includes(extension)) {
+        ctx.status = 400;
+        ctx.body = { ok: false, error: "Unsupported image type." };
+        return;
+      }
+      const base64Payload = match[2];
+      const buffer = Buffer.from(base64Payload, "base64");
+      if (!buffer.length) {
+        ctx.status = 400;
+        ctx.body = { ok: false, error: "Empty image payload." };
+        return;
+      }
+      const uploadDir = path.resolve(dataDir, "camera");
+      fs.mkdirSync(uploadDir, { recursive: true });
+      const savedPath = path.join(uploadDir, `vision-upload-${Date.now()}${extension}`);
+      fs.writeFileSync(savedPath, buffer);
+      setLatestCapturedImg(savedPath);
+      this.onImageUploaded(savedPath);
+      ctx.body = {
+        ok: true,
+        imageUrl: `/api/vision/image?ts=${Date.now()}`,
+        fileName: path.basename(savedPath),
+      };
     });
 
     this.router.get("/api/settings", (ctx) => {

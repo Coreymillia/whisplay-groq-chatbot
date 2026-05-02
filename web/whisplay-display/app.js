@@ -15,6 +15,10 @@ const led = document.getElementById("led");
 const ledText = document.getElementById("ledText");
 const btn = document.getElementById("btn");
 const btnText = document.getElementById("btnText");
+const visionImageInput = document.getElementById("visionImageInput");
+const visionUploadBtn = document.getElementById("visionUploadBtn");
+const visionPreview = document.getElementById("visionPreview");
+const visionStatus = document.getElementById("visionStatus");
 const groqKeyInput = document.getElementById("groqKeyInput");
 const groqKeyHint = document.getElementById("groqKeyHint");
 const geminiKeyInput = document.getElementById("geminiKeyInput");
@@ -321,6 +325,12 @@ function setSettingsStatus(message, isError = false) {
   settingsStatus.style.color = isError ? "#ff8a8a" : "";
 }
 
+function setVisionStatus(message, isError = false) {
+  if (!visionStatus) return;
+  visionStatus.textContent = message;
+  visionStatus.style.color = isError ? "#ff8a8a" : "";
+}
+
 function populatePersonalityPresets(selectedId) {
   if (!personalityPresetSelect) return;
   personalityPresetSelect.innerHTML = "";
@@ -451,6 +461,82 @@ async function loadSettings() {
   }
 }
 
+async function loadVisionPreview() {
+  if (!visionPreview) return;
+  try {
+    const response = await fetch(`/api/vision/image?ts=${Date.now()}`, {
+      cache: "no-store",
+    });
+    if (!response.ok) {
+      visionPreview.style.display = "none";
+      setVisionStatus("No image uploaded.");
+      return;
+    }
+    visionPreview.src = `/api/vision/image?ts=${Date.now()}`;
+    visionPreview.style.display = "block";
+    setVisionStatus("Latest image ready for vision questions.");
+  } catch (error) {
+    console.error("Failed to load vision preview:", error);
+    visionPreview.style.display = "none";
+    setVisionStatus("Failed to load latest image.", true);
+  }
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(reader.error || new Error("Failed to read file."));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function uploadVisionImage() {
+  const file = visionImageInput?.files?.[0];
+  if (!file) {
+    setVisionStatus("Choose an image first.", true);
+    return;
+  }
+  setVisionStatus("Uploading image...");
+  if (visionUploadBtn) {
+    visionUploadBtn.disabled = true;
+  }
+  try {
+    const dataUrl = await readFileAsDataUrl(file);
+    const response = await fetch("/api/vision/upload", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        fileName: file.name,
+        contentType: file.type,
+        dataUrl,
+      }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || payload.ok === false) {
+      throw new Error(payload.error || `HTTP ${response.status}`);
+    }
+    if (visionPreview) {
+      visionPreview.src = payload.imageUrl || `/api/vision/image?ts=${Date.now()}`;
+      visionPreview.style.display = "block";
+    }
+    if (visionImageInput) {
+      visionImageInput.value = "";
+    }
+    setVisionStatus("Image uploaded. Ask the bot what it sees.");
+  } catch (error) {
+    console.error("Failed to upload vision image:", error);
+    const message = error instanceof Error ? error.message : String(error);
+    setVisionStatus(`Upload failed: ${message}`, true);
+  } finally {
+    if (visionUploadBtn) {
+      visionUploadBtn.disabled = false;
+    }
+  }
+}
+
 async function saveSettings({ clearGroqApiKey = false } = {}) {
   if (!settingsLoaded) {
     setSettingsStatus("Settings are still loading.", true);
@@ -551,6 +637,7 @@ async function requestShutdown() {
 
 connectWebSocket();
 loadSettings();
+loadVisionPreview();
 requestAnimationFrame(animateScroll);
 
 personalityPresetSelect?.addEventListener("change", () => {
@@ -621,6 +708,12 @@ window.addEventListener("pointerup", (event) => {
 if (saveSettingsBtn) {
   saveSettingsBtn.addEventListener("click", () => {
     saveSettings();
+  });
+}
+
+if (visionUploadBtn) {
+  visionUploadBtn.addEventListener("click", () => {
+    uploadVisionImage();
   });
 }
 

@@ -95,7 +95,7 @@ Why this matters:
 
 The browser simulator includes a settings panel for the Groq key, Gemini key, preset personalities, freeform personality editing, voice mode, record time, UI theme, HAT header mode, HAT screensaver mode, HAT idle timeout, and a shutdown button for clean power-off without SSH.
 
-The Gemini key field is currently just stored for upcoming vision work. It does not change the active chatbot path yet.
+The browser UI also now includes a simple **Vision Test** image upload box. You can upload a photo from your PC, then ask the bot what it sees.
 
 Current plan for Gemini:
 
@@ -104,6 +104,13 @@ Current plan for Gemini:
 - Start with an **ESP32-CAM over Wi-Fi** as a simple remote snapshot source
 - Keep room for other camera sources later if they fit better than the ESP32-CAM
 - Continue targeting **free-tier usage** while the project is still experimental
+
+Current Gemini behavior:
+
+- **Groq** still handles normal chat
+- **Gemini** is used as the default vision backend
+- uploaded test images become the latest image for vision analysis
+- this lets us test vision now without needing the ESP32-CAM first
 
 ## HAT settings controls
 

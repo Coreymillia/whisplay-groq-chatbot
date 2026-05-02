@@ -1,21 +1,32 @@
+import { GoogleGenAI } from "@google/genai";
 import { LLMTool, ToolReturnTag } from "../../type";
-import { gemini, geminiVisionModel } from "./gemini";
 import dotenv from "dotenv";
-import { getLatestShowedImage } from "../../utils/image";
+import { getLatestShowedImage, getImageMimeType } from "../../utils/image";
 import { readFileSync } from "fs";
+import { getRuntimeSettings } from "../../config/runtime-settings";
 
 dotenv.config();
 
-export const addGeminiVisionTool = (visionTools: LLMTool[]) => {
-  if (!gemini) {
-    return;
+const getGeminiVisionClient = (): GoogleGenAI | null => {
+  const runtimeKey = getRuntimeSettings().geminiApiKey;
+  const apiKey = runtimeKey || process.env.GEMINI_API_KEY || "";
+  if (!apiKey) {
+    return null;
   }
+  return new GoogleGenAI({ apiKey });
+};
+
+const getGeminiVisionModel = (): string => {
+  return process.env.GEMINI_VISION_MODEL || "gemini-2.5-flash";
+};
+
+export const addGeminiVisionTool = (visionTools: LLMTool[]) => {
   visionTools.push({
     type: "function",
     function: {
       name: "describeImage",
       description:
-        "Use this tool when user wants to analyze and interpret an image with the help of vision model, the tool will get the latest showed image byitself and answer questions about the image.",
+        "Use this tool when the user wants to analyze and interpret the latest uploaded, shown, or captured image. Call it for prompts like 'what do you see', 'describe this image', or questions about the current photo.",
       parameters: {
         type: "object",
         properties: {
@@ -30,7 +41,11 @@ export const addGeminiVisionTool = (visionTools: LLMTool[]) => {
     },
     func: async (params) => {
       const { prompt } = params;
-      let imgPath = getLatestShowedImage();
+      const gemini = getGeminiVisionClient();
+      if (!gemini) {
+        return `${ToolReturnTag.Error} Gemini vision is not configured yet.`;
+      }
+      const imgPath = getLatestShowedImage();
       if (!imgPath) {
         return `${ToolReturnTag.Error} No image is found.`;
       }
@@ -38,21 +53,26 @@ export const addGeminiVisionTool = (visionTools: LLMTool[]) => {
       const contents = [
         {
           inlineData: {
-            mimeType: "image/jpeg",
+            mimeType: getImageMimeType(imgPath) || "image/jpeg",
             data: base64ImageFile,
           },
         },
         { text: prompt },
       ];
-      const response = await gemini!.models.generateContent({
-        model: geminiVisionModel,
-        contents: contents,
-      });
-      const content = response.text;
-      return (
-        `${ToolReturnTag.Success}${content}` ||
-        `${ToolReturnTag.Error} No content received from Ollama.`
-      );
+      try {
+        const response = await gemini.models.generateContent({
+          model: getGeminiVisionModel(),
+          contents,
+        });
+        const content = response.text;
+        return (
+          `${ToolReturnTag.Success}${content}` ||
+          `${ToolReturnTag.Error} No content received from Gemini.`
+        );
+      } catch (error) {
+        console.error("Error during Gemini vision request:", error);
+        return `${ToolReturnTag.Error} Failed to analyze the image.`;
+      }
     },
   });
 };

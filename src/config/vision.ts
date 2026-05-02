@@ -6,7 +6,7 @@ import { pluginRegistry } from "../plugin";
 dotenv.config();
 
 const visionServer: VisionServer = (
-  process.env.VISION_SERVER || ""
+  process.env.VISION_SERVER || VisionServer.gemini
 ).toLowerCase() as VisionServer;
 const enableCamera = process.env.ENABLE_CAMERA === "true";
 

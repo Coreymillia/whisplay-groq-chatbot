@@ -25,6 +25,7 @@ import {
   clearPendingCapturedImgForChat,
   getLatestGenImg,
   getLatestDisplayImg,
+  getLatestShowedImage,
   setLatestCapturedImg,
   setPendingCapturedImgForChat,
 } from "../../utils/image";
@@ -41,10 +42,29 @@ import { DEFAULT_EMOJI } from "../../utils";
 import { isMusicPlaying, getCurrentTrackTitle, stopMusicPlayback, startPendingMusicPlayback, onMusicTrackChange, onMusicPlaybackEnd } from "../../device/music-player";
 import { autoSaveExchange } from "../../config/mempalace";
 import { STATE_EMOJIS } from "../../config/state-emojis";
+import { llmFuncMap } from "../../config/llm-tools";
 import {
   SETTINGS_OPEN_GRACE_MS,
   SETTINGS_SELECT_HOLD_MS,
 } from "./settings-menu";
+
+const imageIntentPatterns = [
+  /\bwhat do you see\b/i,
+  /\bdescribe (this|the) (image|photo|picture)\b/i,
+  /\banaly[sz]e (this|the) (image|photo|picture)\b/i,
+  /\bwhat(?:'s| is) in (this|the) (image|photo|picture)\b/i,
+  /\bdo you see\b/i,
+  /\bread (the )?text\b/i,
+  /\bocr\b/i,
+];
+
+function shouldRouteToVision(prompt: string): boolean {
+  const trimmed = prompt.trim();
+  if (!trimmed || !getLatestShowedImage()) {
+    return false;
+  }
+  return imageIntentPatterns.some((pattern) => pattern.test(trimmed));
+}
 
 export const flowStates: Record<FlowName, FlowStateHandler> = {
   sleep: (ctx: ChatFlowContext) => {
@@ -451,6 +471,29 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
     [() => Promise.resolve().then(() => ""), getSystemPromptWithKnowledge]
     [enableRAG ? 1 : 0](ctx.asrText)
       .then((res: string) => {
+        if (shouldRouteToVision(ctx.asrText) && typeof llmFuncMap.describeImage === "function") {
+          display({
+            text: "[describeImage]Analyzing uploaded image...",
+          });
+          llmFuncMap.describeImage({ prompt: ctx.asrText })
+            .then((result) => {
+              if (currentAnswerId !== ctx.answerId) {
+                return;
+              }
+              const cleaned = result.replace(/^\[(success|error|response)\]\s*/i, "");
+              trackingPartial(cleaned || "I couldn't analyze that image.");
+              endPartial();
+            })
+            .catch((error) => {
+              console.error("Vision routing failed:", error);
+              if (currentAnswerId !== ctx.answerId) {
+                return;
+              }
+              trackingPartial("I couldn't analyze that image right now.");
+              endPartial();
+            });
+          return;
+        }
         let knowledgePrompt = res;
         if (res) {
           console.log("Retrieved knowledge for RAG:\n", res);
