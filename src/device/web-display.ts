@@ -18,6 +18,10 @@ import {
   getLatestVisionAnalysis,
 } from "../utils/vision-analysis";
 import {
+  ensureCameraDaemonReady,
+  sendCameraDaemonCommand,
+} from "./camera-daemon";
+import {
   getPublicRuntimeSettings,
   IDLE_TIMEOUT_OPTIONS,
   RECORD_TIMEOUT_OPTIONS,
@@ -318,6 +322,46 @@ export class WebDisplayServer implements WebAudioBridgeServer {
       };
     });
 
+    this.router.post("/api/vision/capture", async (ctx) => {
+      const uploadDir = path.resolve(dataDir, "camera");
+      fs.mkdirSync(uploadDir, { recursive: true });
+      const savedPath = path.join(uploadDir, `vision-capture-${Date.now()}.jpg`);
+      try {
+        await ensureCameraDaemonReady();
+        const response = await sendCameraDaemonCommand(
+          "capture",
+          { path: savedPath },
+          8000,
+        );
+        if (!response.ok || !fs.existsSync(savedPath)) {
+          ctx.status = 500;
+          ctx.body = {
+            ok: false,
+            error:
+              typeof response.error === "string"
+                ? response.error
+                : "Capture failed.",
+          };
+          return;
+        }
+      } catch (error) {
+        ctx.status = 500;
+        ctx.body = {
+          ok: false,
+          error: error instanceof Error ? error.message : "Capture failed.",
+        };
+        return;
+      }
+      setLatestCapturedImg(savedPath);
+      clearLatestVisionAnalysis();
+      this.onImageUploaded(savedPath);
+      ctx.body = {
+        ok: true,
+        imageUrl: `/api/vision/image?ts=${Date.now()}`,
+        fileName: path.basename(savedPath),
+      };
+    });
+
     this.router.get("/api/vision/analysis", (ctx) => {
       ctx.set("Cache-Control", "no-store");
       ctx.body = {
@@ -344,6 +388,8 @@ export class WebDisplayServer implements WebAudioBridgeServer {
         personalityPrompt: getBodyString(body, "personalityPrompt"),
         voiceMode: getBodyString(body, "voiceMode"),
         uiTheme: getBodyString(body, "uiTheme"),
+        cameraSource: getBodyString(body, "cameraSource"),
+        esp32CamUrl: getBodyString(body, "esp32CamUrl"),
         manualRecordMaxSec: getBodyNumber(body, "manualRecordMaxSec"),
         headerMode: getBodyString(body, "headerMode"),
         screensaverMode: getBodyString(body, "screensaverMode"),
@@ -360,6 +406,8 @@ export class WebDisplayServer implements WebAudioBridgeServer {
           personalityPresetId: getPublicRuntimeSettings().personalityPresetId,
           voiceMode: settings.voiceMode,
           uiTheme: settings.uiTheme,
+          cameraSource: settings.cameraSource,
+          esp32CamUrl: settings.esp32CamUrl,
           manualRecordMaxSec: settings.manualRecordMaxSec,
           headerMode: settings.headerMode,
           screensaverMode: settings.screensaverMode,

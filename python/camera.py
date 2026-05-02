@@ -7,7 +7,14 @@ import subprocess
 import sys
 import threading
 import time
+from io import BytesIO
+from urllib.error import HTTPError, URLError
+from urllib.request import urlopen
 from PIL import Image
+
+PYTHON_DIR = os.path.abspath(os.path.dirname(__file__))
+if PYTHON_DIR not in sys.path:
+    sys.path.insert(0, PYTHON_DIR)
 
 from utils import ImageUtils
 
@@ -22,29 +29,133 @@ def _default_web_frame_path() -> str:
     return os.path.join(project_root, "data", "camera_feed", "web_live.jpg")
 
 
+def _default_settings_path() -> str:
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    return os.path.join(project_root, ".whisplay-groqhat-settings.json")
+
+
 DAEMON_HOST = os.getenv("WHISPLAY_CAMERA_DAEMON_HOST", "127.0.0.1")
 DAEMON_PORT = int(os.getenv("WHISPLAY_CAMERA_DAEMON_PORT", "18765"))
 DAEMON_TIMEOUT_SEC = float(os.getenv("WHISPLAY_CAMERA_DAEMON_TIMEOUT_SEC", "2"))
+DEFAULT_CAMERA_SOURCE = "pi-camera"
+DEFAULT_ESP32_CAM_URL = "http://esp32-cam.local"
+
+
+def _normalize_camera_source(value: str | None) -> str:
+    return value if value in {"pi-camera", "esp32-cam"} else DEFAULT_CAMERA_SOURCE
+
+
+def _normalize_camera_url(value: str | None) -> str:
+    if value is None:
+        return DEFAULT_ESP32_CAM_URL
+    normalized = value.strip()
+    if not normalized:
+        return DEFAULT_ESP32_CAM_URL
+    if not normalized.startswith(("http://", "https://")):
+        normalized = f"http://{normalized}"
+    return normalized.rstrip("/")
+
+
+def _format_network_camera_error(base_url: str, error: Exception) -> str:
+    return f"Could not reach ESP32-CAM at {base_url}: {error}"
 
 
 class SharedCameraService:
     def __init__(self):
         self.web_frame_path = _default_web_frame_path()
+        self.settings_path = _default_settings_path()
         os.makedirs(os.path.dirname(self.web_frame_path), exist_ok=True)
 
         self.capture_width = max(64, int(os.getenv("WHISPLAY_CAMERA_WIDTH", "560")))
         self.capture_height = max(64, int(os.getenv("WHISPLAY_CAMERA_HEIGHT", "480")))
         interval_ms = int(os.getenv("WHISPLAY_CAMERA_DAEMON_INTERVAL_MS", "200"))
         self.stream_interval_sec = max(0.05, interval_ms / 1000)
+        self.network_timeout_sec = max(
+            1.0,
+            float(os.getenv("WHISPLAY_CAMERA_NETWORK_TIMEOUT_SEC", "5")),
+        )
 
         self.picam2 = None
         self.running = True
         self.stream_ref_count = 0
         self.state_lock = threading.Lock()
         self.camera_lock = threading.Lock()
+        self._cached_settings = {}
+        self._cached_settings_mtime = None
 
         self.worker = threading.Thread(target=self._stream_loop, daemon=True)
         self.worker.start()
+
+    def _load_runtime_settings(self) -> dict:
+        try:
+            settings_mtime = os.path.getmtime(self.settings_path)
+        except OSError:
+            self._cached_settings = {}
+            self._cached_settings_mtime = None
+            return {}
+
+        if self._cached_settings_mtime == settings_mtime:
+            return dict(self._cached_settings)
+
+        try:
+            with open(self.settings_path, "r", encoding="utf-8") as handle:
+                loaded = json.load(handle)
+        except (OSError, ValueError, TypeError):
+            loaded = {}
+
+        if not isinstance(loaded, dict):
+            loaded = {}
+
+        self._cached_settings = loaded
+        self._cached_settings_mtime = settings_mtime
+        return dict(self._cached_settings)
+
+    def _current_camera_source(self) -> str:
+        settings = self._load_runtime_settings()
+        return _normalize_camera_source(
+            settings.get("cameraSource") or os.getenv("WHISPLAY_CAMERA_SOURCE"),
+        )
+
+    def _current_network_camera_url(self) -> str:
+        settings = self._load_runtime_settings()
+        return _normalize_camera_url(
+            settings.get("esp32CamUrl") or os.getenv("WHISPLAY_ESP32_CAM_URL"),
+        )
+
+    def _network_endpoint(self, path: str) -> str:
+        return f"{self._current_network_camera_url()}{path}"
+
+    def _fetch_network_image_bytes(self) -> bytes:
+        base_url = self._current_network_camera_url()
+        request_url = f"{base_url}/latest.jpg"
+        with urlopen(request_url, timeout=self.network_timeout_sec) as response:
+            if response.status != 200:
+                raise RuntimeError("ESP32-CAM snapshot request failed.")
+            return response.read()
+
+    def _fetch_network_image_bytes_safe(self) -> bytes:
+        try:
+            return self._fetch_network_image_bytes()
+        except (OSError, ValueError, HTTPError, URLError) as error:
+            raise RuntimeError(
+                _format_network_camera_error(self._current_network_camera_url(), error)
+            ) from error
+
+    def _network_camera_ready(self) -> tuple[bool, str]:
+        try:
+            with urlopen(
+                self._network_endpoint("/status"),
+                timeout=self.network_timeout_sec,
+            ) as response:
+                if response.status != 200:
+                    return False, "ESP32-CAM status endpoint returned an error."
+                response.read()
+        except (OSError, ValueError, HTTPError, URLError) as error:
+            return False, _format_network_camera_error(
+                self._current_network_camera_url(),
+                error,
+            )
+        return True, ""
 
     def _ensure_camera_ready(self) -> None:
         if Picamera2 is None:
@@ -59,7 +170,7 @@ class SharedCameraService:
         )
         self.picam2.start()
 
-    def _capture_frame_image(self) -> Image.Image:
+    def _capture_picamera_image(self) -> Image.Image:
         with self.camera_lock:
             self._ensure_camera_ready()
             frame = self.picam2.capture_array()
@@ -67,6 +178,19 @@ class SharedCameraService:
         if image.mode != "RGB":
             image = image.convert("RGB")
         return image
+
+    def _capture_network_image(self) -> Image.Image:
+        data = self._fetch_network_image_bytes_safe()
+        image = Image.open(BytesIO(data))
+        if image.mode != "RGB":
+            image = image.convert("RGB")
+        return image
+
+    def _capture_frame_image(self) -> Image.Image:
+        source = self._current_camera_source()
+        if source == "esp32-cam":
+            return self._capture_network_image()
+        return self._capture_picamera_image()
 
     def _write_web_frame(self, image: Image.Image) -> None:
         temp_path = f"{self.web_frame_path}.tmp"
@@ -103,10 +227,31 @@ class SharedCameraService:
     def handle_command(self, payload: dict) -> dict:
         cmd = str(payload.get("cmd", "")).strip().lower()
 
-        if cmd in ["status", "ping"]:
+        if cmd == "ping":
             with self.state_lock:
                 active = self.stream_ref_count
-            return {"ok": True, "stream_ref_count": active, "ready": Picamera2 is not None}
+            return {"ok": True, "stream_ref_count": active, "source": self._current_camera_source()}
+
+        if cmd == "status":
+            with self.state_lock:
+                active = self.stream_ref_count
+            source = self._current_camera_source()
+            ready = False
+            error = ""
+            if source == "esp32-cam":
+                ready, error = self._network_camera_ready()
+            else:
+                ready = Picamera2 is not None
+                if not ready:
+                    error = "Picamera2 is unavailable"
+            return {
+                "ok": True,
+                "stream_ref_count": active,
+                "ready": ready,
+                "source": source,
+                "esp32_cam_url": self._current_network_camera_url(),
+                "error": error,
+            }
 
         if cmd == "start_stream":
             with self.state_lock:
@@ -129,7 +274,11 @@ class SharedCameraService:
             try:
                 image = self._capture_frame_image()
                 image.save(target_path, format="JPEG", quality=95)
-                return {"ok": True, "path": target_path}
+                return {
+                    "ok": True,
+                    "path": target_path,
+                    "source": self._current_camera_source(),
+                }
             except Exception as e:
                 return {"ok": False, "error": str(e)}
 
@@ -193,7 +342,7 @@ def camera_daemon_request(
 
 def ensure_camera_daemon(timeout_sec: float = 3.0) -> bool:
     try:
-        response = camera_daemon_request("status", timeout=0.4)
+        response = camera_daemon_request("ping", timeout=0.4)
         if response.get("ok"):
             return True
     except Exception:
@@ -210,7 +359,7 @@ def ensure_camera_daemon(timeout_sec: float = 3.0) -> bool:
     deadline = time.time() + timeout_sec
     while time.time() < deadline:
         try:
-            response = camera_daemon_request("status", timeout=0.5)
+            response = camera_daemon_request("ping", timeout=0.5)
             if response.get("ok"):
                 return True
         except Exception:

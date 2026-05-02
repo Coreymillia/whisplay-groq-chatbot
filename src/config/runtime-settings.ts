@@ -4,6 +4,7 @@ import { getCurrentPersonalityPresetId } from "./personality-presets";
 
 export type VoiceMode = "text-only" | "speak-on-demand" | "voice-chat";
 export type UITheme = "default" | "matrix" | "plasma" | "amber-terminal";
+export type CameraSource = "pi-camera" | "esp32-cam";
 export type HeaderMode =
   | "emoji"
   | "matrix"
@@ -27,6 +28,8 @@ export interface RuntimeSettings {
   personalityPrompt: string;
   voiceMode: VoiceMode;
   uiTheme: UITheme;
+  cameraSource: CameraSource;
+  esp32CamUrl: string;
   manualRecordMaxSec: number;
   headerMode: HeaderMode;
   screensaverMode: ScreensaverMode;
@@ -40,6 +43,8 @@ export interface RuntimeSettingsUpdate {
   personalityPrompt?: string;
   voiceMode?: string;
   uiTheme?: string;
+  cameraSource?: string;
+  esp32CamUrl?: string;
   manualRecordMaxSec?: number;
   headerMode?: string;
   screensaverMode?: string;
@@ -54,6 +59,8 @@ const SETTINGS_PATH = path.resolve(
 
 const DEFAULT_VOICE_MODE: VoiceMode = "text-only";
 const DEFAULT_UI_THEME: UITheme = "default";
+const DEFAULT_CAMERA_SOURCE: CameraSource = "pi-camera";
+const DEFAULT_ESP32_CAM_URL = "http://esp32-cam.local";
 const DEFAULT_MANUAL_RECORD_MAX_SEC = 15;
 const DEFAULT_HEADER_MODE: HeaderMode = "emoji";
 const DEFAULT_SCREENSAVER_MODE: ScreensaverMode = "retro-geometry";
@@ -70,6 +77,10 @@ export const UI_THEMES: UITheme[] = [
   "matrix",
   "plasma",
   "amber-terminal",
+];
+export const CAMERA_SOURCES: CameraSource[] = [
+  "pi-camera",
+  "esp32-cam",
 ];
 export const HEADER_MODES: HeaderMode[] = [
   "emoji",
@@ -99,6 +110,10 @@ const VALID_UI_THEMES = new Set<UITheme>([
   "matrix",
   "plasma",
   "amber-terminal",
+]);
+const VALID_CAMERA_SOURCES = new Set<CameraSource>([
+  "pi-camera",
+  "esp32-cam",
 ]);
 const VALID_HEADER_MODES = new Set<HeaderMode>([
   "emoji",
@@ -131,6 +146,30 @@ function normalizeUITheme(value: unknown): UITheme {
     return value as UITheme;
   }
   return DEFAULT_UI_THEME;
+}
+
+function normalizeCameraSource(value: unknown): CameraSource {
+  if (
+    typeof value === "string" &&
+    VALID_CAMERA_SOURCES.has(value as CameraSource)
+  ) {
+    return value as CameraSource;
+  }
+  return DEFAULT_CAMERA_SOURCE;
+}
+
+function normalizeEsp32CamUrl(value: unknown): string {
+  if (typeof value !== "string") {
+    return DEFAULT_ESP32_CAM_URL;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return DEFAULT_ESP32_CAM_URL;
+  }
+  const withProtocol = /^https?:\/\//i.test(trimmed)
+    ? trimmed
+    : `http://${trimmed}`;
+  return withProtocol.replace(/\/+$/, "");
 }
 
 function normalizeHeaderMode(value: unknown): HeaderMode {
@@ -182,6 +221,8 @@ function sanitizeSettings(input: Partial<RuntimeSettings> | null | undefined): R
         : "",
     voiceMode: normalizeVoiceMode(input?.voiceMode),
     uiTheme: normalizeUITheme(input?.uiTheme),
+    cameraSource: normalizeCameraSource(input?.cameraSource),
+    esp32CamUrl: normalizeEsp32CamUrl(input?.esp32CamUrl),
     manualRecordMaxSec: normalizeManualRecordMaxSec(input?.manualRecordMaxSec),
     headerMode: normalizeHeaderMode(input?.headerMode),
     screensaverMode: normalizeScreensaverMode(input?.screensaverMode),
@@ -242,6 +283,14 @@ export function saveRuntimeSettings(
 
   if (typeof update.uiTheme === "string") {
     next.uiTheme = normalizeUITheme(update.uiTheme);
+  }
+
+  if (typeof update.cameraSource === "string") {
+    next.cameraSource = normalizeCameraSource(update.cameraSource);
+  }
+
+  if (typeof update.esp32CamUrl === "string") {
+    next.esp32CamUrl = normalizeEsp32CamUrl(update.esp32CamUrl);
   }
 
   if (typeof update.manualRecordMaxSec === "number") {
@@ -312,6 +361,16 @@ export function getHeaderModeLabel(value: string): string {
   }
 }
 
+export function getCameraSourceLabel(value: string): string {
+  switch (value) {
+    case "esp32-cam":
+      return "ESP32-CAM";
+    case "pi-camera":
+    default:
+      return "Pi Camera";
+  }
+}
+
 export function getScreensaverModeLabel(value: string): string {
   switch (value) {
     case "matrix-binary":
@@ -343,6 +402,8 @@ export function getPublicRuntimeSettings(): {
   personalityPresetId: string;
   voiceMode: VoiceMode;
   uiTheme: UITheme;
+  cameraSource: CameraSource;
+  esp32CamUrl: string;
   manualRecordMaxSec: number;
   headerMode: HeaderMode;
   screensaverMode: ScreensaverMode;
@@ -358,6 +419,8 @@ export function getPublicRuntimeSettings(): {
     ),
     voiceMode: settings.voiceMode,
     uiTheme: settings.uiTheme,
+    cameraSource: settings.cameraSource,
+    esp32CamUrl: settings.esp32CamUrl,
     manualRecordMaxSec: settings.manualRecordMaxSec,
     headerMode: settings.headerMode,
     screensaverMode: settings.screensaverMode,

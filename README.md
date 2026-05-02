@@ -39,7 +39,7 @@ This project starts from the official PiSugar Whisplay chatbot, but is being tai
    ```bash
    cp .env.template .env
    ```
-   Then edit `.env` and set `OPENAI_API_KEY` to your Groq key.
+   Then edit `.env` and set `OPENAI_API_KEY` to your Groq key. If you want Gemini vision ready from the start, also set `GEMINI_API_KEY`.
 4. Build and run:
    ```bash
    bash build.sh
@@ -73,6 +73,23 @@ OPENAI_API_BASE_URL=https://api.groq.com/openai/v1
 OPENAI_API_KEY=your_groq_api_key
 ```
 
+## Getting a Gemini API key
+
+1. Sign in or create an account at [Google AI Studio](https://aistudio.google.com/).
+2. Create an API key from [Google AI Studio API keys](https://aistudio.google.com/app/apikey).
+3. Make sure the key has access to the Gemini API for your project.
+4. Use the key in either of these ways:
+   - put it in `.env` as `GEMINI_API_KEY=...`
+   - or paste it into the **Gemini key** field in the browser settings panel and save
+
+Important Gemini settings in `.env`:
+
+```env
+GEMINI_API_KEY=your_gemini_api_key
+# optional overrides
+# GEMINI_VISION_MODEL=gemini-2.5-flash
+```
+
 ## Speech recognition notes for this fork
 
 Speech recognition is now configured to use the same OpenAI-compatible path against Groq for ASR as well as chat.
@@ -95,7 +112,11 @@ Why this matters:
 
 The browser simulator includes a settings panel for the Groq key, Gemini key, preset personalities, freeform personality editing, voice mode, record time, UI theme, HAT header mode, HAT screensaver mode, HAT idle timeout, and a shutdown button for clean power-off without SSH.
 
+The Groq and Gemini keys can be stored there without editing `.env`. Runtime settings are saved to the local settings file on the Pi, and Gemini vision will use the saved browser key before falling back to `GEMINI_API_KEY` from `.env`.
+
 The browser UI also now includes a simple **Vision Test** image upload box. You can upload a photo from your PC, then ask the bot what it sees.
+
+The browser settings panel now also includes an optional **Camera Source** selector for vision hardware. Right now it supports the local **Pi Camera** path and an **ESP32-CAM** network source with a configurable URL. The Vision Test card can either upload an image from your PC or capture one from the configured camera source.
 
 Current plan for Gemini:
 
@@ -113,6 +134,35 @@ Current Gemini behavior:
 - for vision questions, **Gemini** analyzes the image first and **Groq** turns that result into the final in-character reply on the device
 - the browser UI can optionally show the latest raw **Gemini** output with the **Show Gemini Output** button
 - this lets us test vision now without needing the ESP32-CAM first
+
+## ESP32-CAM path
+
+The repo now includes a **working ESP32-CAM firmware project** under `ESP32CAM/`.
+
+- firmware framework: **PlatformIO / Arduino**
+- expected endpoints:
+  - `GET /status`
+  - `GET /latest.jpg`
+- setup flow:
+  - the firmware now uses **WiFiManager**, matching the MotionSense approach that already worked for this hardware
+  - on first boot or after a Wi-Fi reset, it starts a setup portal using a device-specific SSID like `whisplaycam-xxxxxx-setup`
+  - enter your Wi-Fi SSID/password in that portal and the device will save them in flash
+  - after Wi-Fi joins, that same setup AP stays up as a local info page so you can reconnect to it and see the current LAN IP, Wi-Fi SSID, hostname, and camera endpoints without needing serial logs
+  - hold the **BOOT** button low during power-up to clear saved Wi-Fi settings
+- confirmed working path:
+  1. build and flash the firmware from `ESP32CAM/`
+  2. join the setup AP and enter your Wi-Fi credentials
+  3. reconnect to the setup AP and open `http://192.168.4.1`
+  4. note the shown **LAN IP**
+  5. in the Whisplay browser UI, set **Camera Source** to **ESP32-CAM**
+  6. enter the device URL as `http://<esp32-lan-ip>`
+  7. save settings and use **Capture Camera** in the Vision Test card
+- notes:
+  - use the actual LAN IP shown by the ESP32-CAM, not `esp32-cam.local`
+  - the setup page also exposes `/status`, `/latest.jpg`, and `/wifi/reset`
+  - the current firmware keeps the setup/info AP available after Wi-Fi join so the device stays discoverable without serial logs
+
+The current selector is intentionally generic so future sources like **Arducam** can be added without redesigning the settings UI again.
 
 ## HAT settings controls
 

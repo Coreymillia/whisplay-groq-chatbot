@@ -17,6 +17,7 @@ const btn = document.getElementById("btn");
 const btnText = document.getElementById("btnText");
 const visionImageInput = document.getElementById("visionImageInput");
 const visionUploadBtn = document.getElementById("visionUploadBtn");
+const visionCaptureBtn = document.getElementById("visionCaptureBtn");
 const visionAnalysisToggleBtn = document.getElementById("visionAnalysisToggleBtn");
 const visionAnalysisWrap = document.getElementById("visionAnalysisWrap");
 const visionAnalysisMeta = document.getElementById("visionAnalysisMeta");
@@ -32,6 +33,9 @@ const personalityInput = document.getElementById("personalityInput");
 const voiceModeSelect = document.getElementById("voiceModeSelect");
 const recordTimeSelect = document.getElementById("recordTimeSelect");
 const uiThemeSelect = document.getElementById("uiThemeSelect");
+const cameraSourceSelect = document.getElementById("cameraSourceSelect");
+const esp32CamUrlInput = document.getElementById("esp32CamUrlInput");
+const esp32CamUrlWrap = document.getElementById("esp32CamUrlWrap");
 const headerModeSelect = document.getElementById("headerModeSelect");
 const screensaverModeSelect = document.getElementById("screensaverModeSelect");
 const idleTimeoutSelect = document.getElementById("idleTimeoutSelect");
@@ -59,6 +63,8 @@ let settingsLoaded = false;
 let visionAnalysisVisible = false;
 let latestVisionAnalysisStamp = 0;
 const DEFAULT_UI_THEME = "default";
+const DEFAULT_CAMERA_SOURCE = "pi-camera";
+const DEFAULT_ESP32_CAM_URL = "http://esp32-cam.local";
 const CUSTOM_PERSONALITY_PRESET_ID = "custom";
 let personalityPresets = [];
 let recordTimeoutOptions = [];
@@ -367,6 +373,13 @@ function renderVisionAnalysis(analysis) {
   visionAnalysisText.textContent = analysis.rawResponse || "";
 }
 
+function updateCameraSourceUi() {
+  const source = cameraSourceSelect?.value || DEFAULT_CAMERA_SOURCE;
+  if (esp32CamUrlWrap) {
+    esp32CamUrlWrap.style.display = source === "esp32-cam" ? "block" : "none";
+  }
+}
+
 function populatePersonalityPresets(selectedId) {
   if (!personalityPresetSelect) return;
   personalityPresetSelect.innerHTML = "";
@@ -447,6 +460,12 @@ function applySettings(settings) {
   if (uiThemeSelect) {
     uiThemeSelect.value = settings.uiTheme || DEFAULT_UI_THEME;
   }
+  if (cameraSourceSelect) {
+    cameraSourceSelect.value = settings.cameraSource || DEFAULT_CAMERA_SOURCE;
+  }
+  if (esp32CamUrlInput) {
+    esp32CamUrlInput.value = settings.esp32CamUrl || DEFAULT_ESP32_CAM_URL;
+  }
   if (headerModeSelect) {
     headerModeSelect.value = settings.headerMode || DEFAULT_HEADER_MODE;
   }
@@ -472,6 +491,7 @@ function applySettings(settings) {
   if (geminiKeyInput) {
     geminiKeyInput.value = "";
   }
+  updateCameraSourceUi();
 }
 
 async function loadSettings() {
@@ -596,6 +616,39 @@ async function uploadVisionImage() {
   }
 }
 
+async function captureVisionImage() {
+  setVisionStatus("Capturing image...");
+  if (visionCaptureBtn) {
+    visionCaptureBtn.disabled = true;
+  }
+  try {
+    const response = await fetch("/api/vision/capture", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || payload.ok === false) {
+      throw new Error(payload.error || `HTTP ${response.status}`);
+    }
+    if (visionPreview) {
+      visionPreview.src = payload.imageUrl || `/api/vision/image?ts=${Date.now()}`;
+      visionPreview.style.display = "block";
+    }
+    renderVisionAnalysis(null);
+    setVisionStatus("Camera image captured. Ask the bot what it sees.");
+  } catch (error) {
+    console.error("Failed to capture camera image:", error);
+    const message = error instanceof Error ? error.message : String(error);
+    setVisionStatus(`Capture failed: ${message}`, true);
+  } finally {
+    if (visionCaptureBtn) {
+      visionCaptureBtn.disabled = false;
+    }
+  }
+}
+
 async function saveSettings({ clearGroqApiKey = false } = {}) {
   if (!settingsLoaded) {
     setSettingsStatus("Settings are still loading.", true);
@@ -610,6 +663,8 @@ async function saveSettings({ clearGroqApiKey = false } = {}) {
     voiceMode: voiceModeSelect?.value || "text-only",
     manualRecordMaxSec: parseInt(recordTimeSelect?.value || "15", 10),
     uiTheme: uiThemeSelect?.value || DEFAULT_UI_THEME,
+    cameraSource: cameraSourceSelect?.value || DEFAULT_CAMERA_SOURCE,
+    esp32CamUrl: (esp32CamUrlInput?.value || DEFAULT_ESP32_CAM_URL).trim(),
     headerMode: headerModeSelect?.value || DEFAULT_HEADER_MODE,
     screensaverMode:
       screensaverModeSelect?.value || DEFAULT_SCREENSAVER_MODE,
@@ -779,6 +834,12 @@ if (visionUploadBtn) {
   });
 }
 
+if (visionCaptureBtn) {
+  visionCaptureBtn.addEventListener("click", () => {
+    captureVisionImage();
+  });
+}
+
 if (visionAnalysisToggleBtn) {
   visionAnalysisToggleBtn.addEventListener("click", () => {
     setVisionAnalysisVisible(!visionAnalysisVisible);
@@ -797,6 +858,12 @@ if (shutdownBtn) {
 if (uiThemeSelect) {
   uiThemeSelect.addEventListener("change", () => {
     applyTheme(uiThemeSelect.value || DEFAULT_UI_THEME);
+  });
+}
+
+if (cameraSourceSelect) {
+  cameraSourceSelect.addEventListener("change", () => {
+    updateCameraSourceUi();
   });
 }
 

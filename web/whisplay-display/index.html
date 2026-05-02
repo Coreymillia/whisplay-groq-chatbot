@@ -82,10 +82,11 @@
         <label class="field-label" for="visionImageInput">Upload Image</label>
         <input class="settings-input" id="visionImageInput" type="file" accept="image/*" />
         <div class="field-hint">
-          Pick a photo from your PC, upload it, then ask the bot what it sees.
+          Pick a photo from your PC, or capture one from the configured camera source, then ask the bot what it sees.
         </div>
         <div class="settings-actions">
           <button class="button compact" id="visionUploadBtn" type="button">Use for Vision</button>
+          <button class="button secondary compact" id="visionCaptureBtn" type="button">Capture Camera</button>
           <button class="button secondary compact" id="visionAnalysisToggleBtn" type="button">Show Gemini Output</button>
         </div>
         <img
@@ -163,6 +164,29 @@
         </select>
         <div class="field-hint">
           Themes change the simulator background, fonts, and color palette.
+        </div>
+
+        <label class="field-label" for="cameraSourceSelect">Camera Source</label>
+        <select class="settings-select" id="cameraSourceSelect">
+          <option value="pi-camera">Pi Camera</option>
+          <option value="esp32-cam">ESP32-CAM</option>
+        </select>
+        <div class="field-hint">
+          Optional vision hardware path. This selector is meant to grow later for sources like Arducam too.
+        </div>
+
+        <div id="esp32CamUrlWrap">
+          <label class="field-label" for="esp32CamUrlInput">ESP32-CAM URL</label>
+          <input
+            class="settings-input"
+            id="esp32CamUrlInput"
+            type="text"
+            placeholder="http://esp32-cam.local"
+            autocomplete="off"
+          />
+          <div class="field-hint">
+            Used for `/status` and `/latest.jpg` on the ESP32-CAM firmware.
+          </div>
         </div>
 
         <label class="field-label" for="headerModeSelect">HAT Header</label>
