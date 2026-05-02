@@ -154,10 +154,9 @@ class TextUtils:
       if emoji_img:
         char_size_cache[cache_key] = (emoji_img.width, emoji_img.height)
         return emoji_img.width, emoji_img.height
-    else:
-      bbox = font.getbbox(char)
-      char_size_cache[cache_key] = (bbox[2] - bbox[0], bbox[3] - bbox[1])
-      return char_size_cache[cache_key]
+    bbox = font.getbbox(char)
+    char_size_cache[cache_key] = (bbox[2] - bbox[0], bbox[3] - bbox[1])
+    return char_size_cache[cache_key]
     return 0, 0
   
   @staticmethod
@@ -187,6 +186,10 @@ class TextUtils:
           emoji_y = baseline - emoji_img.height
           img.paste(emoji_img, (x, emoji_y), emoji_img)
           x += emoji_img.width
+        else:
+          draw.text((x, y), char, font=font, fill=(255, 255, 255))
+          char_width = TextUtils.get_char_size(font, char)[0]
+          x += char_width
       else:
         draw.text((x, y), char, font=font, fill=(255, 255, 255))
         char_width = TextUtils.get_char_size(font, char)[0]

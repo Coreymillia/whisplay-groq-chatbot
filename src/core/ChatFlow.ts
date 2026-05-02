@@ -19,6 +19,7 @@ import { playWakeupChime } from "../device/audio";
 import { stopMusicPlayback, isMusicPlaying } from "../device/music-player";
 import type { Status } from "../device/display";
 import { getRuntimeSettings } from "../config/runtime-settings";
+import { STATE_EMOJIS } from "../config/state-emojis";
 import {
   applySettingsMenuAction,
   buildSettingsMenuItems,
@@ -62,6 +63,9 @@ class ChatFlow implements ChatFlowContext {
   enterMusicAfterAnswer: boolean = false;
   musicDisplayText: string = "";
   settingsMenuIndex: number = 0;
+  lastAnswerText: string = "";
+  lastAnswerEmoji: string = STATE_EMOJIS.answering;
+  lastAnswerImage: string = "";
   private ignoreNextSettingsRelease = false;
 
   constructor(options: { enableCamera?: boolean } = {}) {
@@ -73,12 +77,10 @@ class ChatFlow implements ChatFlowContext {
       (sentences: string[]) => {
         if (!this.isAnswerFlow()) return;
         const fullText = sentences.join(" ");
-        let emoji = DEFAULT_EMOJI;
-        if (this.currentFlowName === "external_answer") {
-          emoji = this.currentExternalEmoji || extractEmojis(fullText) || emoji;
-        } else {
-          emoji = extractEmojis(fullText) || emoji;
-        }
+        const emoji =
+          this.currentFlowName === "external_answer"
+            ? this.currentExternalEmoji || STATE_EMOJIS.answering
+            : STATE_EMOJIS.answering;
         display({
           status: "answering",
           emoji,
@@ -145,7 +147,7 @@ class ChatFlow implements ChatFlowContext {
           const statusMap: Record<string, Partial<Status>> = {
             thinking: {
               status: "Thinking",
-              emoji: payload.emoji || "🤔",
+              emoji: payload.emoji || STATE_EMOJIS.thinking,
               text: statusText,
               RGB: "#ff6800",
               scroll_speed: 6,
@@ -153,7 +155,7 @@ class ChatFlow implements ChatFlowContext {
             },
             tool_calling: {
               status: "Tool calling",
-              emoji: payload.emoji || "🔧",
+              emoji: payload.emoji || STATE_EMOJIS.tool,
               text: statusText,
               RGB: "#ff6800",
               scroll_speed: 4,
@@ -161,20 +163,20 @@ class ChatFlow implements ChatFlowContext {
             },
             answering: {
               status: "answering...",
-              emoji: payload.emoji || "💬",
+              emoji: payload.emoji || STATE_EMOJIS.answering,
               RGB: "#00c8a3",
               text_input_enabled: false,
             },
             idle: {
               status: "idle",
-              emoji: payload.emoji || "😊",
+              emoji: payload.emoji || STATE_EMOJIS.externalIdle,
               RGB: "#000055",
               text_input_enabled: textInputEnabled,
             },
           };
           const displayPayload = statusMap[payload.status] || {
             status: payload.status,
-            emoji: payload.emoji || "🤖",
+            emoji: payload.emoji || STATE_EMOJIS.thinking,
             text: statusText,
             RGB: "#ff6800",
             text_input_enabled: false,
@@ -205,7 +207,7 @@ class ChatFlow implements ChatFlowContext {
       const displayText = this.thinkingSentences.join(" ");
       display({
         status: "Thinking",
-        emoji: "🤔",
+        emoji: STATE_EMOJIS.thinking,
         text: displayText,
         RGB: "#ff6800", // yellow
         scroll_speed: 6,
@@ -316,7 +318,7 @@ class ChatFlow implements ChatFlowContext {
   renderSettingsMenu = (message: string = ""): void => {
     display({
       status: "settings",
-      emoji: "⚙️",
+      emoji: STATE_EMOJIS.settings,
       RGB: "#6048ff",
       text: renderSettingsMenuText(this.settingsMenuIndex, message),
       text_input_enabled: false,
@@ -347,6 +349,40 @@ class ChatFlow implements ChatFlowContext {
     const shouldIgnore = this.ignoreNextSettingsRelease;
     this.ignoreNextSettingsRelease = false;
     return shouldIgnore;
+  };
+
+  rememberLastAnswer = ({
+    text,
+    emoji,
+    image,
+  }: {
+    text: string;
+    emoji?: string;
+    image?: string;
+  }): void => {
+    this.lastAnswerText = text.trim();
+    this.lastAnswerEmoji = emoji || STATE_EMOJIS.answering;
+    this.lastAnswerImage = image || "";
+  };
+
+  hasLastAnswer = (): boolean => {
+    return Boolean(this.lastAnswerText || this.lastAnswerImage);
+  };
+
+  replayLastAnswer = (): void => {
+    if (!this.hasLastAnswer()) {
+      return;
+    }
+    display({
+      status: "last reply",
+      emoji: this.lastAnswerEmoji || STATE_EMOJIS.answering,
+      text: this.lastAnswerText || undefined,
+      image: this.lastAnswerImage || "",
+      image_icon_visible: Boolean(this.lastAnswerImage),
+      RGB: "#00c8a3",
+      scroll_speed: 3,
+      text_input_enabled: true,
+    });
   };
 }
 

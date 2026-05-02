@@ -40,6 +40,9 @@ export interface ChatFlowContext {
   enterMusicAfterAnswer: boolean;
   musicDisplayText: string;
   settingsMenuIndex: number;
+  lastAnswerText: string;
+  lastAnswerEmoji: string;
+  lastAnswerImage: string;
 
   transitionTo: (flowName: FlowName) => void;
   recognizeAudio: (path: string, isFromAutoListening?: boolean) => Promise<string>;
@@ -57,4 +60,11 @@ export interface ChatFlowContext {
   activateSettingsSelection: () => void;
   consumeSettingsReleaseGuard: () => boolean;
   getManualRecordMaxSec: () => number;
+  rememberLastAnswer: (payload: {
+    text: string;
+    emoji?: string;
+    image?: string;
+  }) => void;
+  hasLastAnswer: () => boolean;
+  replayLastAnswer: () => void;
 }

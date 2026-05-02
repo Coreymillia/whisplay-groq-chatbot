@@ -40,6 +40,7 @@ import {
 import { DEFAULT_EMOJI } from "../../utils";
 import { isMusicPlaying, getCurrentTrackTitle, stopMusicPlayback, startPendingMusicPlayback, onMusicTrackChange, onMusicPlaybackEnd } from "../../device/music-player";
 import { autoSaveExchange } from "../../config/mempalace";
+import { STATE_EMOJIS } from "../../config/state-emojis";
 import {
   SETTINGS_OPEN_GRACE_MS,
   SETTINGS_SELECT_HOLD_MS,
@@ -47,6 +48,19 @@ import {
 
 export const flowStates: Record<FlowName, FlowStateHandler> = {
   sleep: (ctx: ChatFlowContext) => {
+    onButtonDoubleClick(() => {
+      if (ctx.hasLastAnswer()) {
+        ctx.replayLastAnswer();
+        return;
+      }
+      if (ctx.enableCamera) {
+        const captureImgPath = `${cameraDir}/capture-${moment().format(
+          "YYYYMMDD-HHmmss",
+        )}.jpg`;
+        enterCameraMode(captureImgPath);
+        ctx.transitionTo("camera");
+      }
+    });
     onButtonPressed(() => {
       resetCameraModeControl();
       // Stop any playing music when waking up
@@ -62,23 +76,14 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
       display({ status: "recognizing", text, text_input_enabled: false });
       ctx.transitionTo("answer");
     });
-    if (ctx.enableCamera) {
-      const captureImgPath = `${cameraDir}/capture-${moment().format(
-        "YYYYMMDD-HHmmss",
-      )}.jpg`;
-      onButtonDoubleClick(() => {
-        enterCameraMode(captureImgPath);
-        ctx.transitionTo("camera");
-      });
-    }
     display({
       status: "idle",
-      emoji: "😴",
+      emoji: STATE_EMOJIS.idle,
       RGB: "#000055",
       rag_icon_visible: false,
       ...(getCurrentStatus().text.endsWith("Listening...") || !getCurrentStatus().text
         ? {
-          text: `Long Press the button to say something${ctx.enableCamera ? ",\ndouble click to launch camera" : ""
+          text: `Long press to talk${ctx.hasLastAnswer() ? ",\ndouble press to replay" : ctx.enableCamera ? ",\ndouble press for camera" : ""
             }.`,
         }
         : {}),
@@ -108,7 +113,7 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
     });
     display({
       status: "camera",
-      emoji: "📷",
+      emoji: STATE_EMOJIS.camera,
       RGB: "#00ff88",
     });
   },
@@ -145,7 +150,7 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
     const trackTitle = getCurrentTrackTitle();
     display({
       status: "music",
-      emoji: "🎹",
+      emoji: STATE_EMOJIS.music,
       RGB: "#0066aa",
       text:
         ctx.musicDisplayText ||
@@ -191,7 +196,7 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
       stop();
       display({
         status: "listening",
-        emoji: DEFAULT_EMOJI,
+        emoji: STATE_EMOJIS.listening,
         RGB: "#6048ff",
         text: `Release to send.\nKeep holding ${SETTINGS_OPEN_GRACE_MS / 1000}s for settings...`,
         rag_icon_visible: false,
@@ -256,7 +261,7 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
       });
     display({
       status: "listening",
-      emoji: DEFAULT_EMOJI,
+      emoji: STATE_EMOJIS.listening,
       RGB: "#00ff00",
       text: "Listening...",
       rag_icon_visible: false,
@@ -275,7 +280,7 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
     onButtonReleased(noop);
     display({
       status: "detecting",
-      emoji: DEFAULT_EMOJI,
+      emoji: STATE_EMOJIS.recognizing,
       RGB: "#00ff00",
       text: "Detecting voice level...",
       rag_icon_visible: false,
@@ -283,7 +288,7 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
     getDynamicVoiceDetectLevel().then((level) => {
       display({
         status: "listening",
-        emoji: DEFAULT_EMOJI,
+        emoji: STATE_EMOJIS.listening,
         RGB: "#00ff00",
         text: `(Detect level: ${level}%) Listening...`,
         rag_icon_visible: false,
@@ -302,6 +307,7 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
   asr: (ctx: ChatFlowContext) => {
     display({
       status: "recognizing",
+      emoji: STATE_EMOJIS.recognizing,
     });
     onButtonDoubleClick(null);
     Promise.race([
@@ -383,6 +389,7 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
     ctx.musicDisplayText = "";
     display({
       status: "answering...",
+      emoji: STATE_EMOJIS.answering,
       RGB: "#00c8a3",
     });
     const currentAnswerId = ctx.answerId;
@@ -398,17 +405,21 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
         ];
       sendWhisplayIMMessage(prompt)
         .then((ok) => {
-          if (ok) {
+            if (ok) {
+            ctx.rememberLastAnswer({
+              text: ctx.pendingExternalReply || ctx.asrText,
+              emoji: STATE_EMOJIS.externalIdle,
+            });
             display({
               status: "idle",
-              emoji: "😊",
+              emoji: STATE_EMOJIS.externalIdle,
               RGB: "#000055",
               image_icon_visible: false,
             });
           } else {
             display({
               status: "error",
-              emoji: "⚠️",
+              emoji: STATE_EMOJIS.error,
               text: "OpenClaw send failed",
               image_icon_visible: false,
             });
@@ -515,6 +526,12 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
       });
     getPlayEndPromise().then(() => {
       if (ctx.currentFlowName === "answer") {
+        const img = getLatestDisplayImg();
+        ctx.rememberLastAnswer({
+          text: llmResponseText,
+          emoji: STATE_EMOJIS.answering,
+          image: img || "",
+        });
         autoSaveExchange(ctx.asrText, llmResponseText);
         clearPendingCapturedImgForChat();
         display({ image_icon_visible: false });
@@ -531,7 +548,6 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
           ctx.transitionTo("music");
           return;
         }
-        const img = getLatestDisplayImg();
         if (img) {
           ctx.transitionTo("image");
         } else {
@@ -562,7 +578,7 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
     display({
       status: "answering...",
       RGB: "#00c8a3",
-      ...(ctx.pendingExternalEmoji ? { emoji: ctx.pendingExternalEmoji } : {}),
+      emoji: ctx.pendingExternalEmoji || STATE_EMOJIS.answering,
     });
     onButtonPressed(() => {
       ctx.streamResponser.stop();
@@ -587,6 +603,11 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
       void ctx.streamExternalReply(replyText, replyEmoji);
       ctx.streamResponser.getPlayEndPromise().then(() => {
         if (ctx.currentFlowName !== "external_answer") return;
+        ctx.rememberLastAnswer({
+          text: replyText,
+          emoji: replyEmoji || STATE_EMOJIS.answering,
+          image: replyImageUrl || "",
+        });
         if (ctx.wakeSessionActive || ctx.endAfterAnswer) {
           if (ctx.endAfterAnswer) {
             ctx.endWakeSession();

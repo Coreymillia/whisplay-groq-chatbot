@@ -108,6 +108,16 @@ Current HAT settings items:
 
 The browser UI and HAT menu share the same stored settings.
 
+## HAT replay and face behavior
+
+The HAT now has a simple **double-press replay** feature from the idle screen:
+
+- **double press** from idle = show the last reply again on the HAT
+
+This is currently a display-side refresh of the last answer so it is easier to catch if you miss it.
+
+This fork also now includes a **first-pass face/emoji state system** for the header area on the HAT and browser simulator. It is still basic for now, but it gives the device a clearer state-based face while we work toward a better custom face system later.
+
 ## Preset personalities
 
 This fork now includes a small set of preset personalities in both the browser UI and the HAT settings menu:
