@@ -89,6 +89,16 @@
         />
         <div class="field-hint" id="groqKeyHint">No key stored</div>
 
+        <label class="field-label" for="geminiKeyInput">Gemini API Key</label>
+        <input
+          class="settings-input"
+          id="geminiKeyInput"
+          type="password"
+          placeholder="Leave blank to keep the saved key"
+          autocomplete="off"
+        />
+        <div class="field-hint" id="geminiKeyHint">No key stored</div>
+
         <label class="field-label" for="personalityPresetSelect">Preset Personality</label>
         <select class="settings-select" id="personalityPresetSelect">
           <option value="custom">Custom</option>
@@ -158,7 +168,7 @@
         </div>
 
         <div class="settings-actions">
-          <button class="button secondary compact" id="clearKeyBtn" type="button">Clear Key</button>
+          <button class="button secondary compact" id="clearKeyBtn" type="button">Clear Groq Key</button>
           <button class="button compact" id="saveSettingsBtn" type="button">Save</button>
         </div>
         <div class="settings-actions">

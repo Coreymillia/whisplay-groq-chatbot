@@ -255,6 +255,7 @@ export class WebDisplayServer implements WebAudioBridgeServer {
       const settings = saveRuntimeSettings({
         groqApiKey: getBodyString(body, "groqApiKey"),
         clearGroqApiKey: getBodyBoolean(body, "clearGroqApiKey"),
+        geminiApiKey: getBodyString(body, "geminiApiKey"),
         personalityPrompt: getBodyString(body, "personalityPrompt"),
         voiceMode: getBodyString(body, "voiceMode"),
         uiTheme: getBodyString(body, "uiTheme"),
@@ -269,6 +270,7 @@ export class WebDisplayServer implements WebAudioBridgeServer {
         ok: true,
         settings: {
           groqApiKeyConfigured: Boolean(settings.groqApiKey),
+          geminiApiKeyConfigured: Boolean(settings.geminiApiKey),
           personalityPrompt: settings.personalityPrompt,
           personalityPresetId: getPublicRuntimeSettings().personalityPresetId,
           voiceMode: settings.voiceMode,

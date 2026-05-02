@@ -17,6 +17,8 @@ const btn = document.getElementById("btn");
 const btnText = document.getElementById("btnText");
 const groqKeyInput = document.getElementById("groqKeyInput");
 const groqKeyHint = document.getElementById("groqKeyHint");
+const geminiKeyInput = document.getElementById("geminiKeyInput");
+const geminiKeyHint = document.getElementById("geminiKeyHint");
 const personalityPresetSelect = document.getElementById("personalityPresetSelect");
 const personalityInput = document.getElementById("personalityInput");
 const voiceModeSelect = document.getElementById("voiceModeSelect");
@@ -413,8 +415,16 @@ function applySettings(settings) {
       ? "Groq key stored"
       : "No key stored";
   }
+  if (geminiKeyHint) {
+    geminiKeyHint.textContent = settings.geminiApiKeyConfigured
+      ? "Gemini key stored"
+      : "No key stored";
+  }
   if (groqKeyInput) {
     groqKeyInput.value = "";
+  }
+  if (geminiKeyInput) {
+    geminiKeyInput.value = "";
   }
 }
 
@@ -450,6 +460,7 @@ async function saveSettings({ clearGroqApiKey = false } = {}) {
   const body = {
     groqApiKey: clearGroqApiKey ? "" : (groqKeyInput?.value || "").trim(),
     clearGroqApiKey,
+    geminiApiKey: (geminiKeyInput?.value || "").trim(),
     personalityPrompt: (personalityInput?.value || "").trim(),
     voiceMode: voiceModeSelect?.value || "text-only",
     manualRecordMaxSec: parseInt(recordTimeSelect?.value || "15", 10),
@@ -481,7 +492,7 @@ async function saveSettings({ clearGroqApiKey = false } = {}) {
     setSettingsStatus(
       clearGroqApiKey
         ? "Stored Groq key cleared."
-        : "Settings saved. New replies will use the updated personality and key.",
+        : "Settings saved. New replies will use the updated personality and stored keys.",
     );
   } catch (error) {
     console.error("Failed to save settings:", error);

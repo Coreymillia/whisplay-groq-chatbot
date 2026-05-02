@@ -12,6 +12,7 @@ This project starts from the official PiSugar Whisplay chatbot, but is being tai
 - **Bring-up mode:** browser simulator first, physical HAT now working
 - **Power:** wall-powered is fine; the PiSugar battery is optional
 - **Scope:** build the chatbot first as a dedicated Whisplay + Groq device
+- **Cost target:** stay on free-tier API usage where possible for now
 
 ## Current hardware status
 
@@ -86,7 +87,17 @@ Why this matters:
 
 ## Settings UI notes
 
-The browser simulator includes a settings panel for the Groq key, preset personalities, freeform personality editing, voice mode, record time, UI theme, HAT header mode, HAT screensaver mode, HAT idle timeout, and a shutdown button for clean power-off without SSH.
+The browser simulator includes a settings panel for the Groq key, Gemini key, preset personalities, freeform personality editing, voice mode, record time, UI theme, HAT header mode, HAT screensaver mode, HAT idle timeout, and a shutdown button for clean power-off without SSH.
+
+The Gemini key field is currently just stored for upcoming vision work. It does not change the active chatbot path yet.
+
+Current plan for Gemini:
+
+- Use the Gemini key first for **vision only**
+- Keep **Groq** as the main chatbot path for normal conversation
+- Start with an **ESP32-CAM over Wi-Fi** as a simple remote snapshot source
+- Keep room for other camera sources later if they fit better than the ESP32-CAM
+- Continue targeting **free-tier usage** while the project is still experimental
 
 ## HAT settings controls
 

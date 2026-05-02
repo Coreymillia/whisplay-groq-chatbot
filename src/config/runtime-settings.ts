@@ -23,6 +23,7 @@ export type ScreensaverMode =
 
 export interface RuntimeSettings {
   groqApiKey: string;
+  geminiApiKey: string;
   personalityPrompt: string;
   voiceMode: VoiceMode;
   uiTheme: UITheme;
@@ -35,6 +36,7 @@ export interface RuntimeSettings {
 export interface RuntimeSettingsUpdate {
   groqApiKey?: string;
   clearGroqApiKey?: boolean;
+  geminiApiKey?: string;
   personalityPrompt?: string;
   voiceMode?: string;
   uiTheme?: string;
@@ -172,6 +174,8 @@ function sanitizeSettings(input: Partial<RuntimeSettings> | null | undefined): R
   return {
     groqApiKey:
       typeof input?.groqApiKey === "string" ? input.groqApiKey.trim() : "",
+    geminiApiKey:
+      typeof input?.geminiApiKey === "string" ? input.geminiApiKey.trim() : "",
     personalityPrompt:
       typeof input?.personalityPrompt === "string"
         ? input.personalityPrompt.trim()
@@ -218,6 +222,13 @@ export function saveRuntimeSettings(
     const trimmed = update.groqApiKey.trim();
     if (trimmed) {
       next.groqApiKey = trimmed;
+    }
+  }
+
+  if (typeof update.geminiApiKey === "string") {
+    const trimmed = update.geminiApiKey.trim();
+    if (trimmed) {
+      next.geminiApiKey = trimmed;
     }
   }
 
@@ -327,6 +338,7 @@ export function getIdleTimeoutLabel(value: number): string {
 
 export function getPublicRuntimeSettings(): {
   groqApiKeyConfigured: boolean;
+  geminiApiKeyConfigured: boolean;
   personalityPrompt: string;
   personalityPresetId: string;
   voiceMode: VoiceMode;
@@ -339,6 +351,7 @@ export function getPublicRuntimeSettings(): {
   const settings = loadSettingsFile();
   return {
     groqApiKeyConfigured: Boolean(settings.groqApiKey),
+    geminiApiKeyConfigured: Boolean(settings.geminiApiKey),
     personalityPrompt: settings.personalityPrompt,
     personalityPresetId: getCurrentPersonalityPresetId(
       settings.personalityPrompt,
