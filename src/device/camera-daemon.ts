@@ -1,4 +1,5 @@
 import { execFile } from "child_process";
+import fs from "fs";
 import { Socket } from "net";
 import { resolve } from "path";
 
@@ -91,4 +92,23 @@ export function ensureCameraDaemonReady(): Promise<void> {
       },
     );
   });
+}
+
+export async function captureCameraImage(
+  imagePath: string,
+  timeoutMs = 8000,
+): Promise<void> {
+  await ensureCameraDaemonReady();
+  const response = await sendCameraDaemonCommand(
+    "capture",
+    { path: imagePath },
+    timeoutMs,
+  );
+  if (!response.ok || !fs.existsSync(imagePath)) {
+    throw new Error(
+      typeof response.error === "string"
+        ? response.error
+        : "Capture failed.",
+    );
+  }
 }

@@ -18,7 +18,7 @@ import {
   getLatestVisionAnalysis,
 } from "../utils/vision-analysis";
 import {
-  ensureCameraDaemonReady,
+  captureCameraImage,
   sendCameraDaemonCommand,
 } from "./camera-daemon";
 import {
@@ -327,23 +327,7 @@ export class WebDisplayServer implements WebAudioBridgeServer {
       fs.mkdirSync(uploadDir, { recursive: true });
       const savedPath = path.join(uploadDir, `vision-capture-${Date.now()}.jpg`);
       try {
-        await ensureCameraDaemonReady();
-        const response = await sendCameraDaemonCommand(
-          "capture",
-          { path: savedPath },
-          8000,
-        );
-        if (!response.ok || !fs.existsSync(savedPath)) {
-          ctx.status = 500;
-          ctx.body = {
-            ok: false,
-            error:
-              typeof response.error === "string"
-                ? response.error
-                : "Capture failed.",
-          };
-          return;
-        }
+        await captureCameraImage(savedPath, 8000);
       } catch (error) {
         ctx.status = 500;
         ctx.body = {

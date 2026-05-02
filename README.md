@@ -20,6 +20,8 @@ This project starts from the official PiSugar Whisplay chatbot, but is being tai
 - **Bot on HAT:** working
 - **Microphone:** working
 - **Speaker / WM8960 audio path:** working
+- **Spoken photo capture:** working
+- **Captured still image on HAT display:** working
 - **Web simulator/debug UI:** still available at `http://<host-or-pi-ip>:17880`
 - **Touchscreen:** not wired into the app UX yet; touching the screen currently does not trigger app behavior
 
@@ -131,6 +133,7 @@ Current Gemini behavior:
 - **Groq** still handles normal chat
 - **Gemini** is used as the default vision backend
 - uploaded test images become the latest image for vision analysis
+- spoken commands like **"take photo"** or **"capture image"** now trigger a camera capture on the device path and show the still image on the Whisplay display
 - for vision questions, **Gemini** analyzes the image first and **Groq** turns that result into the final in-character reply on the device
 - the browser UI can optionally show the latest raw **Gemini** output with the **Show Gemini Output** button
 - this lets us test vision now without needing the ESP32-CAM first
@@ -328,9 +331,40 @@ Tutorial (offline version build on RPi 5):
 
 ## Hardware
 
-- Raspberry Pi zero 2w (Recommand RRi 5, 8G RAM for offline build)
-- PiSugar Whisplay HAT (including LCD screen, on-board speaker and microphone)
-- PiSugar 3 1200mAh (Plus version 5000mAh for RPi 5)
+### Base hardware for the current chatbot
+
+- Raspberry Pi Zero 2 W
+- PiSugar Whisplay HAT
+  - LCD
+  - on-board speaker
+  - on-board microphone
+- microSD card with Raspberry Pi OS
+- power source
+  - PiSugar battery is optional
+  - wall power is fine for the current build
+
+### Optional hardware by feature
+
+- **Browser simulator only**
+  - no Whisplay HAT required
+  - useful for setup, debugging, Gemini key entry, and browser-side vision testing
+- **On-device chatbot**
+  - requires the Raspberry Pi + Whisplay HAT stack above
+- **Gemini vision from uploaded images**
+  - no extra camera hardware required
+  - requires a Gemini API key
+- **Spoken "take photo" / "capture image" on device**
+  - requires a configured camera source
+  - works with either the Pi camera path or the ESP32-CAM path
+- **ESP32-CAM remote camera**
+  - optional
+  - requires an ESP32-CAM flashed with the firmware in `ESP32CAM/`
+  - requires the ESP32-CAM to be on the same LAN as the Pi and configured in the browser settings
+
+### Notes
+
+- This fork is currently tuned for **online Groq + Gemini usage**, not a fully offline local-AI build.
+- A Raspberry Pi 5 with more RAM is still the better fit if you want to experiment with heavier offline or local-model paths later.
 
 ## Pre-build Image
 

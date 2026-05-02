@@ -30,6 +30,7 @@ import {
   getLatestShowedImage,
   setLatestCapturedImg,
   setPendingCapturedImgForChat,
+  showLatestCapturedImg,
 } from "../../utils/image";
 import { sendWhisplayIMMessage } from "../../cloud-api/whisplay-im/whisplay-im";
 import { ChatFlowContext, FlowName, FlowStateHandler } from "./types";
@@ -51,6 +52,8 @@ import {
 } from "./settings-menu";
 import { ToolReturnTag } from "../../type";
 import { setLatestVisionAnalysis } from "../../utils/vision-analysis";
+import { clearLatestVisionAnalysis } from "../../utils/vision-analysis";
+import { captureCameraImage } from "../../device/camera-daemon";
 
 const imageIntentPatterns = [
   /\bwhat do you see\b/i,
@@ -62,12 +65,37 @@ const imageIntentPatterns = [
   /\bocr\b/i,
 ];
 
+const captureIntentPatterns = [
+  /\btake (?:a )?(?:photo|picture)\b/i,
+  /\bcapture (?:an? )?(?:image|photo|picture)\b/i,
+  /\bsnap (?:a )?(?:photo|picture)\b/i,
+];
+
 function shouldRouteToVision(prompt: string): boolean {
   const trimmed = prompt.trim();
   if (!trimmed || !getLatestShowedImage()) {
     return false;
   }
   return imageIntentPatterns.some((pattern) => pattern.test(trimmed));
+}
+
+function shouldCaptureImage(prompt: string): boolean {
+  const trimmed = prompt.trim();
+  if (!trimmed) {
+    return false;
+  }
+  return captureIntentPatterns.some((pattern) => pattern.test(trimmed));
+}
+
+async function captureAndPrepareLatestImage(): Promise<string> {
+  const captureImagePath = `${cameraDir}/capture-${moment().format(
+    "YYYYMMDD-HHmmss",
+  )}.jpg`;
+  await captureCameraImage(captureImagePath, 8000);
+  setLatestCapturedImg(captureImagePath);
+  showLatestCapturedImg();
+  clearLatestVisionAnalysis();
+  return captureImagePath;
 }
 
 function stripToolTag(result: string): string {
@@ -160,6 +188,7 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
     });
   },
   camera: (ctx: ChatFlowContext) => {
+    let latestCapturePath = "";
     onButtonDoubleClick(null);
     onButtonPressed(() => {
       handleCameraModePress();
@@ -174,10 +203,19 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
       }
       setLatestCapturedImg(captureImagePath);
       setPendingCapturedImgForChat(captureImagePath);
-      display({ image_icon_visible: true });
+      clearLatestVisionAnalysis();
+      latestCapturePath = captureImagePath;
+      display({
+        image: captureImagePath,
+        image_icon_visible: false,
+      });
     });
     onCameraModeExit(() => {
       if (ctx.currentFlowName === "camera") {
+        if (latestCapturePath) {
+          ctx.transitionTo("image");
+          return;
+        }
         ctx.transitionTo("sleep");
       }
     });
@@ -518,6 +556,40 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
     };
     ctx.partialThinking = "";
     ctx.thinkingSentences = [];
+    if (shouldCaptureImage(ctx.asrText)) {
+      display({
+        text: "[camera]Capturing image...",
+      });
+      void captureAndPrepareLatestImage()
+        .then((captureImagePath) => {
+          if (currentAnswerId !== ctx.answerId) {
+            return;
+          }
+          display({
+            image: captureImagePath,
+            image_icon_visible: false,
+            text: "[camera]Photo captured.",
+          });
+          trackingPartial("Photo captured.");
+          endPartial();
+        })
+        .catch((error) => {
+          console.error("Voice capture failed:", error);
+          if (currentAnswerId !== ctx.answerId) {
+            return;
+          }
+          const message =
+            error instanceof Error && error.message
+              ? error.message
+              : "I couldn't capture a photo right now.";
+          display({
+            text: `[camera]${message}`,
+          });
+          trackingPartial(message);
+          endPartial();
+        });
+      return;
+    }
     [() => Promise.resolve().then(() => ""), getSystemPromptWithKnowledge]
     [enableRAG ? 1 : 0](ctx.asrText)
       .then((res: string) => {
