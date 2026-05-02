@@ -130,15 +130,25 @@
         <select class="settings-select" id="headerModeSelect">
           <option value="emoji">Emoji</option>
           <option value="matrix">Matrix</option>
+          <option value="matrix-binary">Matrix Binary</option>
+          <option value="matrix-blue">Blue Matrix</option>
+          <option value="retro-geometry">Retro Geometry</option>
+          <option value="plasma">Plasma</option>
+          <option value="neon-rain">Neon Rain</option>
         </select>
         <div class="field-hint">
-          Changes the physical HAT header between the face slot and a matrix strip.
+          Lets the physical HAT header use emoji or a matching animated effect strip.
         </div>
 
         <label class="field-label" for="screensaverModeSelect">HAT Screensaver</label>
         <select class="settings-select" id="screensaverModeSelect">
           <option value="off">Off</option>
           <option value="matrix">Matrix</option>
+          <option value="matrix-binary">Matrix Binary</option>
+          <option value="matrix-blue">Blue Matrix</option>
+          <option value="retro-geometry">Retro Geometry</option>
+          <option value="plasma">Plasma</option>
+          <option value="neon-rain">Neon Rain</option>
         </select>
 
         <label class="field-label" for="idleTimeoutSelect">HAT Idle Timeout</label>
@@ -150,6 +160,12 @@
         <div class="settings-actions">
           <button class="button secondary compact" id="clearKeyBtn" type="button">Clear Key</button>
           <button class="button compact" id="saveSettingsBtn" type="button">Save</button>
+        </div>
+        <div class="settings-actions">
+          <button class="button secondary compact" id="shutdownBtn" type="button">Shutdown Pi</button>
+        </div>
+        <div class="field-hint">
+          Use this to power the device down cleanly from the browser instead of SSH.
         </div>
         <div class="status-text" id="settingsStatus">
           Settings apply to new replies without waiting for the HAT.

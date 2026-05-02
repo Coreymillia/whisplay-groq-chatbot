@@ -20,6 +20,7 @@ import { stopMusicPlayback, isMusicPlaying } from "../device/music-player";
 import type { Status } from "../device/display";
 import { getRuntimeSettings } from "../config/runtime-settings";
 import { STATE_EMOJIS } from "../config/state-emojis";
+import { requestSystemShutdown } from "../device/system-control";
 import {
   applySettingsMenuAction,
   buildSettingsMenuItems,
@@ -67,6 +68,7 @@ class ChatFlow implements ChatFlowContext {
   lastAnswerEmoji: string = STATE_EMOJIS.answering;
   lastAnswerImage: string = "";
   private ignoreNextSettingsRelease = false;
+  private shutdownConfirmArmed = false;
 
   constructor(options: { enableCamera?: boolean } = {}) {
     console.log(`[${getCurrentTimeTag()}] ChatBot started.`);
@@ -302,6 +304,7 @@ class ChatFlow implements ChatFlowContext {
     stopMusicPlayback();
     this.endWakeSession();
     this.settingsMenuIndex = 0;
+    this.shutdownConfirmArmed = false;
     this.ignoreNextSettingsRelease = ignoreNextRelease;
     display({
       image: "",
@@ -312,6 +315,7 @@ class ChatFlow implements ChatFlowContext {
   };
 
   closeSettingsMenu = (): void => {
+    this.shutdownConfirmArmed = false;
     this.transitionTo("sleep");
   };
 
@@ -335,18 +339,54 @@ class ChatFlow implements ChatFlowContext {
   moveSettingsSelection = (): void => {
     const items = buildSettingsMenuItems();
     this.settingsMenuIndex = (this.settingsMenuIndex + 1) % items.length;
+    this.shutdownConfirmArmed = false;
     this.renderSettingsMenu();
   };
 
   activateSettingsSelection = (): void => {
     const items = buildSettingsMenuItems();
     const selected = items[this.settingsMenuIndex];
+    if (selected.id === "shutdown") {
+      if (!this.shutdownConfirmArmed) {
+        this.shutdownConfirmArmed = true;
+        this.renderSettingsMenu("Hold again to shut down");
+        return;
+      }
+      this.shutdownConfirmArmed = false;
+      void this.shutdownDevice();
+      return;
+    }
+    this.shutdownConfirmArmed = false;
     const result = applySettingsMenuAction(selected.id);
     if (result.shouldExit) {
       this.closeSettingsMenu();
       return;
     }
     this.renderSettingsMenu(result.message);
+  };
+
+  shutdownDevice = async (): Promise<void> => {
+    const runtimeSettings = getRuntimeSettings();
+    display({
+      status: "shutdown",
+      emoji: "⏻",
+      RGB: "#ff6b00",
+      text: "Powering off...",
+      text_input_enabled: false,
+      rag_icon_visible: false,
+      image_icon_visible: false,
+      image: "",
+      header_mode: runtimeSettings.headerMode,
+      screensaver_mode: runtimeSettings.screensaverMode,
+      idle_timeout_sec: runtimeSettings.idleTimeoutSec,
+    });
+
+    try {
+      await requestSystemShutdown();
+    } catch (error) {
+      console.error("Shutdown request failed:", error);
+      this.renderSettingsMenu("Shutdown failed");
+    }
   };
 
   consumeSettingsReleaseGuard = (): boolean => {

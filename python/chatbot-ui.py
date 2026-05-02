@@ -1,4 +1,5 @@
 from PIL import Image, ImageDraw, ImageFont
+import math
 import os
 import random
 import time
@@ -108,11 +109,22 @@ class RenderThread(threading.Thread):
         self.music_time_font = ImageFont.truetype(self.font_path, 10)
         self.header_matrix_font = ImageFont.truetype(self.font_path, 14)
         self.screensaver_matrix_font = ImageFont.truetype(self.font_path, 16)
+        self.header_effect_height = emoji_font_size + 6
         self.main_text_line_height = self.main_text_font.getmetrics()[0] + self.main_text_font.getmetrics()[1]
         self.text_cache_image = None
         self.current_render_text = ""
         self.pending_auto_scroll_after_hold = False
         self.render_event = threading.Event()
+        self.green_matrix_columns = self.create_rain_columns(10, "01ABCDEF", self.whisplay.LCD_HEIGHT)
+        self.binary_matrix_columns = self.create_rain_columns(7, "01", self.whisplay.LCD_HEIGHT)
+        self.blue_matrix_columns = self.create_rain_columns(8, "01ABCDEF[]{}<>+-*/", self.whisplay.LCD_HEIGHT)
+        self.header_green_matrix_columns = self.create_rain_columns(10, "01ABCDEF", self.header_effect_height)
+        self.header_binary_matrix_columns = self.create_rain_columns(8, "01", self.header_effect_height)
+        self.header_blue_matrix_columns = self.create_rain_columns(8, "01ABCDEF[]{}<>+-*/", self.header_effect_height)
+        self.neon_streams = self.create_neon_streams(4, self.whisplay.LCD_HEIGHT)
+        self.header_neon_streams = self.create_neon_streams(5, self.header_effect_height)
+        self.retro_shapes = [self.create_retro_shape(self.whisplay.LCD_HEIGHT) for _ in range(8)]
+        self.header_retro_shapes = [self.create_retro_shape(self.header_effect_height) for _ in range(4)]
 
     def render_init_screen(self):
         # Display logo on startup
@@ -132,13 +144,12 @@ class RenderThread(threading.Thread):
         if self.should_show_screensaver():
             saver_image = Image.new("RGBA", (self.whisplay.LCD_WIDTH, self.whisplay.LCD_HEIGHT), (0, 0, 0, 255))
             saver_draw = ImageDraw.Draw(saver_image)
-            self.draw_matrix_region(
+            self.render_screensaver_frame(
+                saver_image,
                 saver_draw,
                 self.whisplay.LCD_WIDTH,
                 self.whisplay.LCD_HEIGHT,
-                self.screensaver_matrix_font,
-                self.get_matrix_speed(status, screensaver=True),
-                0,
+                status,
             )
             self.whisplay.draw_image(
                 0,
@@ -229,7 +240,7 @@ class RenderThread(threading.Thread):
             animation_active = self.render_main_text(text_bg_image, text_area_height, text_draw, text, current_scroll_speed)
             self.whisplay.draw_image(0, header_height + progress_bar_height, self.whisplay.LCD_WIDTH, text_area_height, ImageUtils.image_to_rgb565(text_bg_image, self.whisplay.LCD_WIDTH, text_area_height))
 
-            return animation_active or current_header_mode == "matrix"
+            return animation_active or current_header_mode != "emoji"
 
         
 
@@ -344,7 +355,7 @@ class RenderThread(threading.Thread):
                 
     def should_show_screensaver(self):
         return (
-            current_screensaver_mode == "matrix"
+            current_screensaver_mode != "off"
             and current_idle_timeout_sec > 0
             and current_status == "idle"
             and not current_image_path
@@ -353,7 +364,7 @@ class RenderThread(threading.Thread):
 
     def get_screensaver_wait_timeout(self):
         if (
-            current_screensaver_mode != "matrix"
+            current_screensaver_mode == "off"
             or current_idle_timeout_sec <= 0
             or current_status != "idle"
             or current_image_path
@@ -379,6 +390,292 @@ class RenderThread(threading.Thread):
             "camera": 1.5,
         }
         return speed_map.get(status or "", 1.2)
+
+    def create_rain_columns(self, spacing, charset, area_height):
+        columns = []
+        for x in range(0, self.whisplay.LCD_WIDTH, spacing):
+            seed_count = max(4, int(area_height / 12))
+            columns.append({
+                "x": x,
+                "chars": [
+                    {
+                        "char": random.choice(charset),
+                        "y": random.uniform(-area_height * 0.2, area_height + 6),
+                        "brightness": random.randint(70, 190),
+                        "speed": random.uniform(1.0, 2.6),
+                    }
+                    for _ in range(random.randint(max(1, seed_count // 2), seed_count))
+                ],
+                "spawn_timer": random.randint(0, 10),
+                "speed_multiplier": random.uniform(0.8, 1.4),
+                "charset": charset,
+                "area_height": area_height,
+            })
+        return columns
+
+    def update_rain_columns(self, columns, spawn_range, speed_range, fade_step=2):
+        for col in columns:
+            if col["spawn_timer"] <= 0:
+                col["chars"].append({
+                    "char": random.choice(col["charset"]),
+                    "y": -12,
+                    "brightness": random.randint(200, 255),
+                    "speed": random.uniform(speed_range[0], speed_range[1]) * col["speed_multiplier"],
+                })
+                col["spawn_timer"] = random.randint(spawn_range[0], spawn_range[1])
+            else:
+                col["spawn_timer"] -= 1
+
+            survivors = []
+            for char in col["chars"]:
+                char["y"] += char["speed"]
+                char["brightness"] = max(0, char["brightness"] - fade_step)
+                if char["y"] <= col["area_height"] + 18 and char["brightness"] > 20:
+                    survivors.append(char)
+            col["chars"] = survivors
+
+    def draw_rain_columns(self, draw, columns, font, theme, y_offset=0, area_height=None):
+        for col in columns:
+            if not col["chars"]:
+                continue
+            head_char = max(col["chars"], key=lambda item: item["y"])
+            for char in sorted(col["chars"], key=lambda item: item["y"]):
+                y = int(char["y"])
+                max_height = area_height if area_height is not None else self.whisplay.LCD_HEIGHT
+                if y < -12 or y > max_height:
+                    continue
+                brightness = char["brightness"]
+                is_head = char is head_char
+                if theme == "blue":
+                    if is_head:
+                        color = (255, 255, 255, 255)
+                    elif brightness > 180:
+                        color = (190, 220, 255, 255)
+                    elif brightness > 120:
+                        color = (40, 110, min(255, brightness + 70), 255)
+                    else:
+                        color = (0, 35, max(40, brightness), 255)
+                else:
+                    if is_head:
+                        color = (220, 255, 220, 255) if theme == "binary" else (180, 255, 200, 255)
+                    elif brightness > 180:
+                        color = (0, 255, 0, 255)
+                    elif brightness > 120:
+                        color = (0, max(120, brightness), 30, 255)
+                    else:
+                        color = (0, max(40, brightness // 2), 0, 255)
+                draw.text((col["x"], y_offset + y), char["char"], font=font, fill=color)
+
+    def create_neon_streams(self, spacing, area_height):
+        streams = []
+        for x in range(0, self.whisplay.LCD_WIDTH, spacing):
+            seed_count = max(4, int(area_height / 14))
+            streams.append({
+                "x": x,
+                "particles": [
+                    {
+                        "y": random.uniform(-2, area_height + 4),
+                        "brightness": random.randint(120, 255),
+                        "speed": random.uniform(0.7, 2.2),
+                        "size": 1 if random.random() < 0.85 else 2,
+                    }
+                    for _ in range(random.randint(max(1, seed_count // 2), seed_count))
+                ],
+                "spawn_timer": random.randint(0, 4),
+                "color_bias": random.choice(["green", "blue", "mixed"]),
+                "area_height": area_height,
+            })
+        return streams
+
+    def update_neon_streams(self, streams, fade_step=2):
+        for stream in streams:
+            if stream["spawn_timer"] <= 0:
+                stream["particles"].append({
+                    "y": random.uniform(-4, -1),
+                    "brightness": random.randint(210, 255),
+                    "speed": random.uniform(0.7, 2.5),
+                    "size": 1 if random.random() < 0.8 else 2,
+                })
+                stream["spawn_timer"] = random.randint(1, 5)
+            else:
+                stream["spawn_timer"] -= 1
+
+            survivors = []
+            for particle in stream["particles"]:
+                particle["y"] += particle["speed"]
+                particle["brightness"] = max(0, particle["brightness"] - fade_step)
+                if particle["y"] <= stream["area_height"] + 6 and particle["brightness"] > 18:
+                    survivors.append(particle)
+            stream["particles"] = survivors
+
+    def draw_neon_streams(self, image, streams, y_offset=0, area_height=None):
+        self.update_neon_streams(streams)
+        max_height = area_height if area_height is not None else self.whisplay.LCD_HEIGHT
+        for stream in streams:
+            for particle in stream["particles"]:
+                x = stream["x"]
+                y = int(particle["y"])
+                if y < 0 or y >= max_height:
+                    continue
+                fade = particle["brightness"] / 255.0
+                if stream["color_bias"] == "blue":
+                    base = (0, 140, 255)
+                elif stream["color_bias"] == "mixed":
+                    base = (0, 255, 180) if random.random() < 0.5 else (0, 140, 255)
+                else:
+                    base = (0, 255, 90)
+                color = (
+                    int(base[0] * fade),
+                    int(base[1] * fade),
+                    int(base[2] * fade),
+                    255,
+                )
+                for dx in range(particle["size"]):
+                    for dy in range(particle["size"]):
+                        nx = x + dx
+                        ny = y_offset + y + dy
+                        if 0 <= nx < self.whisplay.LCD_WIDTH and 0 <= ny < self.whisplay.LCD_HEIGHT:
+                            image.putpixel((nx, ny), color)
+
+    def create_retro_shape(self, area_height):
+        return {
+            "type": random.choice(["circle", "rectangle", "triangle", "line", "polygon"]),
+            "x": random.randint(0, self.whisplay.LCD_WIDTH),
+            "y": random.randint(0, area_height),
+            "size": random.randint(6, 22),
+            "color": random.choice([
+                (255, 0, 255),
+                (0, 255, 255),
+                (255, 255, 0),
+                (255, 128, 0),
+                (128, 0, 255),
+                (0, 255, 128),
+            ]),
+            "angle": random.uniform(0, math.pi * 2),
+            "speed": random.uniform(0.4, 1.6),
+            "rotation_speed": random.uniform(-0.08, 0.08),
+            "direction": random.uniform(0, math.pi * 2),
+            "life": random.randint(100, 260),
+            "max_life": random.randint(100, 260),
+            "pulse_speed": random.uniform(0.04, 0.18),
+            "width": random.randint(8, 22),
+            "height": random.randint(8, 22),
+            "area_height": area_height,
+        }
+
+    def update_retro_shapes(self, shapes, area_height, target_count):
+        shapes[:] = [shape for shape in shapes if shape["life"] > 0]
+        while len(shapes) < target_count:
+            shapes.append(self.create_retro_shape(area_height))
+
+        now = time.time()
+        for shape in shapes:
+            shape["x"] += math.cos(shape["direction"]) * shape["speed"]
+            shape["y"] += math.sin(shape["direction"]) * shape["speed"]
+            shape["angle"] += shape["rotation_speed"]
+            if shape["x"] < 0 or shape["x"] > self.whisplay.LCD_WIDTH:
+                shape["direction"] = math.pi - shape["direction"]
+                shape["x"] = max(0, min(self.whisplay.LCD_WIDTH, shape["x"]))
+            if shape["y"] < 0 or shape["y"] > area_height:
+                shape["direction"] = -shape["direction"]
+                shape["y"] = max(0, min(area_height, shape["y"]))
+            pulse = 1.0 + 0.3 * math.sin(now * 4 * shape["pulse_speed"] * 10)
+            shape["current_size"] = shape["size"] * pulse
+            shape["life"] -= 1
+
+    def draw_retro_geometry(self, draw, shapes, width, area_height, y_offset=0):
+        self.update_retro_shapes(shapes, area_height, 8 if area_height > 80 else 4)
+        t = time.time()
+        if int(t * 2) % 5 == 0:
+            for x in range(0, width, 20):
+                draw.line([(x, y_offset), (x, y_offset + area_height)], fill=(28, 28, 42, 255), width=1)
+            for y in range(0, area_height, 20):
+                draw.line([(0, y_offset + y), (width, y_offset + y)], fill=(28, 28, 42, 255), width=1)
+
+        for shape in shapes:
+            x = int(shape["x"])
+            y = int(shape["y"]) + y_offset
+            size = int(shape.get("current_size", shape["size"]))
+            age_factor = max(0.2, shape["life"] / shape["max_life"])
+            color = tuple(int(channel * age_factor) for channel in shape["color"]) + (255,)
+            angle = shape["angle"]
+            if shape["type"] == "circle":
+                draw.ellipse([x - size // 2, y - size // 2, x + size // 2, y + size // 2], outline=color, width=2)
+            elif shape["type"] == "rectangle":
+                draw.rectangle([x - shape["width"] // 2, y - shape["height"] // 2, x + shape["width"] // 2, y + shape["height"] // 2], outline=color, width=2)
+            elif shape["type"] == "line":
+                x1 = x + int(size * math.cos(angle))
+                y1 = y + int(size * math.sin(angle))
+                x2 = x - int(size * math.cos(angle))
+                y2 = y - int(size * math.sin(angle))
+                draw.line([(x1, y1), (x2, y2)], fill=color, width=2)
+            else:
+                sides = 3 if shape["type"] == "triangle" else 5
+                points = []
+                for i in range(sides):
+                    px = x + int(size * math.cos(angle + i * 2 * math.pi / sides))
+                    py = y + int(size * math.sin(angle + i * 2 * math.pi / sides))
+                    points.append((px, py))
+                draw.polygon(points, outline=color, width=2)
+
+    def draw_plasma(self, draw, width, height, y_offset=0):
+        t = time.time()
+        block_size = 3 if height < 70 else 4
+        cx = width / 2
+        cy = height / 2
+        for y in range(0, height, block_size):
+            for x in range(0, width, block_size):
+                value = 0
+                value += math.sin((x + t * 35) / 16.0)
+                value += math.sin((y + t * 28) / 11.0)
+                value += math.sin((x + y + t * 24) / 18.0)
+                dist = math.sqrt((x - cx) ** 2 + (y - cy) ** 2)
+                value += math.sin(dist / 11.0 + t * 7.5)
+                value = (value + 4) / 8
+                r = int(128 + 127 * math.sin(value * math.pi * 2))
+                g = int(128 + 127 * math.sin(value * math.pi * 2 + math.pi / 3))
+                b = int(128 + 127 * math.sin(value * math.pi * 2 + 2 * math.pi / 3))
+                draw.rectangle(
+                    [x, y_offset + y, min(width, x + block_size), min(y_offset + height, y_offset + y + block_size)],
+                    fill=(r, g, b, 255),
+                )
+
+    def render_visual_mode(self, mode, image, draw, width, height, status, y_offset=0, header=False):
+        if mode == "matrix":
+            columns = self.header_green_matrix_columns if header else self.green_matrix_columns
+            font = self.header_matrix_font if header else self.screensaver_matrix_font
+            self.update_rain_columns(columns, (2, 8) if header else (1, 4), (1.0, 3.0) if header else (1.4, 3.8), 2 if header else 1)
+            self.draw_rain_columns(draw, columns, font, "green", y_offset, height)
+        elif mode == "matrix-binary":
+            columns = self.header_binary_matrix_columns if header else self.binary_matrix_columns
+            font = self.header_matrix_font if header else self.screensaver_matrix_font
+            self.update_rain_columns(columns, (1, 6) if header else (1, 4), (1.0, 2.8) if header else (1.3, 3.4), 2 if header else 1)
+            self.draw_rain_columns(draw, columns, font, "binary", y_offset, height)
+        elif mode == "matrix-blue":
+            columns = self.header_blue_matrix_columns if header else self.blue_matrix_columns
+            font = self.header_matrix_font if header else self.screensaver_matrix_font
+            self.update_rain_columns(columns, (2, 8) if header else (1, 4), (0.9, 2.6) if header else (1.2, 3.2), 2 if header else 1)
+            self.draw_rain_columns(draw, columns, font, "blue", y_offset, height)
+        elif mode == "retro-geometry":
+            shapes = self.header_retro_shapes if header else self.retro_shapes
+            self.draw_retro_geometry(draw, shapes, width, height, y_offset)
+        elif mode == "plasma":
+            self.draw_plasma(draw, width, height, y_offset)
+        elif mode == "neon-rain":
+            streams = self.header_neon_streams if header else self.neon_streams
+            self.draw_neon_streams(image, streams, y_offset, height)
+        else:
+            self.draw_matrix_region(
+                draw,
+                width,
+                height,
+                self.header_matrix_font if header else self.screensaver_matrix_font,
+                self.get_matrix_speed(status, screensaver=True),
+                y_offset,
+            )
+
+    def render_screensaver_frame(self, image, draw, width, height, status):
+        self.render_visual_mode(current_screensaver_mode, image, draw, width, height, status)
 
     def draw_matrix_region(self, draw, width, height, font, speed, y_offset):
         charset = "01ABCDEF"
@@ -423,14 +720,16 @@ class RenderThread(threading.Thread):
         TextUtils.draw_mixed_text(draw, image, current_status, status_font, (whisplay.CornerHeight, 0))
 
         header_body_y = status_font_size + 8
-        if current_header_mode == "matrix":
-            self.draw_matrix_region(
+        if current_header_mode != "emoji":
+            self.render_visual_mode(
+                current_header_mode,
+                image,
                 draw,
                 image_width,
-                emoji_font_size + 6,
-                self.header_matrix_font,
-                self.get_matrix_speed(current_status),
+                self.header_effect_height,
+                current_status,
                 header_body_y,
+                True,
             )
         else:
             emoji_bbox = emoji_font.getbbox(current_emoji)

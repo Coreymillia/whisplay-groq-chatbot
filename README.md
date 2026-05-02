@@ -86,7 +86,7 @@ Why this matters:
 
 ## Settings UI notes
 
-The browser simulator includes a settings panel for the Groq key, preset personalities, freeform personality editing, voice mode, record time, UI theme, HAT header mode, HAT screensaver mode, and HAT idle timeout.
+The browser simulator includes a settings panel for the Groq key, preset personalities, freeform personality editing, voice mode, record time, UI theme, HAT header mode, HAT screensaver mode, HAT idle timeout, and a shutdown button for clean power-off without SSH.
 
 ## HAT settings controls
 
@@ -107,6 +107,7 @@ Current HAT settings items:
 - Header mode
 - Screensaver mode
 - Idle timeout
+- Shutdown
 - Exit
 
 The browser UI and HAT menu share the same stored settings.
@@ -121,22 +122,38 @@ This is currently a display-side refresh of the last answer so it is easier to c
 
 This fork also now includes a **first-pass face/emoji state system** for the header area on the HAT and browser simulator. It is still basic for now, but it gives the device a clearer state-based face while we work toward a better custom face system later.
 
-## Matrix header and screensaver
+## Header effects and screensavers
 
 The HAT now supports a switchable **header mode**:
 
 - **Emoji** keeps the current face/emoji header
-- **Matrix** replaces that header area with a lightweight animated matrix strip
+- **Matrix**
+- **Matrix Binary**
+- **Blue Matrix**
+- **Retro Geometry**
+- **Plasma**
+- **Neon Rain**
 
-The matrix header changes speed depending on what the device is doing, so it stays calmer while idle and speeds up more while listening, thinking, or answering.
+The animated headers run only on the physical HAT. The matrix-family headers still change speed depending on what the device is doing, so they stay calmer while idle and speed up more while listening, thinking, or answering.
 
-There is also now a **full-screen matrix screensaver** for the HAT:
+There is also now a set of **full-screen HAT screensavers**:
 
 - Enable it from the browser settings or HAT settings menu
 - Set the **Idle timeout** to choose how long the device waits before the saver takes over
 - Set the timeout to **Off** in the browser UI or use the saver setting on the HAT if you do not want the full-screen effect
+- Current saver choices:
+  - **Matrix**
+  - **Matrix Binary**
+  - **Blue Matrix**
+  - **Retro Geometry**
+  - **Plasma**
+  - **Neon Rain**
 
-These visuals are **HAT-only**. The browser UI exposes the settings, but it does not try to mirror the matrix animation itself.
+For fresh installs with no saved runtime settings yet, **Retro Geometry** is now the default HAT screensaver.
+
+The rain-style effects were also tuned to use more of the screen and keep the brighter stream heads moving down the display instead of bunching near the top.
+
+These visuals are **HAT-only**. The browser UI exposes the settings, but it does not try to mirror the HAT animation itself.
 
 ## Preset personalities
 

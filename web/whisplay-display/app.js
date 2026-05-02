@@ -27,6 +27,7 @@ const screensaverModeSelect = document.getElementById("screensaverModeSelect");
 const idleTimeoutSelect = document.getElementById("idleTimeoutSelect");
 const saveSettingsBtn = document.getElementById("saveSettingsBtn");
 const clearKeyBtn = document.getElementById("clearKeyBtn");
+const shutdownBtn = document.getElementById("shutdownBtn");
 const settingsStatus = document.getElementById("settingsStatus");
 const dim = document.getElementById("dim");
 const imageLayer = document.getElementById("imageLayer");
@@ -52,7 +53,7 @@ let recordTimeoutOptions = [];
 let idleTimeoutOptions = [];
 
 const DEFAULT_HEADER_MODE = "emoji";
-const DEFAULT_SCREENSAVER_MODE = "off";
+const DEFAULT_SCREENSAVER_MODE = "retro-geometry";
 const DEFAULT_IDLE_TIMEOUT_SEC = 120;
 
 function setIconVisible(iconEl, visible) {
@@ -488,6 +489,55 @@ async function saveSettings({ clearGroqApiKey = false } = {}) {
   }
 }
 
+async function requestShutdown() {
+  if (!settingsLoaded) {
+    setSettingsStatus("Settings are still loading.", true);
+    return;
+  }
+
+  const confirmed = window.confirm(
+    "Shut the Pi down now? Wait for the device to fully power off before unplugging it.",
+  );
+  if (!confirmed) {
+    return;
+  }
+
+  setSettingsStatus("Requesting shutdown...");
+  if (shutdownBtn) {
+    shutdownBtn.disabled = true;
+  }
+
+  try {
+    const response = await fetch("/api/system/shutdown", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || payload.ok === false) {
+      throw new Error(payload.error || `HTTP ${response.status}`);
+    }
+    setSettingsStatus("Shutdown requested. The Pi should power off shortly.");
+  } catch (error) {
+    console.error("Failed to request shutdown:", error);
+    const message = error instanceof Error ? error.message : String(error);
+    if (error instanceof TypeError || /Failed to fetch/i.test(message)) {
+      setSettingsStatus(
+        "Shutdown may already be in progress. The browser connection dropped while the Pi was powering off.",
+      );
+      return;
+    }
+    setSettingsStatus(
+      `Shutdown failed: ${message}`,
+      true,
+    );
+    if (shutdownBtn) {
+      shutdownBtn.disabled = false;
+    }
+  }
+}
+
 connectWebSocket();
 loadSettings();
 requestAnimationFrame(animateScroll);
@@ -560,6 +610,12 @@ window.addEventListener("pointerup", (event) => {
 if (saveSettingsBtn) {
   saveSettingsBtn.addEventListener("click", () => {
     saveSettings();
+  });
+}
+
+if (shutdownBtn) {
+  shutdownBtn.addEventListener("click", () => {
+    requestShutdown();
   });
 }
 

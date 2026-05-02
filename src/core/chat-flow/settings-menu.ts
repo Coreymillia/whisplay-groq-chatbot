@@ -29,6 +29,7 @@ export type SettingsMenuItemId =
   | "header-mode"
   | "screensaver-mode"
   | "idle-timeout"
+  | "shutdown"
   | "exit";
 
 interface SettingsMenuItem {
@@ -64,11 +65,41 @@ function getCompactThemeLabel(value: string): string {
 }
 
 function getCompactHeaderLabel(value: string): string {
-  return value === "matrix" ? "Matrix" : "Emoji";
+  switch (value) {
+    case "matrix-binary":
+      return "Binary";
+    case "matrix-blue":
+      return "Blue";
+    case "retro-geometry":
+      return "Retro";
+    case "plasma":
+      return "Plasma";
+    case "neon-rain":
+      return "Neon";
+    case "matrix":
+      return "Matrix";
+    default:
+      return "Emoji";
+  }
 }
 
 function getCompactScreensaverLabel(value: string): string {
-  return value === "matrix" ? "Matrix" : "Off";
+  switch (value) {
+    case "matrix-binary":
+      return "Binary";
+    case "matrix-blue":
+      return "Blue";
+    case "retro-geometry":
+      return "Retro";
+    case "plasma":
+      return "Plasma";
+    case "neon-rain":
+      return "Neon";
+    case "matrix":
+      return "Matrix";
+    default:
+      return "Off";
+  }
 }
 
 export function buildSettingsMenuItems(): SettingsMenuItem[] {
@@ -108,6 +139,11 @@ export function buildSettingsMenuItems(): SettingsMenuItem[] {
       id: "idle-timeout",
       label: "Idle",
       value: getIdleTimeoutLabel(settings.idleTimeoutSec),
+    },
+    {
+      id: "shutdown",
+      label: "Shutdown",
+      value: "",
     },
     {
       id: "exit",
@@ -248,6 +284,11 @@ export function applySettingsMenuAction(id: SettingsMenuItemId): {
         shouldExit: false,
       };
     }
+    case "shutdown":
+      return {
+        message: "Hold again to shut down",
+        shouldExit: false,
+      };
     case "exit":
       return {
         message: "Closing",

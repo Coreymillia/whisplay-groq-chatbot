@@ -4,8 +4,22 @@ import { getCurrentPersonalityPresetId } from "./personality-presets";
 
 export type VoiceMode = "text-only" | "speak-on-demand" | "voice-chat";
 export type UITheme = "default" | "matrix" | "plasma" | "amber-terminal";
-export type HeaderMode = "emoji" | "matrix";
-export type ScreensaverMode = "off" | "matrix";
+export type HeaderMode =
+  | "emoji"
+  | "matrix"
+  | "matrix-binary"
+  | "matrix-blue"
+  | "retro-geometry"
+  | "plasma"
+  | "neon-rain";
+export type ScreensaverMode =
+  | "off"
+  | "matrix"
+  | "matrix-binary"
+  | "matrix-blue"
+  | "retro-geometry"
+  | "plasma"
+  | "neon-rain";
 
 export interface RuntimeSettings {
   groqApiKey: string;
@@ -40,7 +54,7 @@ const DEFAULT_VOICE_MODE: VoiceMode = "text-only";
 const DEFAULT_UI_THEME: UITheme = "default";
 const DEFAULT_MANUAL_RECORD_MAX_SEC = 15;
 const DEFAULT_HEADER_MODE: HeaderMode = "emoji";
-const DEFAULT_SCREENSAVER_MODE: ScreensaverMode = "off";
+const DEFAULT_SCREENSAVER_MODE: ScreensaverMode = "retro-geometry";
 const DEFAULT_IDLE_TIMEOUT_SEC = 120;
 export const RECORD_TIMEOUT_OPTIONS = [10, 15, 20, 30, 45, 60];
 export const IDLE_TIMEOUT_OPTIONS = [0, 30, 60, 120, 300, 600];
@@ -55,8 +69,24 @@ export const UI_THEMES: UITheme[] = [
   "plasma",
   "amber-terminal",
 ];
-export const HEADER_MODES: HeaderMode[] = ["emoji", "matrix"];
-export const SCREENSAVER_MODES: ScreensaverMode[] = ["off", "matrix"];
+export const HEADER_MODES: HeaderMode[] = [
+  "emoji",
+  "matrix",
+  "matrix-binary",
+  "matrix-blue",
+  "retro-geometry",
+  "plasma",
+  "neon-rain",
+];
+export const SCREENSAVER_MODES: ScreensaverMode[] = [
+  "off",
+  "matrix",
+  "matrix-binary",
+  "matrix-blue",
+  "retro-geometry",
+  "plasma",
+  "neon-rain",
+];
 const VALID_VOICE_MODES = new Set<VoiceMode>([
   "text-only",
   "speak-on-demand",
@@ -68,8 +98,24 @@ const VALID_UI_THEMES = new Set<UITheme>([
   "plasma",
   "amber-terminal",
 ]);
-const VALID_HEADER_MODES = new Set<HeaderMode>(["emoji", "matrix"]);
-const VALID_SCREENSAVER_MODES = new Set<ScreensaverMode>(["off", "matrix"]);
+const VALID_HEADER_MODES = new Set<HeaderMode>([
+  "emoji",
+  "matrix",
+  "matrix-binary",
+  "matrix-blue",
+  "retro-geometry",
+  "plasma",
+  "neon-rain",
+]);
+const VALID_SCREENSAVER_MODES = new Set<ScreensaverMode>([
+  "off",
+  "matrix",
+  "matrix-binary",
+  "matrix-blue",
+  "retro-geometry",
+  "plasma",
+  "neon-rain",
+]);
 
 function normalizeVoiceMode(value: unknown): VoiceMode {
   if (typeof value === "string" && VALID_VOICE_MODES.has(value as VoiceMode)) {
@@ -237,6 +283,16 @@ export function getUIThemeLabel(value: string): string {
 
 export function getHeaderModeLabel(value: string): string {
   switch (value) {
+    case "matrix-binary":
+      return "Binary Matrix";
+    case "matrix-blue":
+      return "Blue Matrix";
+    case "retro-geometry":
+      return "Retro Geometry";
+    case "plasma":
+      return "Plasma";
+    case "neon-rain":
+      return "Neon Rain";
     case "matrix":
       return "Matrix";
     case "emoji":
@@ -247,6 +303,16 @@ export function getHeaderModeLabel(value: string): string {
 
 export function getScreensaverModeLabel(value: string): string {
   switch (value) {
+    case "matrix-binary":
+      return "Binary Matrix";
+    case "matrix-blue":
+      return "Blue Matrix";
+    case "retro-geometry":
+      return "Retro Geometry";
+    case "plasma":
+      return "Plasma";
+    case "neon-rain":
+      return "Neon Rain";
     case "matrix":
       return "Matrix";
     case "off":

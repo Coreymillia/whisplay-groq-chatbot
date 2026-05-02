@@ -25,6 +25,7 @@ import {
   type WebAudioBridgeServer,
 } from "./web-audio-bridge";
 import type { Status } from "./display";
+import { requestSystemShutdown } from "./system-control";
 
 type ButtonHandler = () => void;
 
@@ -37,6 +38,52 @@ interface WebDisplayOptions {
   onButtonRelease: ButtonHandler;
   onTextInput?: TextInputHandler;
   onSettingsSaved?: (settings: RuntimeSettings) => void;
+}
+
+function normalizeBodyKey(key: string): string {
+  return key.replace(/[^a-z0-9]/gi, "").toLowerCase();
+}
+
+function normalizeRequestBody(body: unknown): Record<string, unknown> {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return {};
+  }
+  return Object.entries(body as Record<string, unknown>).reduce<Record<string, unknown>>(
+    (result, [key, value]) => {
+      result[normalizeBodyKey(key)] = value;
+      return result;
+    },
+    {},
+  );
+}
+
+function getBodyString(
+  body: Record<string, unknown>,
+  key: string,
+): string | undefined {
+  const value = body[normalizeBodyKey(key)];
+  return typeof value === "string" ? value : undefined;
+}
+
+function getBodyBoolean(body: Record<string, unknown>, key: string): boolean {
+  return body[normalizeBodyKey(key)] === true;
+}
+
+function getBodyNumber(
+  body: Record<string, unknown>,
+  key: string,
+): number | undefined {
+  const value = body[normalizeBodyKey(key)];
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string" && value.trim().length > 0) {
+    const numeric = Number(value);
+    if (Number.isFinite(numeric)) {
+      return numeric;
+    }
+  }
+  return undefined;
 }
 
 export class WebDisplayServer implements WebAudioBridgeServer {
@@ -204,33 +251,17 @@ export class WebDisplayServer implements WebAudioBridgeServer {
     });
 
     this.router.post("/api/settings", (ctx) => {
-      const body = ((ctx.request as any).body || {}) as Record<string, unknown>;
+      const body = normalizeRequestBody((ctx.request as any).body);
       const settings = saveRuntimeSettings({
-        groqApiKey:
-          typeof body.groqApiKey === "string" ? body.groqApiKey : undefined,
-        clearGroqApiKey: body.clearGroqApiKey === true,
-        personalityPrompt:
-          typeof body.personalityPrompt === "string"
-            ? body.personalityPrompt
-            : undefined,
-        voiceMode:
-          typeof body.voiceMode === "string" ? body.voiceMode : undefined,
-        uiTheme:
-          typeof body.uiTheme === "string" ? body.uiTheme : undefined,
-        manualRecordMaxSec:
-          typeof body.manualRecordMaxSec === "number"
-            ? body.manualRecordMaxSec
-            : undefined,
-        headerMode:
-          typeof body.headerMode === "string" ? body.headerMode : undefined,
-        screensaverMode:
-          typeof body.screensaverMode === "string"
-            ? body.screensaverMode
-            : undefined,
-        idleTimeoutSec:
-          typeof body.idleTimeoutSec === "number"
-            ? body.idleTimeoutSec
-            : undefined,
+        groqApiKey: getBodyString(body, "groqApiKey"),
+        clearGroqApiKey: getBodyBoolean(body, "clearGroqApiKey"),
+        personalityPrompt: getBodyString(body, "personalityPrompt"),
+        voiceMode: getBodyString(body, "voiceMode"),
+        uiTheme: getBodyString(body, "uiTheme"),
+        manualRecordMaxSec: getBodyNumber(body, "manualRecordMaxSec"),
+        headerMode: getBodyString(body, "headerMode"),
+        screensaverMode: getBodyString(body, "screensaverMode"),
+        idleTimeoutSec: getBodyNumber(body, "idleTimeoutSec"),
       });
       this.onSettingsSaved(settings);
 
@@ -251,6 +282,20 @@ export class WebDisplayServer implements WebAudioBridgeServer {
         recordTimeoutOptions: RECORD_TIMEOUT_OPTIONS,
         idleTimeoutOptions: IDLE_TIMEOUT_OPTIONS,
       };
+    });
+
+    this.router.post("/api/system/shutdown", async (ctx) => {
+      try {
+        await requestSystemShutdown();
+        ctx.body = { ok: true };
+      } catch (error) {
+        ctx.status = 500;
+        ctx.body = {
+          ok: false,
+          error:
+            error instanceof Error ? error.message : "Shutdown request failed",
+        };
+      }
     });
 
   }
