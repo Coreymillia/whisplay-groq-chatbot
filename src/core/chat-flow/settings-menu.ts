@@ -3,8 +3,14 @@ import {
   getNextPersonalityPreset,
 } from "../../config/personality-presets";
 import {
+  HEADER_MODES,
+  IDLE_TIMEOUT_OPTIONS,
+  getHeaderModeLabel,
+  getIdleTimeoutLabel,
   getRuntimeSettings,
   RECORD_TIMEOUT_OPTIONS,
+  SCREENSAVER_MODES,
+  getScreensaverModeLabel,
   saveRuntimeSettings,
   VOICE_MODES,
   UI_THEMES,
@@ -20,6 +26,9 @@ export type SettingsMenuItemId =
   | "record-time"
   | "voice-mode"
   | "ui-theme"
+  | "header-mode"
+  | "screensaver-mode"
+  | "idle-timeout"
   | "exit";
 
 interface SettingsMenuItem {
@@ -54,6 +63,14 @@ function getCompactThemeLabel(value: string): string {
   }
 }
 
+function getCompactHeaderLabel(value: string): string {
+  return value === "matrix" ? "Matrix" : "Emoji";
+}
+
+function getCompactScreensaverLabel(value: string): string {
+  return value === "matrix" ? "Matrix" : "Off";
+}
+
 export function buildSettingsMenuItems(): SettingsMenuItem[] {
   const settings = getRuntimeSettings();
   return [
@@ -76,6 +93,21 @@ export function buildSettingsMenuItems(): SettingsMenuItem[] {
       id: "ui-theme",
       label: "Theme",
       value: getCompactThemeLabel(settings.uiTheme),
+    },
+    {
+      id: "header-mode",
+      label: "Header",
+      value: getCompactHeaderLabel(settings.headerMode),
+    },
+    {
+      id: "screensaver-mode",
+      label: "Saver",
+      value: getCompactScreensaverLabel(settings.screensaverMode),
+    },
+    {
+      id: "idle-timeout",
+      label: "Idle",
+      value: getIdleTimeoutLabel(settings.idleTimeoutSec),
     },
     {
       id: "exit",
@@ -127,6 +159,32 @@ function getNextUITheme(current: string): string {
   return UI_THEMES[(currentIndex + 1) % UI_THEMES.length];
 }
 
+function getNextHeaderMode(current: string): string {
+  const currentIndex = HEADER_MODES.findIndex((mode) => mode === current);
+  if (currentIndex === -1) {
+    return HEADER_MODES[0];
+  }
+  return HEADER_MODES[(currentIndex + 1) % HEADER_MODES.length];
+}
+
+function getNextScreensaverMode(current: string): string {
+  const currentIndex = SCREENSAVER_MODES.findIndex((mode) => mode === current);
+  if (currentIndex === -1) {
+    return SCREENSAVER_MODES[0];
+  }
+  return SCREENSAVER_MODES[(currentIndex + 1) % SCREENSAVER_MODES.length];
+}
+
+function getNextIdleTimeout(current: number): number {
+  const currentIndex = IDLE_TIMEOUT_OPTIONS.findIndex((value) => value === current);
+  if (currentIndex === -1) {
+    return IDLE_TIMEOUT_OPTIONS[0];
+  }
+  return IDLE_TIMEOUT_OPTIONS[
+    (currentIndex + 1) % IDLE_TIMEOUT_OPTIONS.length
+  ];
+}
+
 export function applySettingsMenuAction(id: SettingsMenuItemId): {
   message: string;
   shouldExit: boolean;
@@ -163,6 +221,30 @@ export function applySettingsMenuAction(id: SettingsMenuItemId): {
       saveRuntimeSettings({ uiTheme: nextValue });
       return {
         message: `Theme ${getCompactThemeLabel(nextValue)}`,
+        shouldExit: false,
+      };
+    }
+    case "header-mode": {
+      const nextValue = getNextHeaderMode(settings.headerMode);
+      saveRuntimeSettings({ headerMode: nextValue });
+      return {
+        message: `Header ${getHeaderModeLabel(nextValue)}`,
+        shouldExit: false,
+      };
+    }
+    case "screensaver-mode": {
+      const nextValue = getNextScreensaverMode(settings.screensaverMode);
+      saveRuntimeSettings({ screensaverMode: nextValue });
+      return {
+        message: `Saver ${getScreensaverModeLabel(nextValue)}`,
+        shouldExit: false,
+      };
+    }
+    case "idle-timeout": {
+      const nextValue = getNextIdleTimeout(settings.idleTimeoutSec);
+      saveRuntimeSettings({ idleTimeoutSec: nextValue });
+      return {
+        message: `Idle ${getIdleTimeoutLabel(nextValue)}`,
         shouldExit: false,
       };
     }

@@ -2,6 +2,7 @@ import { exec } from "child_process";
 import { resolve } from "path";
 import { Socket } from "net";
 import { getCurrentTimeTag } from "../utils";
+import { getRuntimeSettings } from "../config/runtime-settings";
 import { WebDisplayServer } from "./web-display";
 import { webAudioBridge } from "./web-audio-bridge";
 import dotEnv from "dotenv";
@@ -32,10 +33,14 @@ export interface Status {
   image_icon_visible: boolean;
   music_progress: number | undefined;
   music_duration_ms: number | undefined;
+  header_mode: string;
+  screensaver_mode: string;
+  idle_timeout_sec: number;
 }
 
-export class WhisplayDisplay {
-  private currentStatus: Status = {
+function getInitialStatus(): Status {
+  const settings = getRuntimeSettings();
+  return {
     status: "starting",
     emoji: "😊",
     text: "",
@@ -55,7 +60,14 @@ export class WhisplayDisplay {
     image_icon_visible: false,
     music_progress: undefined,
     music_duration_ms: undefined,
+    header_mode: settings.headerMode,
+    screensaver_mode: settings.screensaverMode,
+    idle_timeout_sec: settings.idleTimeoutSec,
   };
+}
+
+export class WhisplayDisplay {
+  private currentStatus: Status = getInitialStatus();
 
   private client = null as Socket | null;
   private buttonPressedCallback: () => void = () => {};
@@ -94,6 +106,13 @@ export class WhisplayDisplay {
         onButtonPress: () => this.handleButtonPressedEvent(),
         onButtonRelease: () => this.handleButtonReleasedEvent(),
         onTextInput: (text: string) => this.handleTextInputEvent(text),
+        onSettingsSaved: (settings) => {
+          void this.display({
+            header_mode: settings.headerMode,
+            screensaver_mode: settings.screensaverMode,
+            idle_timeout_sec: settings.idleTimeoutSec,
+          });
+        },
       });
       this.webDisplay.updateStatus(this.currentStatus);
     }
@@ -383,6 +402,9 @@ export class WhisplayDisplay {
       image_icon_visible,
       music_progress,
       music_duration_ms,
+      header_mode,
+      screensaver_mode,
+      idle_timeout_sec,
     } = {
       ...this.currentStatus,
       ...normalizedStatus,
@@ -412,6 +434,9 @@ export class WhisplayDisplay {
     this.currentStatus.image_icon_visible = image_icon_visible;
     this.currentStatus.music_progress = music_progress;
     this.currentStatus.music_duration_ms = music_duration_ms;
+    this.currentStatus.header_mode = header_mode;
+    this.currentStatus.screensaver_mode = screensaver_mode;
+    this.currentStatus.idle_timeout_sec = idle_timeout_sec;
     
     const changedValuesObj = Object.fromEntries(changedValues);
     changedValuesObj.brightness = 100;

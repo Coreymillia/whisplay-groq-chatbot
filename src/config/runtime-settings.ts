@@ -4,6 +4,8 @@ import { getCurrentPersonalityPresetId } from "./personality-presets";
 
 export type VoiceMode = "text-only" | "speak-on-demand" | "voice-chat";
 export type UITheme = "default" | "matrix" | "plasma" | "amber-terminal";
+export type HeaderMode = "emoji" | "matrix";
+export type ScreensaverMode = "off" | "matrix";
 
 export interface RuntimeSettings {
   groqApiKey: string;
@@ -11,6 +13,9 @@ export interface RuntimeSettings {
   voiceMode: VoiceMode;
   uiTheme: UITheme;
   manualRecordMaxSec: number;
+  headerMode: HeaderMode;
+  screensaverMode: ScreensaverMode;
+  idleTimeoutSec: number;
 }
 
 export interface RuntimeSettingsUpdate {
@@ -20,6 +25,9 @@ export interface RuntimeSettingsUpdate {
   voiceMode?: string;
   uiTheme?: string;
   manualRecordMaxSec?: number;
+  headerMode?: string;
+  screensaverMode?: string;
+  idleTimeoutSec?: number;
 }
 
 const SETTINGS_PATH = path.resolve(
@@ -31,7 +39,11 @@ const SETTINGS_PATH = path.resolve(
 const DEFAULT_VOICE_MODE: VoiceMode = "text-only";
 const DEFAULT_UI_THEME: UITheme = "default";
 const DEFAULT_MANUAL_RECORD_MAX_SEC = 15;
+const DEFAULT_HEADER_MODE: HeaderMode = "emoji";
+const DEFAULT_SCREENSAVER_MODE: ScreensaverMode = "off";
+const DEFAULT_IDLE_TIMEOUT_SEC = 120;
 export const RECORD_TIMEOUT_OPTIONS = [10, 15, 20, 30, 45, 60];
+export const IDLE_TIMEOUT_OPTIONS = [0, 30, 60, 120, 300, 600];
 export const VOICE_MODES: VoiceMode[] = [
   "text-only",
   "speak-on-demand",
@@ -43,6 +55,8 @@ export const UI_THEMES: UITheme[] = [
   "plasma",
   "amber-terminal",
 ];
+export const HEADER_MODES: HeaderMode[] = ["emoji", "matrix"];
+export const SCREENSAVER_MODES: ScreensaverMode[] = ["off", "matrix"];
 const VALID_VOICE_MODES = new Set<VoiceMode>([
   "text-only",
   "speak-on-demand",
@@ -54,6 +68,8 @@ const VALID_UI_THEMES = new Set<UITheme>([
   "plasma",
   "amber-terminal",
 ]);
+const VALID_HEADER_MODES = new Set<HeaderMode>(["emoji", "matrix"]);
+const VALID_SCREENSAVER_MODES = new Set<ScreensaverMode>(["off", "matrix"]);
 
 function normalizeVoiceMode(value: unknown): VoiceMode {
   if (typeof value === "string" && VALID_VOICE_MODES.has(value as VoiceMode)) {
@@ -69,12 +85,41 @@ function normalizeUITheme(value: unknown): UITheme {
   return DEFAULT_UI_THEME;
 }
 
+function normalizeHeaderMode(value: unknown): HeaderMode {
+  if (
+    typeof value === "string" &&
+    VALID_HEADER_MODES.has(value as HeaderMode)
+  ) {
+    return value as HeaderMode;
+  }
+  return DEFAULT_HEADER_MODE;
+}
+
+function normalizeScreensaverMode(value: unknown): ScreensaverMode {
+  if (
+    typeof value === "string" &&
+    VALID_SCREENSAVER_MODES.has(value as ScreensaverMode)
+  ) {
+    return value as ScreensaverMode;
+  }
+  return DEFAULT_SCREENSAVER_MODE;
+}
+
 function normalizeManualRecordMaxSec(value: unknown): number {
   const numeric = typeof value === "number" ? value : parseInt(String(value), 10);
   if (!Number.isFinite(numeric)) {
     return DEFAULT_MANUAL_RECORD_MAX_SEC;
   }
   return Math.max(5, Math.min(120, Math.round(numeric)));
+}
+
+function normalizeIdleTimeoutSec(value: unknown): number {
+  const numeric =
+    typeof value === "number" ? value : parseInt(String(value), 10);
+  if (!Number.isFinite(numeric)) {
+    return DEFAULT_IDLE_TIMEOUT_SEC;
+  }
+  return Math.max(0, Math.min(3600, Math.round(numeric)));
 }
 
 function sanitizeSettings(input: Partial<RuntimeSettings> | null | undefined): RuntimeSettings {
@@ -88,6 +133,9 @@ function sanitizeSettings(input: Partial<RuntimeSettings> | null | undefined): R
     voiceMode: normalizeVoiceMode(input?.voiceMode),
     uiTheme: normalizeUITheme(input?.uiTheme),
     manualRecordMaxSec: normalizeManualRecordMaxSec(input?.manualRecordMaxSec),
+    headerMode: normalizeHeaderMode(input?.headerMode),
+    screensaverMode: normalizeScreensaverMode(input?.screensaverMode),
+    idleTimeoutSec: normalizeIdleTimeoutSec(input?.idleTimeoutSec),
   };
 }
 
@@ -145,6 +193,18 @@ export function saveRuntimeSettings(
     );
   }
 
+  if (typeof update.headerMode === "string") {
+    next.headerMode = normalizeHeaderMode(update.headerMode);
+  }
+
+  if (typeof update.screensaverMode === "string") {
+    next.screensaverMode = normalizeScreensaverMode(update.screensaverMode);
+  }
+
+  if (typeof update.idleTimeoutSec === "number") {
+    next.idleTimeoutSec = normalizeIdleTimeoutSec(update.idleTimeoutSec);
+  }
+
   writeSettingsFile(next);
   return next;
 }
@@ -175,6 +235,30 @@ export function getUIThemeLabel(value: string): string {
   }
 }
 
+export function getHeaderModeLabel(value: string): string {
+  switch (value) {
+    case "matrix":
+      return "Matrix";
+    case "emoji":
+    default:
+      return "Emoji";
+  }
+}
+
+export function getScreensaverModeLabel(value: string): string {
+  switch (value) {
+    case "matrix":
+      return "Matrix";
+    case "off":
+    default:
+      return "Off";
+  }
+}
+
+export function getIdleTimeoutLabel(value: number): string {
+  return value <= 0 ? "Off" : `${value}s`;
+}
+
 export function getPublicRuntimeSettings(): {
   groqApiKeyConfigured: boolean;
   personalityPrompt: string;
@@ -182,6 +266,9 @@ export function getPublicRuntimeSettings(): {
   voiceMode: VoiceMode;
   uiTheme: UITheme;
   manualRecordMaxSec: number;
+  headerMode: HeaderMode;
+  screensaverMode: ScreensaverMode;
+  idleTimeoutSec: number;
 } {
   const settings = loadSettingsFile();
   return {
@@ -193,5 +280,8 @@ export function getPublicRuntimeSettings(): {
     voiceMode: settings.voiceMode,
     uiTheme: settings.uiTheme,
     manualRecordMaxSec: settings.manualRecordMaxSec,
+    headerMode: settings.headerMode,
+    screensaverMode: settings.screensaverMode,
+    idleTimeoutSec: settings.idleTimeoutSec,
   };
 }

@@ -126,6 +126,27 @@
           Themes change the simulator background, fonts, and color palette.
         </div>
 
+        <label class="field-label" for="headerModeSelect">HAT Header</label>
+        <select class="settings-select" id="headerModeSelect">
+          <option value="emoji">Emoji</option>
+          <option value="matrix">Matrix</option>
+        </select>
+        <div class="field-hint">
+          Changes the physical HAT header between the face slot and a matrix strip.
+        </div>
+
+        <label class="field-label" for="screensaverModeSelect">HAT Screensaver</label>
+        <select class="settings-select" id="screensaverModeSelect">
+          <option value="off">Off</option>
+          <option value="matrix">Matrix</option>
+        </select>
+
+        <label class="field-label" for="idleTimeoutSelect">HAT Idle Timeout</label>
+        <select class="settings-select" id="idleTimeoutSelect"></select>
+        <div class="field-hint">
+          After this much idle time, the HAT can switch to the full-screen saver.
+        </div>
+
         <div class="settings-actions">
           <button class="button secondary compact" id="clearKeyBtn" type="button">Clear Key</button>
           <button class="button compact" id="saveSettingsBtn" type="button">Save</button>

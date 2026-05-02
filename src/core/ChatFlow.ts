@@ -316,6 +316,7 @@ class ChatFlow implements ChatFlowContext {
   };
 
   renderSettingsMenu = (message: string = ""): void => {
+    const runtimeSettings = getRuntimeSettings();
     display({
       status: "settings",
       emoji: STATE_EMOJIS.settings,
@@ -325,6 +326,9 @@ class ChatFlow implements ChatFlowContext {
       rag_icon_visible: false,
       image_icon_visible: false,
       image: "",
+      header_mode: runtimeSettings.headerMode,
+      screensaver_mode: runtimeSettings.screensaverMode,
+      idle_timeout_sec: runtimeSettings.idleTimeoutSec,
     });
   };
 

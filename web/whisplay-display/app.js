@@ -22,6 +22,9 @@ const personalityInput = document.getElementById("personalityInput");
 const voiceModeSelect = document.getElementById("voiceModeSelect");
 const recordTimeSelect = document.getElementById("recordTimeSelect");
 const uiThemeSelect = document.getElementById("uiThemeSelect");
+const headerModeSelect = document.getElementById("headerModeSelect");
+const screensaverModeSelect = document.getElementById("screensaverModeSelect");
+const idleTimeoutSelect = document.getElementById("idleTimeoutSelect");
 const saveSettingsBtn = document.getElementById("saveSettingsBtn");
 const clearKeyBtn = document.getElementById("clearKeyBtn");
 const settingsStatus = document.getElementById("settingsStatus");
@@ -46,6 +49,11 @@ const DEFAULT_UI_THEME = "default";
 const CUSTOM_PERSONALITY_PRESET_ID = "custom";
 let personalityPresets = [];
 let recordTimeoutOptions = [];
+let idleTimeoutOptions = [];
+
+const DEFAULT_HEADER_MODE = "emoji";
+const DEFAULT_SCREENSAVER_MODE = "off";
+const DEFAULT_IDLE_TIMEOUT_SEC = 120;
 
 function setIconVisible(iconEl, visible) {
   iconEl.style.display = visible ? "block" : "none";
@@ -345,6 +353,31 @@ function populateRecordTimeoutOptions(selectedValue) {
   recordTimeSelect.value = fallbackValue;
 }
 
+function formatIdleTimeoutLabel(value) {
+  return value <= 0 ? "Off" : `${value} seconds`;
+}
+
+function populateIdleTimeoutOptions(selectedValue) {
+  if (!idleTimeoutSelect) return;
+  idleTimeoutSelect.innerHTML = "";
+  idleTimeoutOptions.forEach((value) => {
+    const option = document.createElement("option");
+    option.value = String(value);
+    option.textContent = formatIdleTimeoutLabel(value);
+    idleTimeoutSelect.appendChild(option);
+  });
+  const fallbackValue = String(
+    Number.isFinite(selectedValue) ? selectedValue : DEFAULT_IDLE_TIMEOUT_SEC,
+  );
+  if (![...idleTimeoutSelect.options].some((option) => option.value === fallbackValue)) {
+    const option = document.createElement("option");
+    option.value = fallbackValue;
+    option.textContent = formatIdleTimeoutLabel(parseInt(fallbackValue, 10));
+    idleTimeoutSelect.appendChild(option);
+  }
+  idleTimeoutSelect.value = fallbackValue;
+}
+
 function syncPresetSelectionFromPrompt(prompt) {
   if (!personalityPresetSelect) return;
   const match = personalityPresets.find((preset) => preset.prompt === prompt);
@@ -365,6 +398,14 @@ function applySettings(settings) {
   if (uiThemeSelect) {
     uiThemeSelect.value = settings.uiTheme || DEFAULT_UI_THEME;
   }
+  if (headerModeSelect) {
+    headerModeSelect.value = settings.headerMode || DEFAULT_HEADER_MODE;
+  }
+  if (screensaverModeSelect) {
+    screensaverModeSelect.value =
+      settings.screensaverMode || DEFAULT_SCREENSAVER_MODE;
+  }
+  populateIdleTimeoutOptions(settings.idleTimeoutSec);
   applyTheme(settings.uiTheme || DEFAULT_UI_THEME);
   if (groqKeyHint) {
     groqKeyHint.textContent = settings.groqApiKeyConfigured
@@ -386,6 +427,9 @@ async function loadSettings() {
     personalityPresets = Array.isArray(payload.presets) ? payload.presets : [];
     recordTimeoutOptions = Array.isArray(payload.recordTimeoutOptions)
       ? payload.recordTimeoutOptions
+      : [];
+    idleTimeoutOptions = Array.isArray(payload.idleTimeoutOptions)
+      ? payload.idleTimeoutOptions
       : [];
     applySettings(payload.settings || {});
     settingsLoaded = true;
@@ -409,6 +453,13 @@ async function saveSettings({ clearGroqApiKey = false } = {}) {
     voiceMode: voiceModeSelect?.value || "text-only",
     manualRecordMaxSec: parseInt(recordTimeSelect?.value || "15", 10),
     uiTheme: uiThemeSelect?.value || DEFAULT_UI_THEME,
+    headerMode: headerModeSelect?.value || DEFAULT_HEADER_MODE,
+    screensaverMode:
+      screensaverModeSelect?.value || DEFAULT_SCREENSAVER_MODE,
+    idleTimeoutSec: parseInt(
+      idleTimeoutSelect?.value || String(DEFAULT_IDLE_TIMEOUT_SEC),
+      10,
+    ),
   };
 
   setSettingsStatus(clearGroqApiKey ? "Clearing key..." : "Saving settings...");

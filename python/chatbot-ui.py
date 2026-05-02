@@ -1,5 +1,6 @@
 from PIL import Image, ImageDraw, ImageFont
 import os
+import random
 import time
 import socket
 import json
@@ -55,6 +56,10 @@ current_rag_icon_visible = False
 current_image_icon_visible = False
 current_music_progress = None
 current_music_duration_ms = None
+current_header_mode = "emoji"
+current_screensaver_mode = "off"
+current_idle_timeout_sec = 120
+last_activity_at = time.time()
 camera_mode = False
 camera_capture_image_path = ""
 camera_thread = None
@@ -81,6 +86,11 @@ def resolve_font_path(custom_font_path=None):
 def register_status_icon_factory(factory, priority=100):
     status_icon_factories.append({"priority": priority, "factory": factory})
 
+
+def note_activity():
+    global last_activity_at
+    last_activity_at = time.time()
+
 class RenderThread(threading.Thread):
     def __init__(self, whisplay, font_path, fps=30):
         super().__init__()
@@ -96,6 +106,8 @@ class RenderThread(threading.Thread):
         self.battery_font = ImageFont.truetype(self.font_path, battery_font_size)
         self.main_text_font = ImageFont.truetype(self.font_path, 20)
         self.music_time_font = ImageFont.truetype(self.font_path, 10)
+        self.header_matrix_font = ImageFont.truetype(self.font_path, 14)
+        self.screensaver_matrix_font = ImageFont.truetype(self.font_path, 16)
         self.main_text_line_height = self.main_text_font.getmetrics()[0] + self.main_text_font.getmetrics()[1]
         self.text_cache_image = None
         self.current_render_text = ""
@@ -117,6 +129,25 @@ class RenderThread(threading.Thread):
         self.pending_auto_scroll_after_hold = False
         if camera_mode:
             return False  # Skip rendering if in camera mode
+        if self.should_show_screensaver():
+            saver_image = Image.new("RGBA", (self.whisplay.LCD_WIDTH, self.whisplay.LCD_HEIGHT), (0, 0, 0, 255))
+            saver_draw = ImageDraw.Draw(saver_image)
+            self.draw_matrix_region(
+                saver_draw,
+                self.whisplay.LCD_WIDTH,
+                self.whisplay.LCD_HEIGHT,
+                self.screensaver_matrix_font,
+                self.get_matrix_speed(status, screensaver=True),
+                0,
+            )
+            self.whisplay.draw_image(
+                0,
+                0,
+                self.whisplay.LCD_WIDTH,
+                self.whisplay.LCD_HEIGHT,
+                ImageUtils.image_to_rgb565(saver_image, self.whisplay.LCD_WIDTH, self.whisplay.LCD_HEIGHT),
+            )
+            return True
         if current_image_path not in [None, ""]:
             # Try to load image from path
             if current_image is not None:
@@ -198,7 +229,7 @@ class RenderThread(threading.Thread):
             animation_active = self.render_main_text(text_bg_image, text_area_height, text_draw, text, current_scroll_speed)
             self.whisplay.draw_image(0, header_height + progress_bar_height, self.whisplay.LCD_WIDTH, text_area_height, ImageUtils.image_to_rgb565(text_bg_image, self.whisplay.LCD_WIDTH, text_area_height))
 
-            return animation_active
+            return animation_active or current_header_mode == "matrix"
 
         
 
@@ -311,6 +342,65 @@ class RenderThread(threading.Thread):
     def request_render(self):
         self.render_event.set()
                 
+    def should_show_screensaver(self):
+        return (
+            current_screensaver_mode == "matrix"
+            and current_idle_timeout_sec > 0
+            and current_status == "idle"
+            and not current_image_path
+            and (time.time() - last_activity_at) >= current_idle_timeout_sec
+        )
+
+    def get_screensaver_wait_timeout(self):
+        if (
+            current_screensaver_mode != "matrix"
+            or current_idle_timeout_sec <= 0
+            or current_status != "idle"
+            or current_image_path
+        ):
+            return None
+        remaining = current_idle_timeout_sec - (time.time() - last_activity_at)
+        return max(0.0, remaining)
+
+    def get_matrix_speed(self, status, screensaver=False):
+        if screensaver:
+            return 3.2
+        speed_map = {
+            "idle": 0.8,
+            "sleep": 0.8,
+            "listening": 1.6,
+            "recognizing": 2.0,
+            "thinking": 3.4,
+            "answering": 2.6,
+            "answer": 2.6,
+            "settings": 1.3,
+            "error": 2.4,
+            "music": 1.8,
+            "camera": 1.5,
+        }
+        return speed_map.get(status or "", 1.2)
+
+    def draw_matrix_region(self, draw, width, height, font, speed, y_offset):
+        charset = "01ABCDEF"
+        line_height = max(font.getbbox("A")[3] - font.getbbox("A")[1] + 1, font.size)
+        column_step = max(9, font.size - 2)
+        tail_base = 4 if y_offset > 0 else 8
+        now = time.time()
+        for x in range(0, width + column_step, column_step):
+            column = x // column_step
+            rng = random.Random((column * 9973) + 17)
+            tail_length = tail_base + rng.randint(0, 4)
+            offset = rng.randint(0, height + tail_length * line_height)
+            head_y = int((now * speed * line_height * 1.5 + offset) % (height + tail_length * line_height)) - tail_length * line_height
+            for tail_index in range(tail_length):
+                y = head_y - (tail_index * line_height)
+                if y < 0 or y >= height:
+                    continue
+                alpha = max(60, 255 - tail_index * 38)
+                green = max(80, 255 - tail_index * 28)
+                fill = (150, 255, 180, alpha) if tail_index == 0 else (0, green, 80, alpha)
+                char_index = int(now * 10 + column * 7 + tail_index * 11) % len(charset)
+                draw.text((x, y_offset + y), charset[char_index], font=font, fill=fill)
 
     def render_header(self, image, draw, status, emoji, battery_level, battery_color):
         global current_status, current_emoji, current_battery_level, current_battery_color
@@ -332,10 +422,20 @@ class RenderThread(threading.Thread):
         status_w = status_bbox[2] - status_bbox[0]
         TextUtils.draw_mixed_text(draw, image, current_status, status_font, (whisplay.CornerHeight, 0))
 
-        # Draw emoji centered
-        emoji_bbox = emoji_font.getbbox(current_emoji)
-        emoji_w = emoji_bbox[2] - emoji_bbox[0]
-        TextUtils.draw_mixed_text(draw, image, current_emoji, emoji_font, ((image_width - emoji_w) // 2, status_font_size + 8))
+        header_body_y = status_font_size + 8
+        if current_header_mode == "matrix":
+            self.draw_matrix_region(
+                draw,
+                image_width,
+                emoji_font_size + 6,
+                self.header_matrix_font,
+                self.get_matrix_speed(current_status),
+                header_body_y,
+            )
+        else:
+            emoji_bbox = emoji_font.getbbox(current_emoji)
+            emoji_w = emoji_bbox[2] - emoji_bbox[0]
+            TextUtils.draw_mixed_text(draw, image, current_emoji, emoji_font, ((image_width - emoji_w) // 2, header_body_y))
         
         # Draw battery icon
         status_icon_context = {
@@ -402,6 +502,13 @@ class RenderThread(threading.Thread):
             wait_timeout = None
             if self.pending_auto_scroll_after_hold:
                 wait_timeout = max(0.0, current_scroll_sync_hold_until - time.time())
+            screensaver_wait_timeout = self.get_screensaver_wait_timeout()
+            if screensaver_wait_timeout is not None:
+                wait_timeout = (
+                    screensaver_wait_timeout
+                    if wait_timeout is None
+                    else min(wait_timeout, screensaver_wait_timeout)
+                )
             self.render_event.wait(wait_timeout)
             self.render_event.clear()
             
@@ -410,10 +517,11 @@ class RenderThread(threading.Thread):
         self.render_event.set()
 
 def update_display_data(status=None, emoji=None, text=None,
-                  scroll_speed=None, scroll_sync=None, battery_level=None, battery_color=None, image_path=None,
-                  network_connected=None, vpn_connected=None, rag_icon_visible=None, image_icon_visible=None, transaction_id=None,
-                  wifi_signal_level=None,
-                  music_progress=None, music_duration_ms=None):
+                   scroll_speed=None, scroll_sync=None, battery_level=None, battery_color=None, image_path=None,
+                   network_connected=None, vpn_connected=None, rag_icon_visible=None, image_icon_visible=None, transaction_id=None,
+                   wifi_signal_level=None,
+                   music_progress=None, music_duration_ms=None, header_mode=None,
+                   screensaver_mode=None, idle_timeout_sec=None):
     global current_status, current_emoji, current_text, current_battery_level
     global current_battery_color, current_scroll_top, current_scroll_speed, current_image_path
     global current_scroll_sync_char_end, current_scroll_sync_duration_ms
@@ -422,7 +530,23 @@ def update_display_data(status=None, emoji=None, text=None,
     global current_network_connected, current_vpn_connected, current_rag_icon_visible, current_image_icon_visible, current_transaction_id
     global current_wifi_signal_level
     global current_music_progress, current_music_duration_ms
+    global current_header_mode, current_screensaver_mode, current_idle_timeout_sec
     global render_thread
+
+    if (
+        status is not None
+        or emoji is not None
+        or text is not None
+        or image_path is not None
+        or scroll_sync is not None
+        or transaction_id is not None
+        or music_progress is not None
+        or music_duration_ms is not None
+        or header_mode is not None
+        or screensaver_mode is not None
+        or idle_timeout_sec is not None
+    ):
+        note_activity()
 
     next_text = text
     if text is not None:
@@ -504,6 +628,15 @@ def update_display_data(status=None, emoji=None, text=None,
         current_music_progress = music_progress if music_progress >= 0 else None
     if music_duration_ms is not None:
         current_music_duration_ms = music_duration_ms if music_duration_ms > 0 else None
+    if header_mode is not None:
+        current_header_mode = str(header_mode)
+    if screensaver_mode is not None:
+        current_screensaver_mode = str(screensaver_mode)
+    if idle_timeout_sec is not None:
+        try:
+            current_idle_timeout_sec = max(0, int(idle_timeout_sec))
+        except (TypeError, ValueError):
+            print(f"[Display] Invalid idle_timeout_sec payload: {idle_timeout_sec}")
     if render_thread is not None:
         render_thread.request_render()
 
@@ -526,6 +659,7 @@ def send_to_all_clients(message):
 def exit_camera_mode():
     global camera_mode, camera_thread, render_thread
     print("[Camera] Exiting camera mode...")
+    note_activity()
     if camera_thread is not None:
         camera_thread.stop()
         camera_thread = None
@@ -538,12 +672,14 @@ def exit_camera_mode():
 def on_button_pressed():
     """Function executed when button is pressed"""
     print("[Server] Button pressed")
+    note_activity()
     notification = {"event": "button_pressed"}
     send_to_all_clients(notification)
 
 def on_button_release():
     """Function executed when button is released"""
     print("[Server] Button released")
+    note_activity()
     notification = {"event": "button_released"}
     send_to_all_clients(notification)
 
@@ -586,6 +722,9 @@ def handle_client(client_socket, addr, whisplay):
                     image_icon_visible = content.get("image_icon_visible", None)
                     music_progress = content.get("music_progress", None)
                     music_duration_ms = content.get("music_duration_ms", None)
+                    header_mode = content.get("header_mode", None)
+                    screensaver_mode = content.get("screensaver_mode", None)
+                    idle_timeout_sec = content.get("idle_timeout_sec", None)
                     capture_image_path = content.get("capture_image_path", None)
                     trigger_camera_capture = content.get("camera_capture", None)
                     # boolean to enable camera mode
@@ -631,21 +770,25 @@ def handle_client(client_socket, addr, whisplay):
                     if (text is not None) or (status is not None) or (emoji is not None) or \
                        (battery_level is not None) or (battery_color is not None) or \
                               (image_path is not None) or (network_connected is not None) or \
-                            (wifi_signal_level is not None) or \
-                            (vpn_connected is not None) or \
-                            (rag_icon_visible is not None) or (image_icon_visible is not None) or (scroll_sync is not None) or \
-                            (music_progress is not None) or (music_duration_ms is not None):
+                             (wifi_signal_level is not None) or \
+                             (vpn_connected is not None) or \
+                             (rag_icon_visible is not None) or (image_icon_visible is not None) or (scroll_sync is not None) or \
+                             (music_progress is not None) or (music_duration_ms is not None) or \
+                             (header_mode is not None) or (screensaver_mode is not None) or (idle_timeout_sec is not None):
                         update_display_data(status=status, emoji=emoji,
                                      text=text, scroll_speed=scroll_speed, scroll_sync=scroll_sync,
                                      battery_level=battery_level, battery_color=battery_tuple,
-                                                 image_path=image_path, network_connected=network_connected,
-                                                 wifi_signal_level=wifi_signal_level,
-                                     vpn_connected=vpn_connected,
-                                                 rag_icon_visible=rag_icon_visible,
-                                         image_icon_visible=image_icon_visible,
-                                                 transaction_id=transaction_id,
-                                                 music_progress=music_progress,
-                                                 music_duration_ms=music_duration_ms)
+                                                  image_path=image_path, network_connected=network_connected,
+                                                  wifi_signal_level=wifi_signal_level,
+                                      vpn_connected=vpn_connected,
+                                                  rag_icon_visible=rag_icon_visible,
+                                          image_icon_visible=image_icon_visible,
+                                                  transaction_id=transaction_id,
+                                                  music_progress=music_progress,
+                                                  music_duration_ms=music_duration_ms,
+                                                  header_mode=header_mode,
+                                                  screensaver_mode=screensaver_mode,
+                                                  idle_timeout_sec=idle_timeout_sec)
 
                     client_socket.send(b"OK\n")
                     if response_to_client:

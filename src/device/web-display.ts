@@ -11,10 +11,12 @@ import { dataDir, cameraFeedDir } from "../utils/dir";
 import { getImageMimeType } from "../utils/image";
 import {
   getPublicRuntimeSettings,
+  IDLE_TIMEOUT_OPTIONS,
+  RECORD_TIMEOUT_OPTIONS,
   saveRuntimeSettings,
 } from "../config/runtime-settings";
 import { PERSONALITY_PRESETS } from "../config/personality-presets";
-import { RECORD_TIMEOUT_OPTIONS } from "../config/runtime-settings";
+import type { RuntimeSettings } from "../config/runtime-settings";
 import {
   webAudioBridge,
   FRAME_AUDIO_CHUNK,
@@ -34,6 +36,7 @@ interface WebDisplayOptions {
   onButtonPress: ButtonHandler;
   onButtonRelease: ButtonHandler;
   onTextInput?: TextInputHandler;
+  onSettingsSaved?: (settings: RuntimeSettings) => void;
 }
 
 export class WebDisplayServer implements WebAudioBridgeServer {
@@ -50,6 +53,7 @@ export class WebDisplayServer implements WebAudioBridgeServer {
   private server: http.Server | null = null;
   private wsServer: WebSocketServer | null = null;
   private wsClients = new Set<WebSocket>();
+  private onSettingsSaved: (settings: RuntimeSettings) => void;
 
   constructor(options: WebDisplayOptions) {
     this.host = options.host;
@@ -57,6 +61,7 @@ export class WebDisplayServer implements WebAudioBridgeServer {
     this.onButtonPress = options.onButtonPress;
     this.onButtonRelease = options.onButtonRelease;
     this.onTextInput = options.onTextInput || (() => {});
+    this.onSettingsSaved = options.onSettingsSaved || (() => {});
     this.app = new Koa();
     this.router = new Router();
     this.cameraFramePath = this.resolveCameraFramePath();
@@ -194,6 +199,7 @@ export class WebDisplayServer implements WebAudioBridgeServer {
         settings: getPublicRuntimeSettings(),
         presets: PERSONALITY_PRESETS,
         recordTimeoutOptions: RECORD_TIMEOUT_OPTIONS,
+        idleTimeoutOptions: IDLE_TIMEOUT_OPTIONS,
       };
     });
 
@@ -215,7 +221,18 @@ export class WebDisplayServer implements WebAudioBridgeServer {
           typeof body.manualRecordMaxSec === "number"
             ? body.manualRecordMaxSec
             : undefined,
+        headerMode:
+          typeof body.headerMode === "string" ? body.headerMode : undefined,
+        screensaverMode:
+          typeof body.screensaverMode === "string"
+            ? body.screensaverMode
+            : undefined,
+        idleTimeoutSec:
+          typeof body.idleTimeoutSec === "number"
+            ? body.idleTimeoutSec
+            : undefined,
       });
+      this.onSettingsSaved(settings);
 
       ctx.body = {
         ok: true,
@@ -226,9 +243,13 @@ export class WebDisplayServer implements WebAudioBridgeServer {
           voiceMode: settings.voiceMode,
           uiTheme: settings.uiTheme,
           manualRecordMaxSec: settings.manualRecordMaxSec,
+          headerMode: settings.headerMode,
+          screensaverMode: settings.screensaverMode,
+          idleTimeoutSec: settings.idleTimeoutSec,
         },
         presets: PERSONALITY_PRESETS,
         recordTimeoutOptions: RECORD_TIMEOUT_OPTIONS,
+        idleTimeoutOptions: IDLE_TIMEOUT_OPTIONS,
       };
     });
 
@@ -261,6 +282,9 @@ export class WebDisplayServer implements WebAudioBridgeServer {
       image_revision: this.imageRevision,
       music_progress: this.currentStatus.music_progress,
       music_duration_ms: this.currentStatus.music_duration_ms,
+      header_mode: this.currentStatus.header_mode,
+      screensaver_mode: this.currentStatus.screensaver_mode,
+      idle_timeout_sec: this.currentStatus.idle_timeout_sec,
     };
   }
 
