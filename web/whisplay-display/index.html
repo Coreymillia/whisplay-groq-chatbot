@@ -86,6 +86,7 @@
         </div>
         <div class="settings-actions">
           <button class="button compact" id="visionUploadBtn" type="button">Use for Vision</button>
+          <button class="button secondary compact" id="visionAnalysisToggleBtn" type="button">Show Gemini Output</button>
         </div>
         <img
           id="visionPreview"
@@ -93,6 +94,17 @@
           style="display:none;width:100%;border-radius:12px;margin-top:10px;border:1px solid rgba(255,255,255,0.12);"
         />
         <div class="status-text" id="visionStatus">No image uploaded.</div>
+        <div
+          id="visionAnalysisWrap"
+          style="display:none;margin-top:10px;padding:10px;border-radius:12px;border:1px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.03);"
+        >
+          <div class="field-label" style="margin-top:0">Gemini Output</div>
+          <div class="field-hint" id="visionAnalysisMeta">No Gemini analysis yet.</div>
+          <pre
+            id="visionAnalysisText"
+            style="margin:8px 0 0;white-space:pre-wrap;word-break:break-word;font:inherit;max-height:220px;overflow:auto;"
+          ></pre>
+        </div>
       </div>
       <div class="card" id="settingsCard">
         <div class="title">Settings</div>

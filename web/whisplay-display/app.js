@@ -17,6 +17,10 @@ const btn = document.getElementById("btn");
 const btnText = document.getElementById("btnText");
 const visionImageInput = document.getElementById("visionImageInput");
 const visionUploadBtn = document.getElementById("visionUploadBtn");
+const visionAnalysisToggleBtn = document.getElementById("visionAnalysisToggleBtn");
+const visionAnalysisWrap = document.getElementById("visionAnalysisWrap");
+const visionAnalysisMeta = document.getElementById("visionAnalysisMeta");
+const visionAnalysisText = document.getElementById("visionAnalysisText");
 const visionPreview = document.getElementById("visionPreview");
 const visionStatus = document.getElementById("visionStatus");
 const groqKeyInput = document.getElementById("groqKeyInput");
@@ -52,6 +56,8 @@ let lastImageRevision = -1;
 let isPressed = false;
 let activePointerId = null;
 let settingsLoaded = false;
+let visionAnalysisVisible = false;
+let latestVisionAnalysisStamp = 0;
 const DEFAULT_UI_THEME = "default";
 const CUSTOM_PERSONALITY_PRESET_ID = "custom";
 let personalityPresets = [];
@@ -331,6 +337,36 @@ function setVisionStatus(message, isError = false) {
   visionStatus.style.color = isError ? "#ff8a8a" : "";
 }
 
+function setVisionAnalysisVisible(visible) {
+  visionAnalysisVisible = Boolean(visible);
+  if (visionAnalysisWrap) {
+    visionAnalysisWrap.style.display = visionAnalysisVisible ? "block" : "none";
+  }
+  if (visionAnalysisToggleBtn) {
+    visionAnalysisToggleBtn.textContent = visionAnalysisVisible
+      ? "Hide Gemini Output"
+      : "Show Gemini Output";
+  }
+}
+
+function renderVisionAnalysis(analysis) {
+  if (!visionAnalysisMeta || !visionAnalysisText) return;
+  if (!analysis) {
+    latestVisionAnalysisStamp = 0;
+    visionAnalysisMeta.textContent = "No Gemini analysis yet.";
+    visionAnalysisText.textContent = "";
+    return;
+  }
+  latestVisionAnalysisStamp = Number(analysis.updatedAt || 0);
+  const updatedLabel = latestVisionAnalysisStamp
+    ? new Date(latestVisionAnalysisStamp).toLocaleTimeString()
+    : "just now";
+  const question = analysis.question || "Vision question";
+  const status = analysis.ok === false ? "error" : "ready";
+  visionAnalysisMeta.textContent = `${status} · ${updatedLabel} · ${question}`;
+  visionAnalysisText.textContent = analysis.rawResponse || "";
+}
+
 function populatePersonalityPresets(selectedId) {
   if (!personalityPresetSelect) return;
   personalityPresetSelect.innerHTML = "";
@@ -482,6 +518,28 @@ async function loadVisionPreview() {
   }
 }
 
+async function loadVisionAnalysis() {
+  try {
+    const response = await fetch(`/api/vision/analysis?ts=${Date.now()}`, {
+      cache: "no-store",
+    });
+    if (!response.ok) {
+      return;
+    }
+    const payload = await response.json();
+    const analysis = payload.analysis || null;
+    const updatedAt = Number(analysis?.updatedAt || 0);
+    if (!analysis && latestVisionAnalysisStamp === 0) {
+      return;
+    }
+    if (!analysis || updatedAt !== latestVisionAnalysisStamp) {
+      renderVisionAnalysis(analysis);
+    }
+  } catch (error) {
+    console.error("Failed to load Gemini vision analysis:", error);
+  }
+}
+
 function readFileAsDataUrl(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -525,6 +583,7 @@ async function uploadVisionImage() {
     if (visionImageInput) {
       visionImageInput.value = "";
     }
+    renderVisionAnalysis(null);
     setVisionStatus("Image uploaded. Ask the bot what it sees.");
   } catch (error) {
     console.error("Failed to upload vision image:", error);
@@ -638,7 +697,10 @@ async function requestShutdown() {
 connectWebSocket();
 loadSettings();
 loadVisionPreview();
+loadVisionAnalysis();
+setVisionAnalysisVisible(false);
 requestAnimationFrame(animateScroll);
+setInterval(loadVisionAnalysis, 3000);
 
 personalityPresetSelect?.addEventListener("change", () => {
   const selectedId = personalityPresetSelect.value;
@@ -714,6 +776,15 @@ if (saveSettingsBtn) {
 if (visionUploadBtn) {
   visionUploadBtn.addEventListener("click", () => {
     uploadVisionImage();
+  });
+}
+
+if (visionAnalysisToggleBtn) {
+  visionAnalysisToggleBtn.addEventListener("click", () => {
+    setVisionAnalysisVisible(!visionAnalysisVisible);
+    if (visionAnalysisVisible) {
+      loadVisionAnalysis();
+    }
   });
 }
 

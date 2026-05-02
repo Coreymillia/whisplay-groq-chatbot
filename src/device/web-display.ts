@@ -14,6 +14,10 @@ import {
   setLatestCapturedImg,
 } from "../utils/image";
 import {
+  clearLatestVisionAnalysis,
+  getLatestVisionAnalysis,
+} from "../utils/vision-analysis";
+import {
   getPublicRuntimeSettings,
   IDLE_TIMEOUT_OPTIONS,
   RECORD_TIMEOUT_OPTIONS,
@@ -305,11 +309,19 @@ export class WebDisplayServer implements WebAudioBridgeServer {
       const savedPath = path.join(uploadDir, `vision-upload-${Date.now()}${extension}`);
       fs.writeFileSync(savedPath, buffer);
       setLatestCapturedImg(savedPath);
+      clearLatestVisionAnalysis();
       this.onImageUploaded(savedPath);
       ctx.body = {
         ok: true,
         imageUrl: `/api/vision/image?ts=${Date.now()}`,
         fileName: path.basename(savedPath),
+      };
+    });
+
+    this.router.get("/api/vision/analysis", (ctx) => {
+      ctx.set("Cache-Control", "no-store");
+      ctx.body = {
+        analysis: getLatestVisionAnalysis(),
       };
     });
 

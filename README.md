@@ -110,6 +110,8 @@ Current Gemini behavior:
 - **Groq** still handles normal chat
 - **Gemini** is used as the default vision backend
 - uploaded test images become the latest image for vision analysis
+- for vision questions, **Gemini** analyzes the image first and **Groq** turns that result into the final in-character reply on the device
+- the browser UI can optionally show the latest raw **Gemini** output with the **Show Gemini Output** button
 - this lets us test vision now without needing the ESP32-CAM first
 
 ## HAT settings controls

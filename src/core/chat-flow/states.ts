@@ -20,6 +20,8 @@ import { chatWithLLMStream } from "../../cloud-api/server";
 import { isImMode } from "../../cloud-api/llm";
 import { getSystemPromptWithKnowledge } from "../Knowledge";
 import { enableRAG } from "../../cloud-api/knowledge";
+import { getSystemPrompt } from "../../config/llm-config";
+import { getOpenAIClient, getOpenAILLMModel } from "../../cloud-api/openai/openai";
 import { cameraDir } from "../../utils/dir";
 import {
   clearPendingCapturedImgForChat,
@@ -47,6 +49,8 @@ import {
   SETTINGS_OPEN_GRACE_MS,
   SETTINGS_SELECT_HOLD_MS,
 } from "./settings-menu";
+import { ToolReturnTag } from "../../type";
+import { setLatestVisionAnalysis } from "../../utils/vision-analysis";
 
 const imageIntentPatterns = [
   /\bwhat do you see\b/i,
@@ -64,6 +68,52 @@ function shouldRouteToVision(prompt: string): boolean {
     return false;
   }
   return imageIntentPatterns.some((pattern) => pattern.test(trimmed));
+}
+
+function stripToolTag(result: string): string {
+  return result.replace(/^\[(success|error|response)\]\s*/i, "").trim();
+}
+
+async function streamVisionRelayReply(
+  userPrompt: string,
+  visionAnalysis: string,
+  onChunk: (chunk: string) => void,
+): Promise<string> {
+  const openai = getOpenAIClient();
+  if (!openai) {
+    return "";
+  }
+  const stream = await openai.chat.completions.create({
+    model: getOpenAILLMModel(),
+    stream: true,
+    messages: [
+      {
+        role: "system",
+        content:
+          `${getSystemPrompt()}\n` +
+          "You are answering a question about an already analyzed image. " +
+          "Use the supplied vision analysis as your only visual context. " +
+          "Reply naturally in your active personality, stay concise, and do not mention Gemini, tools, or backend analysis unless the user asks.",
+      },
+      {
+        role: "user",
+        content:
+          `User question: ${userPrompt}\n\n` +
+          `Vision analysis:\n${visionAnalysis}\n\n` +
+          "Answer the user's question naturally. If the analysis seems uncertain, briefly say so.",
+      },
+    ],
+  });
+  let answer = "";
+  for await (const chunk of stream) {
+    const text = chunk.choices[0]?.delta?.content || "";
+    if (!text) {
+      continue;
+    }
+    answer += text;
+    onChunk(text);
+  }
+  return answer.trim();
 }
 
 export const flowStates: Record<FlowName, FlowStateHandler> = {
@@ -476,12 +526,48 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
             text: "[describeImage]Analyzing uploaded image...",
           });
           llmFuncMap.describeImage({ prompt: ctx.asrText })
-            .then((result) => {
+            .then(async (result) => {
               if (currentAnswerId !== ctx.answerId) {
                 return;
               }
-              const cleaned = result.replace(/^\[(success|error|response)\]\s*/i, "");
-              trackingPartial(cleaned || "I couldn't analyze that image.");
+              const cleaned = stripToolTag(result);
+              if (!cleaned) {
+                trackingPartial("I couldn't analyze that image.");
+                endPartial();
+                return;
+              }
+              if (result.startsWith(ToolReturnTag.Error)) {
+                setLatestVisionAnalysis({
+                  question: ctx.asrText,
+                  rawResponse: cleaned,
+                  relayResponse: cleaned,
+                  updatedAt: Date.now(),
+                  ok: false,
+                });
+                trackingPartial(cleaned);
+                endPartial();
+                return;
+              }
+              const relayReply = await streamVisionRelayReply(
+                ctx.asrText,
+                cleaned,
+                (chunk) => {
+                  if (currentAnswerId === ctx.answerId) {
+                    trackingPartial(chunk);
+                  }
+                },
+              );
+              const finalReply = relayReply || cleaned || "I couldn't analyze that image.";
+              if (!relayReply && currentAnswerId === ctx.answerId) {
+                trackingPartial(finalReply);
+              }
+              setLatestVisionAnalysis({
+                question: ctx.asrText,
+                rawResponse: cleaned,
+                relayResponse: finalReply,
+                updatedAt: Date.now(),
+                ok: true,
+              });
               endPartial();
             })
             .catch((error) => {
@@ -489,7 +575,15 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
               if (currentAnswerId !== ctx.answerId) {
                 return;
               }
-              trackingPartial("I couldn't analyze that image right now.");
+              const message = "I couldn't analyze that image right now.";
+              setLatestVisionAnalysis({
+                question: ctx.asrText,
+                rawResponse: message,
+                relayResponse: message,
+                updatedAt: Date.now(),
+                ok: false,
+              });
+              trackingPartial(message);
               endPartial();
             });
           return;
