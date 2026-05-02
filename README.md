@@ -45,12 +45,18 @@ This project starts from the official PiSugar Whisplay chatbot, but is being tai
    bash build.sh
    bash run_chatbot.sh
    ```
-5. Open the browser simulator:
+5. Optional: set the bot to start on boot:
+   ```bash
+   bash startup.sh
+   ```
+6. Open the browser simulator:
    ```text
    http://<host-or-pi-ip>:17880
    ```
 
 The default template in this fork was originally set up for **web simulator first** bring-up. The project has now also been validated on a real Whisplay HAT, while keeping the web UI available for debugging and settings.
+
+For actual device use, prefer the `chatbot.service` boot path over ad-hoc `nohup` launches so the bot comes back cleanly after shutdown or reboot.
 
 ## Getting a Groq API key
 

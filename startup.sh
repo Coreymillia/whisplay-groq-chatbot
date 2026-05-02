@@ -17,8 +17,11 @@ fi
 
 # Get user info
 TARGET_USER=$(whoami)
+TARGET_GROUP=$(id -gn "$TARGET_USER")
 USER_HOME=$HOME
 TARGET_UID=$(id -u $TARGET_USER)
+REPO_DIR=$(cd "$(dirname "$0")" && pwd)
+LOG_PATH="$REPO_DIR/chatbot.log"
 
 # Make sure we do not return roon (in case user called the script with sudo)
 if [ "$TARGET_USER" == "root" ]; then
@@ -29,19 +32,18 @@ fi
 
 echo "----------------------------------------"
 echo "Detected User: $TARGET_USER"
+echo "Detected Group: $TARGET_GROUP"
 echo "Detected Home: $USER_HOME"
 echo "Detected UID:  $TARGET_UID"
+echo "Detected Repo: $REPO_DIR"
 
-# Find Node bin
-NODE_BIN=$(which node)
-
-if [ -z "$NODE_BIN" ]; then
-    echo "Error: Could not find 'node'. Make sure you can run 'node -v' in this terminal."
-    exit 1
+NODE_FOLDER=""
+if NODE_BIN=$(command -v node 2>/dev/null); then
+    NODE_FOLDER=$(dirname "$NODE_BIN")
+    echo "Found Node at: $NODE_FOLDER"
+else
+    echo "Node is not on PATH in this shell. The service will rely on NVM_DIR=$USER_HOME/.nvm."
 fi
-
-NODE_FOLDER=$(dirname $NODE_BIN)
-echo "Found Node at: $NODE_FOLDER"
 echo "----------------------------------------"
 
 # Create the service file
@@ -49,31 +51,31 @@ echo "Creating systemd service file..."
 sudo tee /etc/systemd/system/chatbot.service > /dev/null <<EOF
 [Unit]
 Description=Chatbot Service
-After=network.target sound.target
-Wants=sound.target
+After=network-online.target sound.target
+Wants=network-online.target sound.target
 
 [Service]
 Type=simple
 User=$TARGET_USER
-Group=audio
-SupplementaryGroups=audio video gpio
+Group=$TARGET_GROUP
+SupplementaryGroups=audio video gpio i2c spi input
 
-# Use the dynamic Home Directory
-WorkingDirectory=$USER_HOME/whisplay-ai-chatbot
-ExecStart=/bin/bash $USER_HOME/whisplay-ai-chatbot/run_chatbot.sh
+WorkingDirectory=$REPO_DIR
+ExecStart=/bin/bash $REPO_DIR/run_chatbot.sh
 
-# Inject the dynamic Node path and dynamic User ID
+# Inject runtime environment
 Environment=PATH=$NODE_FOLDER:/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin
 Environment=HOME=$USER_HOME
 Environment=XDG_RUNTIME_DIR=/run/user/$TARGET_UID
 Environment=NODE_ENV=production
+Environment=NVM_DIR=$USER_HOME/.nvm
 
 # Audio permissions
 PrivateDevices=no
 
 # Logs
-StandardOutput=append:$USER_HOME/whisplay-ai-chatbot/chatbot.log
-StandardError=append:$USER_HOME/whisplay-ai-chatbot/chatbot.log
+StandardOutput=append:$LOG_PATH
+StandardError=append:$LOG_PATH
 
 Restart=always
 RestartSec=2
@@ -91,4 +93,4 @@ sudo systemctl restart chatbot.service
 echo "Done! Chatbot is starting..."
 echo "Checking status..."
 sleep 2
-sudo systemctl status chatbot --no-pager
+sudo systemctl status chatbot.service --no-pager
