@@ -49,6 +49,10 @@ import { autoSaveExchange } from "../../config/mempalace";
 import { STATE_EMOJIS } from "../../config/state-emojis";
 import { llmFuncMap } from "../../config/llm-tools";
 import {
+  getVoiceModeLabel,
+  saveRuntimeSettings,
+} from "../../config/runtime-settings";
+import {
   SETTINGS_OPEN_GRACE_MS,
   SETTINGS_SELECT_HOLD_MS,
 } from "./settings-menu";
@@ -85,6 +89,14 @@ const settingsIntentPatterns = [
   /^\s*(?:settings|open\s+settings|settings\s+menu)\s*[.!?]*$/i,
 ];
 
+const voiceOnIntentPatterns = [
+  /^\s*(?:talk\s+to\s+me|speak\s+now|start\s+(?:speaking|talking)|voice\s+on|turn\s+(?:the\s+)?voice\s+on|enable\s+(?:voice|speech))\s*[.!?]*$/i,
+];
+
+const voiceOffIntentPatterns = [
+  /^\s*(?:don't\s+talk\s+to\s+me|do\s+not\s+talk\s+to\s+me|stop\s+(?:speaking|talking)|don't\s+speak|do\s+not\s+speak|be\s+quiet|voice\s+off|turn\s+(?:the\s+)?voice\s+off|disable\s+(?:voice|speech)|mute(?:\s+voice)?)\s*[.!?]*$/i,
+];
+
 const PHOTO_BROWSER_EXIT_HOLD_MS = 1800;
 
 function shouldRouteToVision(prompt: string): boolean {
@@ -116,6 +128,20 @@ function shouldShutdown(prompt: string): boolean {
 function shouldOpenSettings(prompt: string): boolean {
   const trimmed = prompt.trim();
   return settingsIntentPatterns.some((pattern) => pattern.test(trimmed));
+}
+
+function getVoiceModeCommand(prompt: string): "voice-chat" | "text-only" | null {
+  const trimmed = prompt.trim();
+  if (!trimmed) {
+    return null;
+  }
+  if (voiceOnIntentPatterns.some((pattern) => pattern.test(trimmed))) {
+    return "voice-chat";
+  }
+  if (voiceOffIntentPatterns.some((pattern) => pattern.test(trimmed))) {
+    return "text-only";
+  }
+  return null;
 }
 
 async function captureAndPrepareLatestImage(): Promise<string> {
@@ -679,6 +705,11 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
     };
     ctx.partialThinking = "";
     ctx.thinkingSentences = [];
+    const finishDirectMessage = (message: string, showImageAfter = false): void => {
+      trackingPartial(message);
+      endPartial();
+      finishDirectAnswer(showImageAfter);
+    };
     if (shouldOpenSettings(ctx.asrText)) {
       ctx.openSettingsMenu();
       return;
@@ -687,16 +718,22 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
       void ctx.shutdownDevice();
       return;
     }
+    const voiceModeCommand = getVoiceModeCommand(ctx.asrText);
+    if (voiceModeCommand) {
+      saveRuntimeSettings({ voiceMode: voiceModeCommand });
+      const modeLabel = getVoiceModeLabel(voiceModeCommand);
+      const message =
+        voiceModeCommand === "voice-chat"
+          ? `Voice mode ${modeLabel}. I'll talk to you now.`
+          : `Voice mode ${modeLabel}. I'll stay quiet.`;
+      finishDirectMessage(message);
+      return;
+    }
     if (shouldBrowsePhotos(ctx.asrText)) {
       const photos = listCapturedImgs();
       if (!photos.length) {
-        const message = "No saved photos yet.";
-        display({
-          text: `[photos]${message}`,
-        });
-        trackingPartial(message);
-        endPartial();
-        finishDirectAnswer(false);
+        display({ text: "[photos]No saved photos yet." });
+        finishDirectMessage("No saved photos yet.");
         return;
       }
       ctx.endWakeSession();
@@ -717,9 +754,7 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
             image_icon_visible: false,
             text: "[camera]Photo captured.",
           });
-          trackingPartial("Photo captured.");
-          endPartial();
-          finishDirectAnswer(true);
+          finishDirectMessage("Photo captured.", true);
         })
         .catch((error) => {
           console.error("Voice capture failed:", error);
@@ -733,9 +768,7 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
           display({
             text: `[camera]${message}`,
           });
-          trackingPartial(message);
-          endPartial();
-          finishDirectAnswer(false);
+          finishDirectMessage(message);
         });
       return;
     }

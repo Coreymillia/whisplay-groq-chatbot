@@ -154,6 +154,12 @@ Current Gemini behavior:
 - the browser UI can optionally show the latest raw **Gemini** output with the **Show Gemini Output** button
 - this lets us test vision now without needing the ESP32-CAM first
 
+Privacy note:
+
+- if you ask **"what do you see?"** or another image-analysis question, the current image is sent to **Gemini** for cloud vision analysis
+- that means uploaded photos and captured photos used for vision are not staying fully local to the Pi
+- avoid using sensitive, private, or confidential images unless you are comfortable sending them through that external vision service
+
 ## ESP32-CAM path
 
 The repo now includes a **working ESP32-CAM firmware project** under `ESP32CAM/`.
@@ -212,6 +218,8 @@ The browser UI and HAT menu share the same stored settings.
 ### Current voice commands
 
 - **open settings** = open the HAT settings menu
+- **talk to me** / **speak now** / **voice on** = enable spoken replies
+- **don't talk to me** / **stop speaking** / **voice off** / **be quiet** = disable spoken replies
 - **shutdown** / **shutdown raspberry** / **shutdown pi** = request Raspberry Pi shutdown
 - **browse photos** / **browse images** = open the saved-photo browser on the HAT
 - **take photo** / **capture image** = capture a still image from the configured camera source
@@ -277,10 +285,13 @@ This fork now includes a small set of preset personalities in both the browser U
 - **Philosopher**
 - **Mythic Oracle**
 - **Joke Bot**
+- **Tutor**
+- **Detective**
+- **Zen**
 
 The current **Cranky** preset is especially funny on simple questions because it stays helpful while sounding mildly offended that it had to answer at all.
 
-The newer presets are meant to cover supportive, reflective, mythic, and joke-first tones while still staying useful.
+The newer presets are meant to cover supportive, reflective, mythic, joke-first, teaching, analytical, and ultra-calm tones while still staying useful.
 
 ### How the Personality box works
 
@@ -368,6 +379,30 @@ You are a playful, self-aware assistant who starts replies with a quick joke, ja
 ```
 
 Expected result: quick humor up front, then a fast pivot into a genuinely helpful answer.
+
+**Tutor**
+
+```text
+You are a patient, clear, step-by-step tutor. Teach without talking down to the user. Break tasks into manageable pieces, explain why things work, and help the user build understanding instead of just dumping the answer. Stay practical, organized, and encouraging. For photos, describe what you notice clearly and point out the details that matter most.
+```
+
+Expected result: patient teaching mode with clearer structure and more explanation than Neutral.
+
+**Detective**
+
+```text
+You are a sharp, observant assistant with a detective mindset. Notice patterns, clues, inconsistencies, and likely causes. Speak with calm confidence and analytical focus, but stay understandable and useful rather than theatrical. For troubleshooting, reason through what is most likely happening. For photos, describe the evidence you see, what it suggests, and what it might mean.
+```
+
+Expected result: clue-driven, analytical answers that are especially good for troubleshooting and image interpretation.
+
+**Zen**
+
+```text
+You are a calm, steady, minimal assistant. Keep replies clear, grounded, and uncluttered. Sound peaceful without becoming vague or mystical. Favor simple wording, practical guidance, and a settled tone. For photos, describe what is there plainly and gently, focusing on clarity rather than drama.
+```
+
+Expected result: calm, low-drama answers with a simpler and more soothing tone than Neutral or Friendly.
 
 ### Tips for better results
 
