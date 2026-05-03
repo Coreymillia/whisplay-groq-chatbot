@@ -89,6 +89,10 @@ const settingsIntentPatterns = [
   /^\s*(?:settings|open\s+settings|settings\s+menu)\s*[.!?]*$/i,
 ];
 
+const voiceHelpIntentPatterns = [
+  /^\s*(?:help|voice\s+commands|show\s+voice\s+commands|voice\s+command\s+list)\s*[.!?]*$/i,
+];
+
 const voiceOnIntentPatterns = [
   /^\s*(?:talk\s+to\s+me|speak\s+now|start\s+(?:speaking|talking)|voice\s+on|turn\s+(?:the\s+)?voice\s+on|enable\s+(?:voice|speech))\s*[.!?]*$/i,
 ];
@@ -98,6 +102,14 @@ const voiceOffIntentPatterns = [
 ];
 
 const PHOTO_BROWSER_EXIT_HOLD_MS = 1800;
+const VOICE_HELP_EXIT_HOLD_MS = 1800;
+
+const VOICE_COMMAND_HELP_PAGES = [
+  "VOICE CMDS 1/4\nhelp\nvoice commands\nopen settings\n\nShort: next\nHold: exit",
+  "VOICE CMDS 2/4\ntalk to me\nspeak now\nvoice on",
+  "VOICE CMDS 3/4\ndon't talk to me\nstop speaking\nvoice off\nbe quiet",
+  "VOICE CMDS 4/4\ntake photo\ncapture image\nbrowse photos\nbrowse images\nshutdown pi",
+];
 
 function shouldRouteToVision(prompt: string): boolean {
   const trimmed = prompt.trim();
@@ -128,6 +140,11 @@ function shouldShutdown(prompt: string): boolean {
 function shouldOpenSettings(prompt: string): boolean {
   const trimmed = prompt.trim();
   return settingsIntentPatterns.some((pattern) => pattern.test(trimmed));
+}
+
+function shouldOpenVoiceHelp(prompt: string): boolean {
+  const trimmed = prompt.trim();
+  return voiceHelpIntentPatterns.some((pattern) => pattern.test(trimmed));
 }
 
 function getVoiceModeCommand(prompt: string): "voice-chat" | "text-only" | null {
@@ -353,6 +370,57 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
       renderCurrentPhoto();
     });
     renderCurrentPhoto();
+  },
+  voice_command_help: (ctx: ChatFlowContext) => {
+    let pageIndex = 0;
+    let holdTimer: NodeJS.Timeout | null = null;
+    let holdTriggered = false;
+
+    const exitVoiceHelp = () => {
+      if (holdTimer) {
+        clearTimeout(holdTimer);
+        holdTimer = null;
+      }
+      ctx.transitionTo("sleep");
+    };
+
+    const renderCurrentPage = () => {
+      const page = VOICE_COMMAND_HELP_PAGES[pageIndex] || VOICE_COMMAND_HELP_PAGES[0];
+      display({
+        status: "help",
+        emoji: STATE_EMOJIS.idle,
+        RGB: "#3388ff",
+        text: page,
+        image: "",
+        image_icon_visible: false,
+        rag_icon_visible: false,
+      });
+    };
+
+    onButtonDoubleClick(null);
+    onButtonPressed(() => {
+      holdTriggered = false;
+      if (holdTimer) {
+        clearTimeout(holdTimer);
+      }
+      holdTimer = setTimeout(() => {
+        holdTriggered = true;
+        exitVoiceHelp();
+      }, VOICE_HELP_EXIT_HOLD_MS);
+    });
+    onButtonReleased(() => {
+      if (holdTimer) {
+        clearTimeout(holdTimer);
+        holdTimer = null;
+      }
+      if (holdTriggered) {
+        holdTriggered = false;
+        return;
+      }
+      pageIndex = (pageIndex + 1) % VOICE_COMMAND_HELP_PAGES.length;
+      renderCurrentPage();
+    });
+    renderCurrentPage();
   },
   music: (ctx: ChatFlowContext) => {
     // Start deferred music playback when entering music state
@@ -712,6 +780,11 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
     };
     if (shouldOpenSettings(ctx.asrText)) {
       ctx.openSettingsMenu();
+      return;
+    }
+    if (shouldOpenVoiceHelp(ctx.asrText)) {
+      ctx.endWakeSession();
+      ctx.transitionTo("voice_command_help");
       return;
     }
     if (shouldShutdown(ctx.asrText)) {

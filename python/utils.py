@@ -1,4 +1,5 @@
 import os
+import re
 import unicodedata
 from io import BytesIO
 import numpy as np
@@ -177,7 +178,7 @@ class TextUtils:
     width = 0
     for char in text:
       width += TextUtils.get_char_size(font, char)[0]
-    img = Image.new("RGBA", (width, line_height), (0, 0, 0, 0))
+    img = Image.new("RGBA", (max(1, width), line_height), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
     for char in text:
       if EmojiUtils.is_emoji(char):
@@ -213,20 +214,73 @@ class TextUtils:
 
   @staticmethod
   def wrap_text(draw, text, font, max_width):
+    if not text:
+      return []
+
+    def get_text_width(value):
+      return sum(TextUtils.get_char_size(font, char)[0] for char in value)
+
+    def split_long_token(token):
+      chunks = []
+      current_chunk = ""
+      current_width = 0
+      for char in token:
+        char_width = TextUtils.get_char_size(font, char)[0]
+        if current_chunk and current_width + char_width > max_width:
+          chunks.append(current_chunk)
+          current_chunk = char
+          current_width = char_width
+        else:
+          current_chunk += char
+          current_width += char_width
+      if current_chunk:
+        chunks.append(current_chunk)
+      return chunks or [token]
+
+    normalized_text = text.replace("\r\n", "\n").replace("\r", "\n")
     lines = []
-    current_line = ""
-    current_width = 0
-    for char in text:
-      test_line = current_line + char
-      char_width = TextUtils.get_char_size(font, char)[0]
-      current_width += char_width
-      w = current_width
-      if w <= max_width:
-        current_line = test_line
-      else:
+
+    for paragraph in normalized_text.split("\n"):
+      if not paragraph:
+        if lines:
+          lines.append("")
+        continue
+
+      tokens = re.findall(r"\S+|\s+", paragraph)
+      current_line = ""
+      pending_space = False
+
+      for token in tokens:
+        if token.isspace():
+          pending_space = bool(current_line)
+          continue
+
+        separator = " " if pending_space and current_line else ""
+        candidate = f"{current_line}{separator}{token}"
+
+        if not current_line and get_text_width(token) > max_width:
+          lines.extend(split_long_token(token))
+          pending_space = False
+          current_line = ""
+          continue
+
+        if get_text_width(candidate) <= max_width:
+          current_line = candidate
+          pending_space = False
+          continue
+
+        if current_line:
+          lines.append(current_line)
+
+        if get_text_width(token) > max_width:
+          token_chunks = split_long_token(token)
+          lines.extend(token_chunks[:-1])
+          current_line = token_chunks[-1]
+        else:
+          current_line = token
+        pending_space = False
+
+      if current_line:
         lines.append(current_line)
-        current_line = char
-        current_width = char_width
-    if current_line:
-      lines.append(current_line)
+
     return lines

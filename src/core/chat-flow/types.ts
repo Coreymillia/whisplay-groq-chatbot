@@ -4,6 +4,7 @@ export type FlowName =
   | "sleep"
   | "camera"
   | "photo_browser"
+  | "voice_command_help"
   | "music"
   | "listening"
   | "settings"

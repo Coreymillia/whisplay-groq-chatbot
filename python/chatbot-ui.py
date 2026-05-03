@@ -301,9 +301,7 @@ class RenderThread(threading.Thread):
                 render_y += line_height
         
         # render_text
-        render_text = ""
-        for line in display_lines:
-            render_text += line
+        render_text = "\n".join(display_lines)
         if self.current_render_text != render_text:
             self.current_render_text = render_text
             show_text_image = Image.new("RGBA", (self.whisplay.LCD_WIDTH, render_y + len(display_lines) * line_height), (0, 0, 0, 255))

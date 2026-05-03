@@ -25,6 +25,41 @@ This project starts from the official PiSugar Whisplay chatbot, but is being tai
 - **Captured still image on HAT display:** working
 - **Web simulator/debug UI:** still available at `http://<host-or-pi-ip>:17880`
 
+## Current feature highlights
+
+- **One-button device flow:** long press to talk, double press to replay the last answer, and voice shortcuts for settings and help
+- **Voice controls:** settings, voice on/off, photo capture, photo browsing, shutdown, and an on-device voice-command cheat sheet
+- **Vision flow:** upload a photo or capture one from the configured camera source, then ask **"what do you see?"**
+- **Preset personalities:** Neutral, Friendly, Cranky, Roast Bot, Sleepy Pi, Affirmation, Philosopher, Mythic Oracle, Joke Bot, Tutor, Detective, and Zen
+- **HAT visuals:** switchable header effects plus full-screen screensavers such as Matrix, Retro Geometry, Plasma, and Neon Rain
+- **Improved HAT readability:** reply text now wraps more naturally on the device instead of breaking as aggressively mid-word
+
+## Device screenshots
+
+These are a few representative shots of the current build. They intentionally show only a small sample so the README stays readable.
+
+### Browser simulator and basic HAT idle view
+
+![Browser simulator and HAT idle view](images/IMG_20260503_164602346_HDR.jpg)
+
+![Whisplay HAT idle screen](images/IMG_20260503_164937203_HDR.jpg)
+
+### Matrix screensaver on the Whisplay HAT
+
+![Matrix screensaver on the Whisplay HAT](images/IMG_20260503_164718210_HDR.jpg)
+
+### Vision example: uploaded shop photo and Cranky Bot reaction
+
+![Shop photo shown on the Whisplay HAT for vision analysis](images/IMG_20260503_171337860_HDR.jpg)
+
+![Cranky Bot starting its reaction to the uploaded shop photo](images/IMG_20260503_171358433_HDR.jpg)
+
+![Cranky Bot continuing its complaint about the shop mess](images/IMG_20260503_171402454_HDR.jpg)
+
+### Cranky Bot reply example
+
+![Cranky Bot giving a sarcastic GitHub-flavored reply](images/IMG_20260503_171835378_HDR.jpg)
+
 ## Quick start for this fork
 
 1. Clone this project and enter it:
@@ -217,12 +252,18 @@ The browser UI and HAT menu share the same stored settings.
 
 ### Current voice commands
 
+- **help** / **voice commands** = open the on-device voice command cheat sheet
 - **open settings** = open the HAT settings menu
 - **talk to me** / **speak now** / **voice on** = enable spoken replies
 - **don't talk to me** / **stop speaking** / **voice off** / **be quiet** = disable spoken replies
 - **shutdown** / **shutdown raspberry** / **shutdown pi** = request Raspberry Pi shutdown
 - **browse photos** / **browse images** = open the saved-photo browser on the HAT
 - **take photo** / **capture image** = capture a still image from the configured camera source
+
+### HAT voice command cheat sheet controls
+
+- **short press** = next cheat-sheet page
+- **long press** = exit back to the chatbot
 
 ### HAT photo browser controls
 
