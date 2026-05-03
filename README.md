@@ -23,7 +23,6 @@ This project starts from the official PiSugar Whisplay chatbot, but is being tai
 - **Spoken photo capture:** working
 - **Captured still image on HAT display:** working
 - **Web simulator/debug UI:** still available at `http://<host-or-pi-ip>:17880`
-- **Touchscreen:** not wired into the app UX yet; touching the screen currently does not trigger app behavior
 
 ## Quick start for this fork
 
@@ -116,9 +115,11 @@ The browser simulator includes a settings panel for the Groq key, Gemini key, pr
 
 The Groq and Gemini keys can be stored there without editing `.env`. Runtime settings are saved to the local settings file on the Pi, and Gemini vision will use the saved browser key before falling back to `GEMINI_API_KEY` from `.env`.
 
-The browser UI also now includes a simple **Vision Test** image upload box. You can upload a photo from your PC, then ask the bot what it sees.
+The browser UI also now includes a simple **Vision Test** image upload box. You can upload a photo from your PC, then say or type **"what do you see?"** to get a response in the tone of the currently selected chatbot personality.
 
 The browser settings panel now also includes an optional **Camera Source** selector for vision hardware. Right now it supports the local **Pi Camera** path and an **ESP32-CAM** network source with a configurable URL. The Vision Test card can either upload an image from your PC or capture one from the configured camera source.
+
+Captured photos are now kept in the project camera storage and exposed in the browser UI as a **Saved Photos** list. The browser UI can delete saved photos; the HAT browse mode is read-only.
 
 Current plan for Gemini:
 
@@ -190,6 +191,20 @@ Current HAT settings items:
 - Exit
 
 The browser UI and HAT menu share the same stored settings.
+
+## Voice control commands
+
+Current direct voice/text commands:
+
+- **open settings** = open the HAT settings menu
+- **shutdown** / **shutdown raspberry** / **shutdown pi** = request Raspberry Pi shutdown
+- **browse photos** / **browse images** = open the saved-photo browser on the HAT
+- **take photo** / **capture image** = capture a still image from the configured camera source
+
+In the HAT photo browser:
+
+- **short press** = next saved photo
+- **long press** = exit back to the chatbot
 
 ## HAT replay and face behavior
 

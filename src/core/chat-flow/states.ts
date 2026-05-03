@@ -25,11 +25,13 @@ import { getOpenAIClient, getOpenAILLMModel } from "../../cloud-api/openai/opena
 import { cameraDir } from "../../utils/dir";
 import {
   clearPendingCapturedImgForChat,
+  listCapturedImgs,
   getLatestGenImg,
   getLatestDisplayImg,
   getLatestShowedImage,
   setLatestCapturedImg,
   setPendingCapturedImgForChat,
+  showCapturedImgByIndex,
   showLatestCapturedImg,
 } from "../../utils/image";
 import { sendWhisplayIMMessage } from "../../cloud-api/whisplay-im/whisplay-im";
@@ -71,6 +73,20 @@ const captureIntentPatterns = [
   /\bsnap (?:a )?(?:photo|picture)\b/i,
 ];
 
+const browseIntentPatterns = [
+  /^\s*browse\s+(?:photos|images)\s*[.!?]*$/i,
+];
+
+const shutdownIntentPatterns = [
+  /^\s*(?:shutdown|shut\s*down)(?:\s+(?:raspberry(?:\s*pi)?|pi))?\s*[.!?]*$/i,
+];
+
+const settingsIntentPatterns = [
+  /^\s*(?:settings|open\s+settings|settings\s+menu)\s*[.!?]*$/i,
+];
+
+const PHOTO_BROWSER_EXIT_HOLD_MS = 1800;
+
 function shouldRouteToVision(prompt: string): boolean {
   const trimmed = prompt.trim();
   if (!trimmed || !getLatestShowedImage()) {
@@ -85,6 +101,21 @@ function shouldCaptureImage(prompt: string): boolean {
     return false;
   }
   return captureIntentPatterns.some((pattern) => pattern.test(trimmed));
+}
+
+function shouldBrowsePhotos(prompt: string): boolean {
+  const trimmed = prompt.trim();
+  return browseIntentPatterns.some((pattern) => pattern.test(trimmed));
+}
+
+function shouldShutdown(prompt: string): boolean {
+  const trimmed = prompt.trim();
+  return shutdownIntentPatterns.some((pattern) => pattern.test(trimmed));
+}
+
+function shouldOpenSettings(prompt: string): boolean {
+  const trimmed = prompt.trim();
+  return settingsIntentPatterns.some((pattern) => pattern.test(trimmed));
 }
 
 async function captureAndPrepareLatestImage(): Promise<string> {
@@ -224,6 +255,78 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
       emoji: STATE_EMOJIS.camera,
       RGB: "#00ff88",
     });
+  },
+  photo_browser: (ctx: ChatFlowContext) => {
+    let photoIndex = 0;
+    let holdTimer: NodeJS.Timeout | null = null;
+    let holdTriggered = false;
+
+    const exitPhotoBrowser = () => {
+      if (holdTimer) {
+        clearTimeout(holdTimer);
+        holdTimer = null;
+      }
+      display({
+        image: "",
+        image_icon_visible: false,
+      });
+      ctx.transitionTo("sleep");
+    };
+
+    const renderCurrentPhoto = () => {
+      const photos = listCapturedImgs();
+      if (!photos.length) {
+        display({
+          status: "photos",
+          emoji: STATE_EMOJIS.camera,
+          RGB: "#0088ff",
+          text: "No saved photos.\nHold to exit.",
+          image: "",
+          image_icon_visible: false,
+        });
+        return;
+      }
+      if (photoIndex >= photos.length) {
+        photoIndex = 0;
+      }
+      const imagePath = showCapturedImgByIndex(photoIndex);
+      display({
+        status: "photos",
+        emoji: STATE_EMOJIS.camera,
+        RGB: "#0088ff",
+        text: `Photo ${photoIndex + 1}/${photos.length}\nShort press: next\nHold: exit`,
+        image: imagePath,
+        image_icon_visible: false,
+      });
+    };
+
+    onButtonDoubleClick(null);
+    onButtonPressed(() => {
+      holdTriggered = false;
+      if (holdTimer) {
+        clearTimeout(holdTimer);
+      }
+      holdTimer = setTimeout(() => {
+        holdTriggered = true;
+        exitPhotoBrowser();
+      }, PHOTO_BROWSER_EXIT_HOLD_MS);
+    });
+    onButtonReleased(() => {
+      if (holdTimer) {
+        clearTimeout(holdTimer);
+        holdTimer = null;
+      }
+      if (holdTriggered) {
+        holdTriggered = false;
+        return;
+      }
+      const photos = listCapturedImgs();
+      if (photos.length > 1) {
+        photoIndex = (photoIndex + 1) % photos.length;
+      }
+      renderCurrentPhoto();
+    });
+    renderCurrentPhoto();
   },
   music: (ctx: ChatFlowContext) => {
     // Start deferred music playback when entering music state
@@ -554,8 +657,52 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
       llmResponseText += text;
       if (currentAnswerId === ctx.answerId) partial(text);
     };
+    const finishDirectAnswer = (showImageAfter = false): void => {
+      getPlayEndPromise().then(() => {
+        if (ctx.currentFlowName !== "answer" || currentAnswerId !== ctx.answerId) {
+          return;
+        }
+        const img = showImageAfter ? getLatestDisplayImg() : "";
+        ctx.rememberLastAnswer({
+          text: llmResponseText,
+          emoji: STATE_EMOJIS.answering,
+          image: img || "",
+        });
+        clearPendingCapturedImgForChat();
+        display({ image_icon_visible: false });
+        if (img) {
+          ctx.transitionTo("image");
+          return;
+        }
+        ctx.transitionTo("sleep");
+      });
+    };
     ctx.partialThinking = "";
     ctx.thinkingSentences = [];
+    if (shouldOpenSettings(ctx.asrText)) {
+      ctx.openSettingsMenu();
+      return;
+    }
+    if (shouldShutdown(ctx.asrText)) {
+      void ctx.shutdownDevice();
+      return;
+    }
+    if (shouldBrowsePhotos(ctx.asrText)) {
+      const photos = listCapturedImgs();
+      if (!photos.length) {
+        const message = "No saved photos yet.";
+        display({
+          text: `[photos]${message}`,
+        });
+        trackingPartial(message);
+        endPartial();
+        finishDirectAnswer(false);
+        return;
+      }
+      ctx.endWakeSession();
+      ctx.transitionTo("photo_browser");
+      return;
+    }
     if (shouldCaptureImage(ctx.asrText)) {
       display({
         text: "[camera]Capturing image...",
@@ -572,6 +719,7 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
           });
           trackingPartial("Photo captured.");
           endPartial();
+          finishDirectAnswer(true);
         })
         .catch((error) => {
           console.error("Voice capture failed:", error);
@@ -587,6 +735,7 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
           });
           trackingPartial(message);
           endPartial();
+          finishDirectAnswer(false);
         });
       return;
     }

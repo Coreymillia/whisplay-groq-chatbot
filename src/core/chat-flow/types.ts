@@ -3,6 +3,7 @@ import { StreamResponser } from "../StreamResponsor";
 export type FlowName =
   | "sleep"
   | "camera"
+  | "photo_browser"
   | "music"
   | "listening"
   | "settings"
@@ -52,6 +53,7 @@ export interface ChatFlowContext {
   shouldContinueWakeSession: () => boolean;
   shouldEndAfterAnswer: (text: string) => boolean;
   shouldOpenSettingsMenu: (text: string) => boolean;
+  shutdownDevice: () => Promise<void>;
   streamExternalReply: (text: string, emoji?: string) => Promise<void>;
   openSettingsMenu: (ignoreNextRelease?: boolean) => void;
   closeSettingsMenu: () => void;

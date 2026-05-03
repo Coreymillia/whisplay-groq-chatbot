@@ -24,6 +24,8 @@ const visionAnalysisMeta = document.getElementById("visionAnalysisMeta");
 const visionAnalysisText = document.getElementById("visionAnalysisText");
 const visionPreview = document.getElementById("visionPreview");
 const visionStatus = document.getElementById("visionStatus");
+const savedPhotosList = document.getElementById("savedPhotosList");
+const savedPhotosStatus = document.getElementById("savedPhotosStatus");
 const groqKeyInput = document.getElementById("groqKeyInput");
 const groqKeyHint = document.getElementById("groqKeyHint");
 const geminiKeyInput = document.getElementById("geminiKeyInput");
@@ -62,6 +64,7 @@ let activePointerId = null;
 let settingsLoaded = false;
 let visionAnalysisVisible = false;
 let latestVisionAnalysisStamp = 0;
+let savedPhotos = [];
 const DEFAULT_UI_THEME = "default";
 const DEFAULT_CAMERA_SOURCE = "pi-camera";
 const DEFAULT_ESP32_CAM_URL = "http://esp32-cam.local";
@@ -343,6 +346,12 @@ function setVisionStatus(message, isError = false) {
   visionStatus.style.color = isError ? "#ff8a8a" : "";
 }
 
+function setSavedPhotosStatus(message, isError = false) {
+  if (!savedPhotosStatus) return;
+  savedPhotosStatus.textContent = message;
+  savedPhotosStatus.style.color = isError ? "#ff8a8a" : "";
+}
+
 function setVisionAnalysisVisible(visible) {
   visionAnalysisVisible = Boolean(visible);
   if (visionAnalysisWrap) {
@@ -371,6 +380,103 @@ function renderVisionAnalysis(analysis) {
   const status = analysis.ok === false ? "error" : "ready";
   visionAnalysisMeta.textContent = `${status} · ${updatedLabel} · ${question}`;
   visionAnalysisText.textContent = analysis.rawResponse || "";
+}
+
+function renderSavedPhotos() {
+  if (!savedPhotosList) return;
+  savedPhotosList.innerHTML = "";
+  if (!savedPhotos.length) {
+    setSavedPhotosStatus("No saved photos yet.");
+    return;
+  }
+  setSavedPhotosStatus(`${savedPhotos.length} saved photo${savedPhotos.length === 1 ? "" : "s"}.`);
+  for (const photo of savedPhotos) {
+    const card = document.createElement("div");
+    card.style.border = "1px solid rgba(255,255,255,0.12)";
+    card.style.borderRadius = "12px";
+    card.style.padding = "8px";
+    card.style.background = "rgba(255,255,255,0.03)";
+
+    const img = document.createElement("img");
+    img.src = `${photo.imageUrl}?ts=${photo.updatedAt}`;
+    img.alt = photo.fileName;
+    img.style.width = "100%";
+    img.style.aspectRatio = "1 / 1";
+    img.style.objectFit = "cover";
+    img.style.borderRadius = "8px";
+    img.style.display = "block";
+
+    const label = document.createElement("div");
+    label.textContent = photo.fileName;
+    label.style.fontSize = "12px";
+    label.style.marginTop = "8px";
+    label.style.wordBreak = "break-word";
+
+    const meta = document.createElement("div");
+    meta.textContent = new Date(photo.updatedAt).toLocaleString();
+    meta.style.fontSize = "11px";
+    meta.style.opacity = "0.7";
+    meta.style.marginTop = "4px";
+
+    const deleteBtn = document.createElement("button");
+    deleteBtn.type = "button";
+    deleteBtn.className = "button secondary compact";
+    deleteBtn.textContent = "Delete";
+    deleteBtn.style.marginTop = "8px";
+    deleteBtn.addEventListener("click", () => {
+      deleteSavedPhoto(photo.fileName);
+    });
+
+    card.appendChild(img);
+    card.appendChild(label);
+    card.appendChild(meta);
+    card.appendChild(deleteBtn);
+    savedPhotosList.appendChild(card);
+  }
+}
+
+async function loadSavedPhotos() {
+  try {
+    const response = await fetch(`/api/photos?ts=${Date.now()}`, {
+      cache: "no-store",
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    const payload = await response.json();
+    savedPhotos = Array.isArray(payload.photos) ? payload.photos : [];
+    renderSavedPhotos();
+  } catch (error) {
+    console.error("Failed to load saved photos:", error);
+    savedPhotos = [];
+    renderSavedPhotos();
+    setSavedPhotosStatus("Failed to load saved photos.", true);
+  }
+}
+
+async function deleteSavedPhoto(fileName) {
+  const confirmed = window.confirm(`Delete ${fileName}?`);
+  if (!confirmed) {
+    return;
+  }
+  try {
+    const response = await fetch("/api/photos", {
+      method: "DELETE",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ fileName }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || payload.ok === false) {
+      throw new Error(payload.error || `HTTP ${response.status}`);
+    }
+    await loadSavedPhotos();
+  } catch (error) {
+    console.error("Failed to delete saved photo:", error);
+    const message = error instanceof Error ? error.message : String(error);
+    setSavedPhotosStatus(`Delete failed: ${message}`, true);
+  }
 }
 
 function updateCameraSourceUi() {
@@ -604,6 +710,7 @@ async function uploadVisionImage() {
       visionImageInput.value = "";
     }
     renderVisionAnalysis(null);
+    loadSavedPhotos();
     setVisionStatus("Image uploaded. Ask the bot what it sees.");
   } catch (error) {
     console.error("Failed to upload vision image:", error);
@@ -637,6 +744,7 @@ async function captureVisionImage() {
       visionPreview.style.display = "block";
     }
     renderVisionAnalysis(null);
+    loadSavedPhotos();
     setVisionStatus("Camera image captured. Ask the bot what it sees.");
   } catch (error) {
     console.error("Failed to capture camera image:", error);
@@ -753,6 +861,7 @@ connectWebSocket();
 loadSettings();
 loadVisionPreview();
 loadVisionAnalysis();
+loadSavedPhotos();
 setVisionAnalysisVisible(false);
 requestAnimationFrame(animateScroll);
 setInterval(loadVisionAnalysis, 3000);

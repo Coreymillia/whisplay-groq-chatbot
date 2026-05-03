@@ -9,7 +9,9 @@ import serve from "koa-static";
 import { WebSocketServer, WebSocket, RawData } from "ws";
 import { dataDir, cameraFeedDir } from "../utils/dir";
 import {
+  deleteCapturedImg,
   getImageMimeType,
+  listCapturedImgs,
   getLatestShowedImage,
   setLatestCapturedImg,
 } from "../utils/image";
@@ -351,6 +353,58 @@ export class WebDisplayServer implements WebAudioBridgeServer {
       ctx.body = {
         analysis: getLatestVisionAnalysis(),
       };
+    });
+
+    this.router.get("/api/photos", (ctx) => {
+      ctx.set("Cache-Control", "no-store");
+      const photos = listCapturedImgs().map((photoPath) => {
+        const stats = fs.statSync(photoPath);
+        const fileName = path.basename(photoPath);
+        return {
+          fileName,
+          imageUrl: `/api/photos/image/${encodeURIComponent(fileName)}`,
+          updatedAt: stats.mtimeMs,
+          sizeBytes: stats.size,
+        };
+      });
+      ctx.body = { photos };
+    });
+
+    this.router.get("/api/photos/image/:fileName", (ctx) => {
+      ctx.set("Cache-Control", "no-store");
+      const fileName = decodeURIComponent(String(ctx.params.fileName || ""));
+      const photoPath = path.resolve(dataDir, "camera", path.basename(fileName));
+      if (!photoPath.startsWith(path.resolve(dataDir, "camera") + path.sep)) {
+        ctx.status = 400;
+        ctx.body = "Invalid photo path";
+        return;
+      }
+      if (!fs.existsSync(photoPath)) {
+        ctx.status = 404;
+        ctx.body = "Photo not found";
+        return;
+      }
+      ctx.type = getImageMimeType(photoPath);
+      ctx.body = fs.createReadStream(photoPath);
+    });
+
+    this.router.delete("/api/photos", (ctx) => {
+      const body = normalizeRequestBody((ctx.request as any).body);
+      const fileName = getBodyString(body, "fileName") || "";
+      const deletedPath = deleteCapturedImg(fileName);
+      if (!deletedPath) {
+        ctx.status = 404;
+        ctx.body = { ok: false, error: "Photo not found." };
+        return;
+      }
+      if (this.currentStatus?.image === deletedPath) {
+        this.updateStatus({
+          ...this.currentStatus,
+          image: "",
+          image_icon_visible: false,
+        });
+      }
+      ctx.body = { ok: true };
     });
 
     this.router.get("/api/settings", (ctx) => {
