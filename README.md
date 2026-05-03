@@ -20,6 +20,7 @@ This project starts from the official PiSugar Whisplay chatbot, but is being tai
 - **Bot on HAT:** working
 - **Microphone:** working
 - **Speaker / WM8960 audio path:** working
+- **Spoken replies / TTS:** confirmed working with `espeak-ng`
 - **Spoken photo capture:** working
 - **Captured still image on HAT display:** working
 - **Web simulator/debug UI:** still available at `http://<host-or-pi-ip>:17880`
@@ -108,6 +109,20 @@ Why this matters:
 - The original OpenAI ASR code path used `whisper-1`.
 - That model name failed against the Groq endpoint in live testing.
 - This fork now defaults to `whisper-large-v3-turbo` when using the Groq OpenAI-compatible base URL, which restored speech recognition on the Pi.
+
+## Speech output notes for this fork
+
+Speech output is now also confirmed working on the physical Pi + Whisplay hardware using the local `espeak-ng` TTS path.
+
+Working settings:
+
+```env
+TTS_SERVER=espeak-ng
+```
+
+- Set **Voice mode** to **Voice chat** in the browser or HAT settings to enable spoken replies
+- The current `espeak-ng` plugin defaults to `ESPEAK_NG_VOICE=en` unless you override it in `.env`
+- This was confirmed working through the Whisplay speaker path on the Pi Zero 2 W hardware
 
 ## Settings UI notes
 
