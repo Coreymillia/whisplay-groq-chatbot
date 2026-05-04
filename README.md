@@ -4,7 +4,7 @@
 
 [![Discord](https://img.shields.io/discord/1483017948305297501?logo=discord&logoColor=white&label=Discord&color=5865F2)](https://discord.gg/znGrZmTk)
 
-This project starts from the official PiSugar Whisplay chatbot, but is being tailored for a **Raspberry Pi Zero 2 W** with a **Groq-backed LLM path** and a cleaner bring-up flow for the PiSugar **Whisplay HAT**.
+This project starts from the official PiSugar Whisplay chatbot, but is being tailored for a **Raspberry Pi Zero 2 W** with a **Groq-backed LLM path**, a cleaner bring-up flow for the PiSugar **Whisplay HAT**, and an early **CYD companion display** for touch-based remote control.
 
 ## Current project direction
 
@@ -12,6 +12,7 @@ This project starts from the official PiSugar Whisplay chatbot, but is being tai
 - **Bring-up mode:** browser simulator first, physical HAT now working
 - **Power:** wall-powered is fine; the PiSugar battery is optional
 - **Scope:** build the chatbot first as a dedicated Whisplay + Groq device
+- **Companion path:** add optional ESP32 sidecars like the CYD without replacing the Pi-hosted chatbot brain
 - **Cost target:** stay on free-tier API usage where possible for now
 
 ## Current hardware status
@@ -23,6 +24,7 @@ This project starts from the official PiSugar Whisplay chatbot, but is being tai
 - **Spoken replies / TTS:** confirmed working with `espeak-ng`
 - **Spoken photo capture:** working
 - **Captured still image on HAT display:** working
+- **Companion CYD touchscreen client:** working as an early rough-start build, with more tuning planned
 - **Web simulator/debug UI:** still available at `http://<host-or-pi-ip>:17880`
 
 ## Current feature highlights
@@ -33,6 +35,7 @@ This project starts from the official PiSugar Whisplay chatbot, but is being tai
 - **Preset personalities:** Neutral, Friendly, Cranky, Roast Bot, Sleepy Pi, Affirmation, Philosopher, Mythic Oracle, Joke Bot, Tutor, Detective, and Zen
 - **HAT visuals:** switchable header effects plus full-screen screensavers such as Matrix, Retro Geometry, Plasma, and Neon Rain
 - **Improved HAT readability:** reply text now wraps more naturally on the device instead of breaking as aggressively mid-word
+- **Companion CYD controls:** touch actions for **New Chat**, **Repeat**, **Capture**, **Voice**, plus an on-screen **Setup** button for reopening the Wi-Fi portal
 
 ## Device screenshots
 
@@ -43,6 +46,10 @@ These are a few representative shots of the current build. They intentionally sh
 ![Browser simulator and HAT idle view](images/IMG_20260503_164602346_HDR.jpg)
 
 ![Whisplay HAT idle screen](images/IMG_20260503_164937203_HDR.jpg)
+
+### Early CYD companion build
+
+![Early Whisplay CYD companion build](images/IMG_20260504_155914704_HDR.jpg)
 
 ### Matrix screensaver on the Whisplay HAT
 
@@ -94,6 +101,18 @@ These are a few representative shots of the current build. They intentionally sh
 The default template in this fork was originally set up for **web simulator first** bring-up. The project has now also been validated on a real Whisplay HAT, while keeping the web UI available for debugging and settings.
 
 For actual device use, prefer the `chatbot.service` boot path over ad-hoc `nohup` launches so the bot comes back cleanly after shutdown or reboot.
+
+## Companion CYD status
+
+This repo now also includes an early companion firmware project under `CompanionCYD/` for the popular **Cheap Yellow Display (ESP32-2432S028R)**.
+
+- the **Pi stays the chatbot brain**
+- the **CYD acts as a remote touchscreen client**
+- current actions include **New Chat**, **Repeat**, **Capture**, **Voice**, and **Setup**
+- Wi-Fi credentials and Pi host settings are handled from the CYD's own captive portal
+- both **normal** and **inverted** display variants are included
+
+This is intentionally a **rough start**, not a polished final companion UI. It is already usable, but more tuning is planned around layout, diagnostics, and overall interaction flow.
 
 ## Getting a Groq API key
 

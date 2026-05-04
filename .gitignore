@@ -19,3 +19,7 @@ package-lock.json
 docker/volume
 .DS_Store
 __pycache__
+CompanionCYD/.pio
+CompanionCYD/.vscode
+CompanionCYD/INVERTEDdisplay/.pio
+CompanionCYD/INVERTEDdisplay/.vscode

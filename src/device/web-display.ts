@@ -57,6 +57,7 @@ interface WebDisplayOptions {
   port: number;
   onButtonPress: ButtonHandler;
   onButtonRelease: ButtonHandler;
+  onButtonDoubleClick?: ButtonHandler;
   onTextInput?: TextInputHandler;
   onSettingsSaved?: (settings: RuntimeSettings) => void;
   onImageUploaded?: (imagePath: string) => void;
@@ -118,6 +119,7 @@ export class WebDisplayServer implements WebAudioBridgeServer {
   private port: number;
   private onButtonPress: ButtonHandler;
   private onButtonRelease: ButtonHandler;
+  private onButtonDoubleClick: ButtonHandler;
   private onTextInput: TextInputHandler;
   private server: http.Server | null = null;
   private wsServer: WebSocketServer | null = null;
@@ -130,6 +132,7 @@ export class WebDisplayServer implements WebAudioBridgeServer {
     this.port = options.port;
     this.onButtonPress = options.onButtonPress;
     this.onButtonRelease = options.onButtonRelease;
+    this.onButtonDoubleClick = options.onButtonDoubleClick || (() => {});
     this.onTextInput = options.onTextInput || (() => {});
     this.onSettingsSaved = options.onSettingsSaved || (() => {});
     this.onImageUploaded = options.onImageUploaded || (() => {});
@@ -421,6 +424,11 @@ export class WebDisplayServer implements WebAudioBridgeServer {
       };
     });
 
+    this.router.get("/api/state", (ctx) => {
+      ctx.set("Cache-Control", "no-store");
+      ctx.body = this.buildStatePayload();
+    });
+
     this.router.post("/api/chat/reset", (ctx) => {
       resetChatHistory();
       ctx.body = { ok: true };
@@ -440,6 +448,68 @@ export class WebDisplayServer implements WebAudioBridgeServer {
         ctx.body = { ok: false, error: "Chat history not found." };
         return;
       }
+      ctx.body = { ok: true };
+    });
+
+    this.router.post("/api/input/text", (ctx) => {
+      const body = normalizeRequestBody((ctx.request as any).body);
+      const text = getBodyString(body, "text")?.trim() || "";
+      if (!text) {
+        ctx.status = 400;
+        ctx.body = { ok: false, error: "Missing input text." };
+        return;
+      }
+      this.onTextInput(text);
+      ctx.body = { ok: true };
+    });
+
+    this.router.post("/api/companion/action", (ctx) => {
+      const body = normalizeRequestBody((ctx.request as any).body);
+      const action = getBodyString(body, "action")?.trim().toLowerCase() || "";
+      if (!action) {
+        ctx.status = 400;
+        ctx.body = { ok: false, error: "Missing companion action." };
+        return;
+      }
+
+      switch (action) {
+        case "new-chat":
+        case "new_chat":
+        case "reset-chat":
+        case "reset_chat":
+          resetChatHistory();
+          break;
+        case "repeat":
+        case "replay":
+        case "replay-last-answer":
+        case "replay_last_answer":
+          this.onButtonDoubleClick();
+          break;
+        case "button-press":
+        case "button_press":
+          this.onButtonPress();
+          break;
+        case "button-release":
+        case "button_release":
+          this.onButtonRelease();
+          break;
+        case "text-input":
+        case "text_input": {
+          const text = getBodyString(body, "text")?.trim() || "";
+          if (!text) {
+            ctx.status = 400;
+            ctx.body = { ok: false, error: "Missing input text." };
+            return;
+          }
+          this.onTextInput(text);
+          break;
+        }
+        default:
+          ctx.status = 400;
+          ctx.body = { ok: false, error: `Unsupported companion action: ${action}` };
+          return;
+      }
+
       ctx.body = { ok: true };
     });
 

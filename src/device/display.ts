@@ -116,6 +116,7 @@ export class WhisplayDisplay {
         port,
         onButtonPress: () => this.handleButtonPressedEvent(),
         onButtonRelease: () => this.handleButtonReleasedEvent(),
+        onButtonDoubleClick: () => this.handleButtonDoubleClickEvent(),
         onTextInput: (text: string) => this.handleTextInputEvent(text),
         onSettingsSaved: (settings) => {
           try {
@@ -515,6 +516,10 @@ export class WhisplayDisplay {
 
   private handleCameraCaptureEvent(): void {
     this.onCameraCaptureCallback();
+  }
+
+  private handleButtonDoubleClickEvent(): void {
+    this.buttonDoubleClickCallback?.();
   }
 
   private handleTextInputEvent(text: string): void {
