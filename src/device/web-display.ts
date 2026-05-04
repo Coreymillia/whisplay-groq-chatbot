@@ -20,6 +20,11 @@ import {
   getLatestVisionAnalysis,
 } from "../utils/vision-analysis";
 import {
+  listSavedChatHistories,
+  loadSavedChatHistory,
+  resetChatHistory,
+} from "../cloud-api/server";
+import {
   captureCameraImage,
   sendCameraDaemonCommand,
 } from "./camera-daemon";
@@ -404,6 +409,35 @@ export class WebDisplayServer implements WebAudioBridgeServer {
           image: "",
           image_icon_visible: false,
         });
+      }
+      ctx.body = { ok: true };
+    });
+
+    this.router.get("/api/chat/histories", (ctx) => {
+      ctx.set("Cache-Control", "no-store");
+      ctx.body = {
+        histories: listSavedChatHistories(),
+      };
+    });
+
+    this.router.post("/api/chat/reset", (ctx) => {
+      resetChatHistory();
+      ctx.body = { ok: true };
+    });
+
+    this.router.post("/api/chat/load", (ctx) => {
+      const body = normalizeRequestBody((ctx.request as any).body);
+      const fileName = getBodyString(body, "fileName") || "";
+      if (!fileName) {
+        ctx.status = 400;
+        ctx.body = { ok: false, error: "Missing chat history file." };
+        return;
+      }
+      const loaded = loadSavedChatHistory(fileName);
+      if (!loaded) {
+        ctx.status = 404;
+        ctx.body = { ok: false, error: "Chat history not found." };
+        return;
       }
       ctx.body = { ok: true };
     });

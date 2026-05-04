@@ -10,6 +10,14 @@ export type ChatWithLLMStreamFunction = (
 ) => Promise<any>;
 export type SummaryTextWithLLMFunction = (text: string, promptPrefix: string) => Promise<string>;
 export type ResetChatHistoryFunction = () => void;
+export interface SavedChatHistorySummary {
+  fileName: string;
+  updatedAt: number;
+  messageCount: number;
+  preview: string;
+}
+export type ListSavedChatHistoriesFunction = () => SavedChatHistorySummary[];
+export type LoadSavedChatHistoryFunction = (fileName: string) => boolean;
 export type TTSProcessorFunction = (text: string) => Promise<any>;
 
 

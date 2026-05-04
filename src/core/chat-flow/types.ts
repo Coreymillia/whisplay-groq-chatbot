@@ -76,4 +76,5 @@ export interface ChatFlowContext {
   hasLastAnswer: () => boolean;
   replayLastAnswer: () => void;
   repeatLastAnswerAloud: () => void;
+  clearLastAnswer: () => void;
 }

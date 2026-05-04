@@ -27,6 +27,10 @@ const visionStatus = document.getElementById("visionStatus");
 const savedPhotosList = document.getElementById("savedPhotosList");
 const savedPhotosStatus = document.getElementById("savedPhotosStatus");
 const savedPhotosToggleBtn = document.getElementById("savedPhotosToggleBtn");
+const chatHistorySelect = document.getElementById("chatHistorySelect");
+const loadChatBtn = document.getElementById("loadChatBtn");
+const newChatBtn = document.getElementById("newChatBtn");
+const chatStatus = document.getElementById("chatStatus");
 const groqKeyInput = document.getElementById("groqKeyInput");
 const groqKeyHint = document.getElementById("groqKeyHint");
 const geminiKeyInput = document.getElementById("geminiKeyInput");
@@ -68,6 +72,7 @@ let visionAnalysisVisible = false;
 let latestVisionAnalysisStamp = 0;
 let savedPhotos = [];
 let showAllSavedPhotos = false;
+let savedChatHistories = [];
 const DEFAULT_UI_THEME = "default";
 const DEFAULT_CAMERA_SOURCE = "pi-camera";
 const DEFAULT_ESP32_CAM_URL = "http://esp32-cam.local";
@@ -356,6 +361,12 @@ function setSavedPhotosStatus(message, isError = false) {
   savedPhotosStatus.style.color = isError ? "#ff8a8a" : "";
 }
 
+function setChatStatus(message, isError = false) {
+  if (!chatStatus) return;
+  chatStatus.textContent = message;
+  chatStatus.style.color = isError ? "#ff8a8a" : "";
+}
+
 function setVisionAnalysisVisible(visible) {
   visionAnalysisVisible = Boolean(visible);
   if (visionAnalysisWrap) {
@@ -434,6 +445,15 @@ function renderSavedPhotos() {
     meta.className = "saved-photo-meta";
     meta.textContent = new Date(photo.updatedAt).toLocaleString();
 
+    const actions = document.createElement("div");
+    actions.className = "saved-photo-actions";
+
+    const downloadLink = document.createElement("a");
+    downloadLink.className = "button compact saved-photo-download";
+    downloadLink.textContent = "Download";
+    downloadLink.href = photo.imageUrl;
+    downloadLink.download = photo.fileName;
+
     const deleteBtn = document.createElement("button");
     deleteBtn.type = "button";
     deleteBtn.className = "button secondary compact saved-photo-delete";
@@ -445,7 +465,9 @@ function renderSavedPhotos() {
     card.appendChild(img);
     card.appendChild(label);
     card.appendChild(meta);
-    card.appendChild(deleteBtn);
+    actions.appendChild(downloadLink);
+    actions.appendChild(deleteBtn);
+    card.appendChild(actions);
     savedPhotosList.appendChild(card);
   }
 }
@@ -498,6 +520,122 @@ function updateCameraSourceUi() {
   const source = cameraSourceSelect?.value || DEFAULT_CAMERA_SOURCE;
   if (esp32CamUrlWrap) {
     esp32CamUrlWrap.style.display = source === "esp32-cam" ? "block" : "none";
+  }
+}
+
+function formatChatHistoryOption(history) {
+  const timeLabel = history.updatedAt
+    ? new Date(history.updatedAt).toLocaleString()
+    : history.fileName;
+  const preview = history.preview ? ` - ${history.preview}` : "";
+  return `${timeLabel}${preview}`;
+}
+
+function renderChatHistoryOptions() {
+  if (!chatHistorySelect) return;
+  chatHistorySelect.innerHTML = "";
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = savedChatHistories.length ? "Saved chats" : "No saved chats";
+  chatHistorySelect.appendChild(placeholder);
+  savedChatHistories.forEach((history) => {
+    const option = document.createElement("option");
+    option.value = history.fileName;
+    option.textContent = formatChatHistoryOption(history);
+    chatHistorySelect.appendChild(option);
+  });
+  chatHistorySelect.value = "";
+  if (loadChatBtn) {
+    loadChatBtn.disabled = savedChatHistories.length === 0;
+  }
+}
+
+async function loadChatHistories() {
+  try {
+    const response = await fetch(`/api/chat/histories?ts=${Date.now()}`, {
+      cache: "no-store",
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    const payload = await response.json();
+    savedChatHistories = Array.isArray(payload.histories) ? payload.histories : [];
+    renderChatHistoryOptions();
+  } catch (error) {
+    console.error("Failed to load chat histories:", error);
+    savedChatHistories = [];
+    renderChatHistoryOptions();
+    setChatStatus("Failed to load saved chats.", true);
+  }
+}
+
+async function resetChat() {
+  setChatStatus("Starting new chat...");
+  if (newChatBtn) {
+    newChatBtn.disabled = true;
+  }
+  try {
+    const response = await fetch("/api/chat/reset", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({}),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || payload.ok === false) {
+      throw new Error(payload.error || `HTTP ${response.status}`);
+    }
+    setChatStatus("Started a new chat.");
+    await loadChatHistories();
+  } catch (error) {
+    console.error("Failed to reset chat:", error);
+    const message = error instanceof Error ? error.message : String(error);
+    setChatStatus(`New chat failed: ${message}`, true);
+  } finally {
+    if (newChatBtn) {
+      newChatBtn.disabled = false;
+    }
+  }
+}
+
+async function loadSelectedChatHistory() {
+  const fileName = chatHistorySelect?.value || "";
+  if (!fileName) {
+    setChatStatus("Choose a saved chat first.", true);
+    return;
+  }
+  setChatStatus("Loading saved chat...");
+  if (loadChatBtn) {
+    loadChatBtn.disabled = true;
+  }
+  try {
+    const response = await fetch("/api/chat/load", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ fileName }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || payload.ok === false) {
+      throw new Error(payload.error || `HTTP ${response.status}`);
+    }
+    const selectedHistory = savedChatHistories.find((history) => history.fileName === fileName);
+    setChatStatus(
+      selectedHistory?.preview
+        ? `Loaded chat: ${selectedHistory.preview}`
+        : "Loaded saved chat.",
+    );
+    await loadChatHistories();
+  } catch (error) {
+    console.error("Failed to load saved chat:", error);
+    const message = error instanceof Error ? error.message : String(error);
+    setChatStatus(`Load failed: ${message}`, true);
+  } finally {
+    if (loadChatBtn) {
+      loadChatBtn.disabled = savedChatHistories.length === 0;
+    }
   }
 }
 
@@ -907,6 +1045,7 @@ loadSettings();
 loadVisionPreview();
 loadVisionAnalysis();
 loadSavedPhotos();
+loadChatHistories();
 setVisionAnalysisVisible(false);
 requestAnimationFrame(animateScroll);
 setInterval(loadVisionAnalysis, 3000);
@@ -1010,6 +1149,18 @@ if (savedPhotosToggleBtn) {
     }
     showAllSavedPhotos = !showAllSavedPhotos;
     renderSavedPhotos();
+  });
+}
+
+if (newChatBtn) {
+  newChatBtn.addEventListener("click", () => {
+    resetChat();
+  });
+}
+
+if (loadChatBtn) {
+  loadChatBtn.addEventListener("click", () => {
+    loadSelectedChatHistory();
   });
 }
 

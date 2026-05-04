@@ -16,7 +16,7 @@ import {
   recordFileFormat,
   getDynamicVoiceDetectLevel,
 } from "../../device/audio";
-import { chatWithLLMStream } from "../../cloud-api/server";
+import { chatWithLLMStream, resetChatHistory } from "../../cloud-api/server";
 import { isImMode } from "../../cloud-api/llm";
 import { getSystemPromptWithKnowledge } from "../Knowledge";
 import { enableRAG } from "../../cloud-api/knowledge";
@@ -110,8 +110,14 @@ const voiceOffIntentPatterns = [
   /^\s*(?:don't\s+talk\s+to\s+me|do\s+not\s+talk\s+to\s+me|stop\s+(?:speaking|talking)|don't\s+speak|do\s+not\s+speak|be\s+quiet|voice\s+off|turn\s+(?:the\s+)?voice\s+off|disable\s+(?:voice|speech)|mute(?:\s+voice)?)\s*[.!?]*$/i,
 ];
 
+const speakOnDemandIntentPattern = /^\s*tell\s+me\b/i;
+
 const replaySpeechIntentPatterns = [
   /^\s*(?:read(?:\s+that)?\s+aloud|read(?:\s+that)?\s+out\s+loud|say\s+that\s+again|repeat\s+that|repeat\s+the\s+last\s+answer)\s*[.!?]*$/i,
+];
+
+const clearChatIntentPatterns = [
+  /^\s*(?:new\s+chat|clear\s+chat|reset\s+chat|start\s+(?:a\s+)?new\s+chat)\s*[.!?]*$/i,
 ];
 
 const volumeUpIntentPatterns = [
@@ -165,6 +171,11 @@ function shouldOpenVoiceHelp(prompt: string): boolean {
 function shouldReplayLastAnswerAloud(prompt: string): boolean {
   const trimmed = prompt.trim();
   return replaySpeechIntentPatterns.some((pattern) => pattern.test(trimmed));
+}
+
+function shouldClearChat(prompt: string): boolean {
+  const trimmed = prompt.trim();
+  return clearChatIntentPatterns.some((pattern) => pattern.test(trimmed));
 }
 
 function parseVolumeCommand(
@@ -227,6 +238,10 @@ function getVoiceModeCommand(prompt: string): "voice-chat" | "text-only" | null 
     return "text-only";
   }
   return null;
+}
+
+function shouldForceSpeakOnDemandReply(prompt: string): boolean {
+  return speakOnDemandIntentPattern.test(prompt.trim());
 }
 
 async function captureAndPrepareLatestImage(): Promise<string> {
@@ -815,6 +830,16 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
       stop: stopPlaying,
     } = ctx.streamResponser;
     let llmResponseText = "";
+    const shouldForceReplySpeech =
+      getRuntimeSettings().voiceMode === "speak-on-demand" &&
+      shouldForceSpeakOnDemandReply(ctx.asrText);
+    const runReplyFlow = async (callback: () => Promise<void>): Promise<void> => {
+      if (shouldForceReplySpeech) {
+        await ctx.streamResponser.withForcedSpeech(callback);
+        return;
+      }
+      await callback();
+    };
     const trackingPartial = (text: string): void => {
       llmResponseText += text;
       if (currentAnswerId === ctx.answerId) partial(text);
@@ -861,6 +886,14 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
         return;
       }
       ctx.repeatLastAnswerAloud();
+      return;
+    }
+    if (shouldClearChat(ctx.asrText)) {
+      resetChatHistory();
+      ctx.knowledgePrompts = [];
+      ctx.clearLastAnswer();
+      clearPendingCapturedImgForChat();
+      finishDirectMessage("Started a new chat.");
       return;
     }
     const volumeCommand = parseVolumeCommand(ctx.asrText);
@@ -958,11 +991,12 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
           display({
             text: "[describeImage]Analyzing uploaded image...",
           });
-          llmFuncMap.describeImage({ prompt: ctx.asrText })
-            .then(async (result) => {
-              if (currentAnswerId !== ctx.answerId) {
-                return;
-              }
+          void runReplyFlow(async () => {
+            await llmFuncMap.describeImage({ prompt: ctx.asrText })
+              .then(async (result) => {
+                if (currentAnswerId !== ctx.answerId) {
+                  return;
+                }
               const cleaned = stripToolTag(result);
               if (!cleaned) {
                 trackingPartial("I couldn't analyze that image.");
@@ -1016,9 +1050,10 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
                 updatedAt: Date.now(),
                 ok: false,
               });
-              trackingPartial(message);
-              endPartial();
-            });
+                trackingPartial(message);
+                endPartial();
+              });
+          });
           return;
         }
         let knowledgePrompt = res;
@@ -1052,47 +1087,49 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
             content: ctx.asrText,
           },
         ]);
-        chatWithLLMStream(
-          prompt,
-          (text) => { if (currentAnswerId === ctx.answerId) trackingPartial(text); },
-          () => currentAnswerId === ctx.answerId && endPartial(),
-          (partialThinking) =>
-            currentAnswerId === ctx.answerId &&
-            ctx.partialThinkingCallback(partialThinking),
-          (functionName: string, result?: string) => {
-            if (
-              functionName === "endConversation" &&
-              result?.startsWith("[success]")
-            ) {
-              ctx.endAfterAnswer = true;
-            }
-            if (
-              functionName === "generateImage" &&
-              result?.startsWith("[success]")
-            ) {
-              const img = getLatestGenImg();
-              if (img) {
-                display({ image: img });
+        void runReplyFlow(async () => {
+          await chatWithLLMStream(
+            prompt,
+            (text) => { if (currentAnswerId === ctx.answerId) trackingPartial(text); },
+            () => currentAnswerId === ctx.answerId && endPartial(),
+            (partialThinking) =>
+              currentAnswerId === ctx.answerId &&
+              ctx.partialThinkingCallback(partialThinking),
+            (functionName: string, result?: string) => {
+              if (
+                functionName === "endConversation" &&
+                result?.startsWith("[success]")
+              ) {
+                ctx.endAfterAnswer = true;
               }
-            }
-            if (
-              functionName.startsWith("playMusic") &&
-              result?.startsWith("[success]")
-            ) {
-              ctx.enterMusicAfterAnswer = true;
-              ctx.musicDisplayText = result.replace(/^\[success\]/, "").trim();
-            }
-            if (result) {
-              display({
-                text: `[${functionName}]${result}`,
-              });
-            } else {
-              display({
-                text: `Invoking [${functionName}]... {count}s`,
-              });
-            }
-          },
-        );
+              if (
+                functionName === "generateImage" &&
+                result?.startsWith("[success]")
+              ) {
+                const img = getLatestGenImg();
+                if (img) {
+                  display({ image: img });
+                }
+              }
+              if (
+                functionName.startsWith("playMusic") &&
+                result?.startsWith("[success]")
+              ) {
+                ctx.enterMusicAfterAnswer = true;
+                ctx.musicDisplayText = result.replace(/^\[success\]/, "").trim();
+              }
+              if (result) {
+                display({
+                  text: `[${functionName}]${result}`,
+                });
+              } else {
+                display({
+                  text: `Invoking [${functionName}]... {count}s`,
+                });
+              }
+            },
+          );
+        });
       });
     getPlayEndPromise().then(() => {
       if (ctx.currentFlowName === "answer") {

@@ -434,6 +434,10 @@ body::before {
   margin: 0 auto;
   box-shadow: 0 10px 18px rgba(0, 0, 0, 0.4);
   transition: transform 0.08s ease, box-shadow 0.08s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
 }
 
 .button.compact {
@@ -470,6 +474,27 @@ body::before {
 
 .text-input-wrap {
   position: relative;
+}
+
+.text-toolbar {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.text-history-controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex: 1 1 280px;
+}
+
+#chatHistorySelect {
+  min-width: 0;
+  flex: 1 1 auto;
 }
 
 #textInput {
@@ -573,6 +598,18 @@ body::before {
 
 .saved-photo-delete {
   margin-top: 8px;
+}
+
+.saved-photo-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.saved-photo-download,
+.saved-photo-delete {
+  margin-top: 0;
 }
 
 .saved-photos-empty {

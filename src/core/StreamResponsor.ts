@@ -61,9 +61,10 @@ export class StreamResponser {
   }
 
   private isTextOnlyMode = (): boolean => {
+    const voiceMode = getRuntimeSettings().voiceMode;
     return (
       this.forcedSpeechDepth === 0 &&
-      getRuntimeSettings().voiceMode === "text-only"
+      voiceMode !== "voice-chat"
     );
   };
 

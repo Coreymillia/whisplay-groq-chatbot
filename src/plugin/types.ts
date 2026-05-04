@@ -30,6 +30,13 @@ export interface LLMProvider {
   ) => Promise<any>;
   resetChatHistory: () => void;
   summaryTextWithLLM?: (text: string, promptPrefix: string) => Promise<string>;
+  listSavedChatHistories?: () => Array<{
+    fileName: string;
+    updatedAt: number;
+    messageCount: number;
+    preview: string;
+  }>;
+  loadSavedChatHistory?: (fileName: string) => boolean;
 }
 
 /** TTS (Text-to-Speech) provider */

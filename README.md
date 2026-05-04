@@ -255,9 +255,11 @@ The browser UI and HAT menu share the same stored settings.
 
 - **help** / **voice commands** = open the on-device voice command cheat sheet
 - **open settings** = open the HAT settings menu
+- **new chat** / **clear chat** / **reset chat** = clear the current conversation memory and start fresh
 - **talk to me** / **speak now** / **voice on** = enable spoken replies
 - **don't talk to me** / **stop speaking** / **voice off** / **be quiet** = disable spoken replies
 - **read that aloud** / **read that out loud** / **say that again** / **repeat that** = speak the last reply on demand, even in text-only mode
+- In **Speak on demand** mode, start a request with **`tell me ...`** to make that **one reply** speak without changing the saved voice mode
 - **set volume to 1-10** / **volume 1-10** = set speaker volume on a 1-10 scale
 - **volume up** / **volume down** = raise or lower the current speaker volume by one step
 - **screen timeout 1-10 minutes** / **display timeout 1-10 minutes** = set the HAT screen/saver timeout
@@ -276,6 +278,10 @@ The browser UI and HAT menu share the same stored settings.
 
 - **short press** = next saved photo
 - **long press** = exit back to the chatbot
+
+The browser-side saved photo view now keeps the **100 most recent photos** automatically. Older saved photos roll off first, and each saved photo can be **downloaded** from the browser UI before you delete it or let it age out.
+
+The browser UI also now has a **New Chat** button plus a **saved chats** picker. You can clear the active conversation memory for a fresh start, or load one of the saved chat history files back into the current session if you want to jump back into an older thread.
 
 ## HAT replay and face behavior
 

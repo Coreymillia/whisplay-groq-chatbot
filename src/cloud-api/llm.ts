@@ -3,6 +3,8 @@ import dotenv from "dotenv";
 import { LLMServer } from "../type";
 import {
   ChatWithLLMStreamFunction,
+  ListSavedChatHistoriesFunction,
+  LoadSavedChatHistoryFunction,
   ResetChatHistoryFunction,
   SummaryTextWithLLMFunction,
 } from "./interface";
@@ -13,6 +15,8 @@ dotenv.config();
 let _chatWithLLMStream: ChatWithLLMStreamFunction = noop as any;
 let resetChatHistory: ResetChatHistoryFunction = noop as any;
 let summaryTextWithLLM: SummaryTextWithLLMFunction = async (text, _) => text;
+let listSavedChatHistories: ListSavedChatHistoriesFunction = () => [];
+let loadSavedChatHistory: LoadSavedChatHistoryFunction = () => false;
 
 const MAX_FUNCTION_CALL_DEPTH = 5;
 let functionCallDepth = 0;
@@ -61,10 +65,23 @@ try {
   if (llmProvider.summaryTextWithLLM) {
     summaryTextWithLLM = llmProvider.summaryTextWithLLM;
   }
+  if (llmProvider.listSavedChatHistories) {
+    listSavedChatHistories = llmProvider.listSavedChatHistories;
+  }
+  if (llmProvider.loadSavedChatHistory) {
+    loadSavedChatHistory = llmProvider.loadSavedChatHistory;
+  }
 } catch (e: any) {
   console.warn(e.message);
 }
 
 const isImMode = llmServer === LLMServer.whisplayim;
 
-export { chatWithLLMStream, resetChatHistory, summaryTextWithLLM, isImMode };
+export {
+  chatWithLLMStream,
+  resetChatHistory,
+  summaryTextWithLLM,
+  listSavedChatHistories,
+  loadSavedChatHistory,
+  isImMode,
+};

@@ -14,6 +14,7 @@ import { getOpenAIClient, getOpenAILLMModel } from "./openai";
 import { llmFuncMap, llmTools } from "../../config/llm-tools";
 import {
   ChatWithLLMStreamFunction,
+  SavedChatHistorySummary,
   SummaryTextWithLLMFunction,
 } from "../interface";
 import { chatHistoryDir } from "../../utils/dir";
@@ -48,6 +49,7 @@ const buildImageDataUrl = (imagePath: string): string => {
 const chatHistoryFileName = `openai_chat_history_${moment().format(
   "YYYY-MM-DD_HH-mm-ss",
 )}.json`;
+const CHAT_HISTORY_FILE_PATTERN = /^openai_chat_history_.*\.json$/;
 
 const messages: Message[] = [
   {
@@ -74,6 +76,82 @@ const resetChatHistory = (): void => {
     role: "system",
     content: getSystemPrompt(),
   });
+};
+
+const getSafeChatHistoryPath = (fileName: string): string => {
+  return path.resolve(chatHistoryDir, path.basename(fileName || ""));
+};
+
+const readSavedChatHistory = (fileName: string): Message[] | null => {
+  const historyPath = getSafeChatHistoryPath(fileName);
+  if (!historyPath.startsWith(path.resolve(chatHistoryDir) + path.sep)) {
+    return null;
+  }
+  if (!fs.existsSync(historyPath) || !CHAT_HISTORY_FILE_PATTERN.test(path.basename(historyPath))) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(fs.readFileSync(historyPath, "utf8"));
+    if (!Array.isArray(parsed)) {
+      return null;
+    }
+    return parsed.filter((message) => {
+      return (
+        message &&
+        typeof message === "object" &&
+        typeof message.role === "string" &&
+        "content" in message
+      );
+    }) as Message[];
+  } catch (error) {
+    console.error("Failed to read saved chat history:", error);
+    return null;
+  }
+};
+
+const getHistoryPreview = (history: Message[]): string => {
+  const lastUserMessage = [...history]
+    .reverse()
+    .find((message) => message.role === "user" && typeof message.content === "string");
+  const fallbackMessage = [...history]
+    .reverse()
+    .find((message) => typeof message.content === "string" && message.content.trim().length > 0);
+  const previewSource = (lastUserMessage?.content || fallbackMessage?.content || "").trim();
+  return previewSource.length > 72
+    ? `${previewSource.slice(0, 69).trimEnd()}...`
+    : previewSource;
+};
+
+const listSavedChatHistories = (): SavedChatHistorySummary[] => {
+  if (!fs.existsSync(chatHistoryDir)) {
+    return [];
+  }
+  return fs.readdirSync(chatHistoryDir)
+    .filter((fileName) => CHAT_HISTORY_FILE_PATTERN.test(fileName))
+    .map((fileName) => {
+      const historyPath = path.join(chatHistoryDir, fileName);
+      const stats = fs.statSync(historyPath);
+      const history = readSavedChatHistory(fileName) || [];
+      return {
+        fileName,
+        updatedAt: stats.mtimeMs,
+        messageCount: history.length,
+        preview: getHistoryPreview(history),
+      };
+    })
+    .sort((a, b) => b.updatedAt - a.updatedAt);
+};
+
+const loadSavedChatHistory = (fileName: string): boolean => {
+  const history = readSavedChatHistory(fileName);
+  if (!history || history.length === 0) {
+    return false;
+  }
+  messages.length = 0;
+  messages.push(...history);
+  syncSystemPrompt();
+  updateLastMessageTime();
+  return true;
 };
 
 const chatWithLLMStream: ChatWithLLMStreamFunction = async (
@@ -315,4 +393,10 @@ const summaryTextWithLLM: SummaryTextWithLLMFunction = async (
   }
 };
 
-export default { chatWithLLMStream, resetChatHistory, summaryTextWithLLM };
+export default {
+  chatWithLLMStream,
+  resetChatHistory,
+  summaryTextWithLLM,
+  listSavedChatHistories,
+  loadSavedChatHistory,
+};

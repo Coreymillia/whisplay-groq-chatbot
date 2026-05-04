@@ -427,6 +427,12 @@ class ChatFlow implements ChatFlowContext {
     return Boolean(this.lastAnswerText || this.lastAnswerImage);
   };
 
+  clearLastAnswer = (): void => {
+    this.lastAnswerText = "";
+    this.lastAnswerEmoji = STATE_EMOJIS.answering;
+    this.lastAnswerImage = "";
+  };
+
   replayLastAnswer = (): void => {
     if (!this.hasLastAnswer()) {
       return;

@@ -38,6 +38,8 @@ export function registerLLMPlugins(): void {
         chatWithLLMStream: mod.chatWithLLMStream,
         resetChatHistory: mod.resetChatHistory,
         summaryTextWithLLM: mod.summaryTextWithLLM,
+        listSavedChatHistories: mod.listSavedChatHistories,
+        loadSavedChatHistory: mod.loadSavedChatHistory,
       };
     },
   } as LLMPlugin);

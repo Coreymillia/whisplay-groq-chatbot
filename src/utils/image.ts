@@ -4,6 +4,7 @@ import path from "path";
 
 export const genImgList: string[] = [];
 export const capturedImgList: string[] = [];
+export const MAX_CAPTURED_IMGS = 100;
 
 let latestDisplayImg = "";
 let latestShowedImg = "";
@@ -44,6 +45,39 @@ const loadLatestCapturedImg = () => {
 
 loadLatestCapturedImg();
 
+const clearTrackedImagePath = (imagePath: string) => {
+  if (latestDisplayImg === imagePath) {
+    latestDisplayImg = "";
+  }
+  if (latestShowedImg === imagePath) {
+    latestShowedImg = "";
+  }
+  if (pendingCapturedImgForChat === imagePath) {
+    clearPendingCapturedImgForChat();
+  }
+};
+
+const enforceCapturedImgLimit = (maxCount = MAX_CAPTURED_IMGS) => {
+  if (maxCount <= 0) {
+    return;
+  }
+  const images = readImagesFromDir(cameraDir);
+  const overflowCount = Math.max(0, images.length - maxCount);
+  if (overflowCount <= 0) {
+    capturedImgList.splice(0, capturedImgList.length, ...images);
+    return;
+  }
+  const removed = images.slice(0, overflowCount);
+  removed.forEach((imagePath) => {
+    if (fs.existsSync(imagePath)) {
+      fs.unlinkSync(imagePath);
+    }
+    clearTrackedImagePath(imagePath);
+  });
+  const remainingImages = images.slice(overflowCount);
+  capturedImgList.splice(0, capturedImgList.length, ...remainingImages);
+};
+
 export const setLatestGenImg = (imgPath: string) => {
   genImgList.push(imgPath);
   latestDisplayImg = imgPath;
@@ -79,6 +113,7 @@ export const setLatestCapturedImg = (imgPath: string) => {
   }
   capturedImgList.push(normalizedPath);
   setLatestShowedImage(imgPath);
+  enforceCapturedImgLimit();
 };
 
 export const setPendingCapturedImgForChat = (imgPath: string) => {
@@ -147,15 +182,7 @@ export const deleteCapturedImg = (fileName: string): string => {
   if (existingIndex >= 0) {
     capturedImgList.splice(existingIndex, 1);
   }
-  if (latestDisplayImg === imagePath) {
-    latestDisplayImg = "";
-  }
-  if (latestShowedImg === imagePath) {
-    latestShowedImg = "";
-  }
-  if (pendingCapturedImgForChat === imagePath) {
-    clearPendingCapturedImgForChat();
-  }
+  clearTrackedImagePath(imagePath);
   return imagePath;
 };
 

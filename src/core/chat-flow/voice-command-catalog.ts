@@ -25,6 +25,10 @@ export const VOICE_COMMAND_HELP_ENTRIES: VoiceCommandHelpEntry[] = [
     summary: "read that aloud / say that again",
   },
   {
+    id: "new-chat",
+    summary: "new chat / clear chat",
+  },
+  {
     id: "volume-set",
     summary: "set volume to 1-10",
   },

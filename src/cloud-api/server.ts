@@ -11,7 +11,12 @@ import {
   TTSServer,
   VisionServer,
 } from "../type";
-import { chatWithLLMStream, resetChatHistory } from "./llm";
+import {
+  chatWithLLMStream,
+  resetChatHistory,
+  listSavedChatHistories,
+  loadSavedChatHistory,
+} from "./llm";
 import {
   RecognizeAudioFunction,
   TTSProcessorFunction,
@@ -68,6 +73,8 @@ export {
   chatWithLLMStream,
   ttsProcessor,
   resetChatHistory,
+  listSavedChatHistories,
+  loadSavedChatHistory,
   vectorDB,
   embedText,
 };
