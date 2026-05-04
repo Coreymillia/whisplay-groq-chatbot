@@ -12,6 +12,8 @@ import {
   SCREENSAVER_MODES,
   getScreensaverModeLabel,
   saveRuntimeSettings,
+  SCROLL_SPEED_OPTIONS,
+  getScrollSpeedLevelLabel,
   VOLUME_LEVEL_OPTIONS,
   getVolumeLevelLabel,
   VOICE_MODES,
@@ -27,6 +29,7 @@ export const SETTINGS_OPEN_GRACE_MS = 3_000;
 export type SettingsMenuItemId =
   | "personality"
   | "record-time"
+  | "scroll-speed"
   | "volume"
   | "voice-mode"
   | "ui-theme"
@@ -120,6 +123,11 @@ export function buildSettingsMenuItems(): SettingsMenuItem[] {
       value: `${settings.manualRecordMaxSec}s`,
     },
     {
+      id: "scroll-speed",
+      label: "Scroll",
+      value: getScrollSpeedLevelLabel(settings.scrollSpeedLevel),
+    },
+    {
       id: "volume",
       label: "Volume",
       value: getVolumeLevelLabel(settings.volumeLevel),
@@ -198,6 +206,16 @@ function getNextVolumeLevel(current: number): number {
   ];
 }
 
+function getNextScrollSpeedLevel(current: number): number {
+  const currentIndex = SCROLL_SPEED_OPTIONS.findIndex((value) => value === current);
+  if (currentIndex === -1) {
+    return SCROLL_SPEED_OPTIONS[0];
+  }
+  return SCROLL_SPEED_OPTIONS[
+    (currentIndex + 1) % SCROLL_SPEED_OPTIONS.length
+  ];
+}
+
 function getNextVoiceMode(current: string): string {
   const currentIndex = VOICE_MODES.findIndex((mode) => mode === current);
   if (currentIndex === -1) {
@@ -260,6 +278,14 @@ export function applySettingsMenuAction(id: SettingsMenuItemId): {
       saveRuntimeSettings({ manualRecordMaxSec: nextValue });
       return {
         message: `Record ${nextValue}s`,
+        shouldExit: false,
+      };
+    }
+    case "scroll-speed": {
+      const nextValue = getNextScrollSpeedLevel(settings.scrollSpeedLevel);
+      saveRuntimeSettings({ scrollSpeedLevel: nextValue });
+      return {
+        message: `Scroll ${getScrollSpeedLevelLabel(nextValue)}`,
         shouldExit: false,
       };
     }

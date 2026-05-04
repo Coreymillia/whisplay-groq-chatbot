@@ -40,6 +40,7 @@ const personalityInput = document.getElementById("personalityInput");
 const voiceModeSelect = document.getElementById("voiceModeSelect");
 const volumeLevelSelect = document.getElementById("volumeLevelSelect");
 const recordTimeSelect = document.getElementById("recordTimeSelect");
+const scrollSpeedSelect = document.getElementById("scrollSpeedSelect");
 const uiThemeSelect = document.getElementById("uiThemeSelect");
 const cameraSourceSelect = document.getElementById("cameraSourceSelect");
 const esp32CamUrlInput = document.getElementById("esp32CamUrlInput");
@@ -57,6 +58,7 @@ const imageDisplay = document.getElementById("imageDisplay");
 
 let scrollTop = 0;
 let scrollSpeed = 0;
+let scrollSpeedFactor = 1;
 let scrollTarget = null;
 let scrollSyncStart = null;
 let scrollSyncDuration = 0;
@@ -80,6 +82,7 @@ const CUSTOM_PERSONALITY_PRESET_ID = "custom";
 let personalityPresets = [];
 let volumeLevelOptions = [];
 let recordTimeoutOptions = [];
+let scrollSpeedOptions = [];
 let idleTimeoutOptions = [];
 
 const DEFAULT_HEADER_MODE = "emoji";
@@ -146,14 +149,16 @@ function applyScrollSync(text, sync, viewportHeight) {
   scrollSyncDuration = duration;
 }
 
-function updateText(text, sync, speed) {
+function updateText(text, sync, speed, speedFactor = 1) {
   const viewportHeight = document.querySelector(".text-viewport").offsetHeight;
   const nextText = text || "";
   const isRegressive =
     nextText.length > 0 && nextText.length < lastText.length && lastText.startsWith(nextText);
+  const nextFactor = Number.isFinite(speedFactor) ? Math.max(0, speedFactor) : 1;
 
   if (isRegressive) {
     scrollSpeed = Math.max(0, parseInt(speed || 0, 10));
+    scrollSpeedFactor = nextFactor;
     applyScrollSync(lastText, sync, viewportHeight);
     maxScroll = Math.max(0, textContent.offsetHeight - viewportHeight);
     return;
@@ -173,6 +178,7 @@ function updateText(text, sync, speed) {
   }
 
   scrollSpeed = Math.max(0, parseInt(speed || 0, 10));
+  scrollSpeedFactor = nextFactor;
   applyScrollSync(lastText, sync, viewportHeight);
   maxScroll = Math.max(0, textContent.offsetHeight - viewportHeight);
 }
@@ -193,7 +199,7 @@ function animateScroll(timestamp) {
       scrollSyncStart = null;
     }
   } else if (scrollSpeed > 0 && scrollTop < maxScroll) {
-    const speedPerSec = scrollSpeed * 5;
+    const speedPerSec = scrollSpeed * 5 * scrollSpeedFactor;
     scrollTop = Math.min(maxScroll, scrollTop + (speedPerSec * deltaMs) / 1000);
   }
 
@@ -218,7 +224,12 @@ function applyState(data) {
   const status = data.status || "";
   statusText.textContent = status;
   emojiText.textContent = data.emoji || "";
-  updateText(data.text || "", data.scroll_sync, data.scroll_speed);
+  updateText(
+    data.text || "",
+    data.scroll_sync,
+    data.scroll_speed,
+    data.scroll_speed_factor,
+  );
   updateTextInputState(data.text_input_enabled, status);
 
   const ledColor = normalizeColor(data.RGB);
@@ -678,6 +689,10 @@ function formatVolumeLevelLabel(value) {
   return `${value}/10`;
 }
 
+function formatScrollSpeedLabel(value) {
+  return `${value}/10`;
+}
+
 function populateVolumeLevelOptions(selectedValue) {
   if (!volumeLevelSelect) return;
   volumeLevelSelect.innerHTML = "";
@@ -697,6 +712,27 @@ function populateVolumeLevelOptions(selectedValue) {
     volumeLevelSelect.appendChild(option);
   }
   volumeLevelSelect.value = fallbackValue;
+}
+
+function populateScrollSpeedOptions(selectedValue) {
+  if (!scrollSpeedSelect) return;
+  scrollSpeedSelect.innerHTML = "";
+  scrollSpeedOptions.forEach((value) => {
+    const option = document.createElement("option");
+    option.value = String(value);
+    option.textContent = formatScrollSpeedLabel(value);
+    scrollSpeedSelect.appendChild(option);
+  });
+  const fallbackValue = String(
+    Number.isFinite(selectedValue) ? selectedValue : 5,
+  );
+  if (![...scrollSpeedSelect.options].some((option) => option.value === fallbackValue)) {
+    const option = document.createElement("option");
+    option.value = fallbackValue;
+    option.textContent = formatScrollSpeedLabel(parseInt(fallbackValue, 10));
+    scrollSpeedSelect.appendChild(option);
+  }
+  scrollSpeedSelect.value = fallbackValue;
 }
 
 function formatIdleTimeoutLabel(value) {
@@ -735,6 +771,7 @@ function applySettings(settings) {
   populatePersonalityPresets(settings.personalityPresetId);
   populateVolumeLevelOptions(settings.volumeLevel || 9);
   populateRecordTimeoutOptions(settings.manualRecordMaxSec || 15);
+  populateScrollSpeedOptions(settings.scrollSpeedLevel || 5);
   if (personalityInput) {
     personalityInput.value = settings.personalityPrompt || "";
   }
@@ -789,6 +826,9 @@ async function loadSettings() {
     personalityPresets = Array.isArray(payload.presets) ? payload.presets : [];
     volumeLevelOptions = Array.isArray(payload.volumeLevelOptions)
       ? payload.volumeLevelOptions
+      : [];
+    scrollSpeedOptions = Array.isArray(payload.scrollSpeedOptions)
+      ? payload.scrollSpeedOptions
       : [];
     recordTimeoutOptions = Array.isArray(payload.recordTimeoutOptions)
       ? payload.recordTimeoutOptions
@@ -953,6 +993,7 @@ async function saveSettings({ clearGroqApiKey = false } = {}) {
     voiceMode: voiceModeSelect?.value || "text-only",
     volumeLevel: parseInt(volumeLevelSelect?.value || "9", 10),
     manualRecordMaxSec: parseInt(recordTimeSelect?.value || "15", 10),
+    scrollSpeedLevel: parseInt(scrollSpeedSelect?.value || "5", 10),
     uiTheme: uiThemeSelect?.value || DEFAULT_UI_THEME,
     cameraSource: cameraSourceSelect?.value || DEFAULT_CAMERA_SOURCE,
     esp32CamUrl: (esp32CamUrlInput?.value || DEFAULT_ESP32_CAM_URL).trim(),

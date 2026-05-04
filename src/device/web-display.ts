@@ -32,6 +32,7 @@ import {
   getPublicRuntimeSettings,
   IDLE_TIMEOUT_OPTIONS,
   RECORD_TIMEOUT_OPTIONS,
+  SCROLL_SPEED_OPTIONS,
   VOLUME_LEVEL_OPTIONS,
   saveRuntimeSettings,
 } from "../config/runtime-settings";
@@ -448,6 +449,7 @@ export class WebDisplayServer implements WebAudioBridgeServer {
         settings: getPublicRuntimeSettings(),
         presets: PERSONALITY_PRESETS,
         volumeLevelOptions: VOLUME_LEVEL_OPTIONS,
+        scrollSpeedOptions: SCROLL_SPEED_OPTIONS,
         recordTimeoutOptions: RECORD_TIMEOUT_OPTIONS,
         idleTimeoutOptions: IDLE_TIMEOUT_OPTIONS,
       };
@@ -461,6 +463,7 @@ export class WebDisplayServer implements WebAudioBridgeServer {
         geminiApiKey: getBodyString(body, "geminiApiKey"),
         personalityPrompt: getBodyString(body, "personalityPrompt"),
         volumeLevel: getBodyNumber(body, "volumeLevel"),
+        scrollSpeedLevel: getBodyNumber(body, "scrollSpeedLevel"),
         voiceMode: getBodyString(body, "voiceMode"),
         uiTheme: getBodyString(body, "uiTheme"),
         cameraSource: getBodyString(body, "cameraSource"),
@@ -480,6 +483,7 @@ export class WebDisplayServer implements WebAudioBridgeServer {
           personalityPrompt: settings.personalityPrompt,
           personalityPresetId: getPublicRuntimeSettings().personalityPresetId,
           volumeLevel: settings.volumeLevel,
+          scrollSpeedLevel: settings.scrollSpeedLevel,
           voiceMode: settings.voiceMode,
           uiTheme: settings.uiTheme,
           cameraSource: settings.cameraSource,
@@ -491,6 +495,7 @@ export class WebDisplayServer implements WebAudioBridgeServer {
         },
         presets: PERSONALITY_PRESETS,
         volumeLevelOptions: VOLUME_LEVEL_OPTIONS,
+        scrollSpeedOptions: SCROLL_SPEED_OPTIONS,
         recordTimeoutOptions: RECORD_TIMEOUT_OPTIONS,
         idleTimeoutOptions: IDLE_TIMEOUT_OPTIONS,
       };
@@ -524,6 +529,7 @@ export class WebDisplayServer implements WebAudioBridgeServer {
       text: this.currentStatus.text,
       text_input_enabled: this.currentStatus.text_input_enabled,
       scroll_speed: this.currentStatus.scroll_speed,
+      scroll_speed_factor: this.currentStatus.scroll_speed_factor,
       scroll_sync: this.currentStatus.scroll_sync,
       brightness: this.currentStatus.brightness,
       RGB: this.currentStatus.RGB,

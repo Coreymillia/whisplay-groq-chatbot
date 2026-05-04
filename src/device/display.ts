@@ -2,7 +2,10 @@ import { exec } from "child_process";
 import { resolve } from "path";
 import { Socket } from "net";
 import { getCurrentTimeTag } from "../utils";
-import { getRuntimeSettings } from "../config/runtime-settings";
+import {
+  getRuntimeSettings,
+  getScrollSpeedFactor,
+} from "../config/runtime-settings";
 import { WebDisplayServer } from "./web-display";
 import { webAudioBridge } from "./web-audio-bridge";
 import { setVolumeByLevel } from "../utils/volume";
@@ -16,6 +19,7 @@ export interface Status {
   text: string;
   text_input_enabled?: boolean;
   scroll_speed: number;
+  scroll_speed_factor: number;
   scroll_sync?: {
     char_end: number;
     duration_ms: number;
@@ -47,6 +51,7 @@ function getInitialStatus(): Status {
     text: "",
     text_input_enabled: false,
     scroll_speed: 3,
+    scroll_speed_factor: getScrollSpeedFactor(settings.scrollSpeedLevel),
     scroll_sync: undefined,
     brightness: 100,
     RGB: "#00FF30",
@@ -122,6 +127,8 @@ export class WhisplayDisplay {
             header_mode: settings.headerMode,
             screensaver_mode: settings.screensaverMode,
             idle_timeout_sec: settings.idleTimeoutSec,
+            scroll_speed: this.currentStatus.scroll_speed,
+            scroll_speed_factor: getScrollSpeedFactor(settings.scrollSpeedLevel),
           });
         },
       });
@@ -398,6 +405,8 @@ export class WhisplayDisplay {
       emoji,
       text,
       text_input_enabled,
+      scroll_speed,
+      scroll_speed_factor,
       RGB,
       brightness,
       scroll_sync,
@@ -431,6 +440,8 @@ export class WhisplayDisplay {
     this.currentStatus.emoji = emoji;
     this.currentStatus.text = text;
     this.currentStatus.text_input_enabled = text_input_enabled;
+    this.currentStatus.scroll_speed = scroll_speed;
+    this.currentStatus.scroll_speed_factor = scroll_speed_factor;
     this.currentStatus.RGB = RGB;
     this.currentStatus.brightness = brightness;
     this.currentStatus.scroll_sync = scroll_sync;

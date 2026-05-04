@@ -161,7 +161,7 @@ TTS_SERVER=espeak-ng
 
 ## Settings UI notes
 
-The browser simulator includes a settings panel for the Groq key, Gemini key, preset personalities, freeform personality editing, voice mode, record time, UI theme, HAT header mode, HAT screensaver mode, HAT idle timeout, and a shutdown button for clean power-off without SSH.
+The browser simulator includes a settings panel for the Groq key, Gemini key, preset personalities, freeform personality editing, voice mode, record time, text scroll speed, UI theme, HAT header mode, HAT screensaver mode, HAT idle timeout, and a shutdown button for clean power-off without SSH.
 
 The Groq and Gemini keys can be stored there without editing `.env`. Runtime settings are saved to the local settings file on the Pi, and Gemini vision will use the saved browser key before falling back to `GEMINI_API_KEY` from `.env`.
 
@@ -170,6 +170,8 @@ The browser UI also now includes a simple **Vision Test** image upload box. You 
 The browser settings panel now also includes an optional **Camera Source** selector for vision hardware. Right now it supports the local **Pi Camera** path and an **ESP32-CAM** network source with a configurable URL. The Vision Test card can either upload an image from your PC or capture one from the configured camera source.
 
 Captured photos are now kept in the project camera storage and exposed in the browser UI as a **Saved Photos** list. The browser UI can delete saved photos; the HAT browse mode is read-only.
+
+The saved **Text Scroll Speed** setting applies to both the browser simulator and the physical HAT, so you can speed up long replies without changing the existing button behavior.
 
 Current plan for Gemini:
 

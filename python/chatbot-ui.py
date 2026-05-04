@@ -41,7 +41,9 @@ current_battery_color = ColorUtils.get_rgb255_from_any("#55FF00")
 current_scroll_top = 0
 DEFAULT_SCROLL_SPEED = 0.25
 MAX_SCROLL_SPEED = 0.5
+DEFAULT_SCROLL_SPEED_FACTOR = 1.0
 current_scroll_speed = DEFAULT_SCROLL_SPEED
+current_scroll_speed_factor = DEFAULT_SCROLL_SPEED_FACTOR
 current_scroll_sync_char_end = None
 current_scroll_sync_duration_ms = None
 current_scroll_sync_target_top = None
@@ -67,6 +69,23 @@ camera_thread = None
 render_thread = None
 clients = {}
 status_icon_factories = []
+
+
+def normalize_scroll_speed_factor(value):
+    try:
+        return max(0.4, min(2.0, float(value)))
+    except (TypeError, ValueError):
+        return DEFAULT_SCROLL_SPEED_FACTOR
+
+
+def to_device_scroll_speed(requested_speed, scroll_speed_factor):
+    try:
+        base_speed = float(requested_speed)
+    except (TypeError, ValueError):
+        raise ValueError(f"Invalid scroll_speed payload: {requested_speed}")
+    normalized_speed = (base_speed / 3.0) * DEFAULT_SCROLL_SPEED
+    effective_speed = normalized_speed * normalize_scroll_speed_factor(scroll_speed_factor)
+    return min(MAX_SCROLL_SPEED, max(0.0, effective_speed))
 
 
 def resolve_font_path(custom_font_path=None):
@@ -814,13 +833,14 @@ class RenderThread(threading.Thread):
         self.render_event.set()
 
 def update_display_data(status=None, emoji=None, text=None,
-                   scroll_speed=None, scroll_sync=None, battery_level=None, battery_color=None, image_path=None,
+                   scroll_speed=None, scroll_speed_factor=None, scroll_sync=None, battery_level=None, battery_color=None, image_path=None,
                    network_connected=None, vpn_connected=None, rag_icon_visible=None, image_icon_visible=None, transaction_id=None,
                    wifi_signal_level=None,
                    music_progress=None, music_duration_ms=None, header_mode=None,
                    screensaver_mode=None, idle_timeout_sec=None):
     global current_status, current_emoji, current_text, current_battery_level
     global current_battery_color, current_scroll_top, current_scroll_speed, current_image_path
+    global current_scroll_speed_factor
     global current_scroll_sync_char_end, current_scroll_sync_duration_ms
     global current_scroll_sync_target_top, current_scroll_sync_speed
     global current_scroll_sync_hold_until
@@ -894,10 +914,17 @@ def update_display_data(status=None, emoji=None, text=None,
                 )
         except Exception as e:
             print(f"[Display] Invalid scroll_sync payload: {e}")
+    if scroll_speed_factor is not None:
+        try:
+            current_scroll_speed_factor = normalize_scroll_speed_factor(scroll_speed_factor)
+        except (TypeError, ValueError):
+            print(f"[Display] Invalid scroll_speed_factor payload: {scroll_speed_factor}")
     if scroll_speed is not None:
         try:
-            requested_speed = float(scroll_speed)
-            current_scroll_speed = min(MAX_SCROLL_SPEED, max(0.0, requested_speed))
+            current_scroll_speed = to_device_scroll_speed(
+                scroll_speed,
+                current_scroll_speed_factor,
+            )
         except (TypeError, ValueError):
             print(f"[Display] Invalid scroll_speed payload: {scroll_speed}")
     if network_connected is not None:
@@ -1007,6 +1034,7 @@ def handle_client(client_socket, addr, whisplay):
                     rgbled = content.get("RGB", None)
                     brightness = content.get("brightness", None)
                     scroll_speed = content.get("scroll_speed", None)
+                    scroll_speed_factor = content.get("scroll_speed_factor", None)
                     scroll_sync = content.get("scroll_sync", None)
                     response_to_client = content.get("response", None)
                     battery_level = content.get("battery_level", None)
@@ -1073,7 +1101,7 @@ def handle_client(client_socket, addr, whisplay):
                              (music_progress is not None) or (music_duration_ms is not None) or \
                              (header_mode is not None) or (screensaver_mode is not None) or (idle_timeout_sec is not None):
                         update_display_data(status=status, emoji=emoji,
-                                     text=text, scroll_speed=scroll_speed, scroll_sync=scroll_sync,
+                                     text=text, scroll_speed=scroll_speed, scroll_speed_factor=scroll_speed_factor, scroll_sync=scroll_sync,
                                      battery_level=battery_level, battery_color=battery_tuple,
                                                   image_path=image_path, network_connected=network_connected,
                                                   wifi_signal_level=wifi_signal_level,

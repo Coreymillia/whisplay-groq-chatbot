@@ -27,6 +27,7 @@ export interface RuntimeSettings {
   geminiApiKey: string;
   personalityPrompt: string;
   volumeLevel: number;
+  scrollSpeedLevel: number;
   voiceMode: VoiceMode;
   uiTheme: UITheme;
   cameraSource: CameraSource;
@@ -43,6 +44,7 @@ export interface RuntimeSettingsUpdate {
   geminiApiKey?: string;
   personalityPrompt?: string;
   volumeLevel?: number;
+  scrollSpeedLevel?: number;
   voiceMode?: string;
   uiTheme?: string;
   cameraSource?: string;
@@ -61,6 +63,7 @@ const SETTINGS_PATH = path.resolve(
 
 const DEFAULT_VOICE_MODE: VoiceMode = "text-only";
 const DEFAULT_VOLUME_LEVEL = 9;
+const DEFAULT_SCROLL_SPEED_LEVEL = 5;
 const DEFAULT_UI_THEME: UITheme = "default";
 const DEFAULT_CAMERA_SOURCE: CameraSource = "pi-camera";
 const DEFAULT_ESP32_CAM_URL = "http://esp32-cam.local";
@@ -70,6 +73,7 @@ const DEFAULT_SCREENSAVER_MODE: ScreensaverMode = "retro-geometry";
 const DEFAULT_IDLE_TIMEOUT_SEC = 120;
 export const RECORD_TIMEOUT_OPTIONS = [10, 15, 20, 30, 45, 60];
 export const VOLUME_LEVEL_OPTIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+export const SCROLL_SPEED_OPTIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 export const IDLE_TIMEOUT_OPTIONS = [0, 60, 120, 180, 240, 300, 360, 420, 480, 540, 600];
 export const VOICE_MODES: VoiceMode[] = [
   "text-only",
@@ -153,6 +157,14 @@ function normalizeVolumeLevel(value: unknown): number {
   return Math.max(1, Math.min(10, Math.round(numeric)));
 }
 
+function normalizeScrollSpeedLevel(value: unknown): number {
+  const numeric = typeof value === "number" ? value : parseInt(String(value), 10);
+  if (!Number.isFinite(numeric)) {
+    return DEFAULT_SCROLL_SPEED_LEVEL;
+  }
+  return Math.max(1, Math.min(10, Math.round(numeric)));
+}
+
 function normalizeUITheme(value: unknown): UITheme {
   if (typeof value === "string" && VALID_UI_THEMES.has(value as UITheme)) {
     return value as UITheme;
@@ -232,6 +244,7 @@ function sanitizeSettings(input: Partial<RuntimeSettings> | null | undefined): R
         ? input.personalityPrompt.trim()
         : "",
     volumeLevel: normalizeVolumeLevel(input?.volumeLevel),
+    scrollSpeedLevel: normalizeScrollSpeedLevel(input?.scrollSpeedLevel),
     voiceMode: normalizeVoiceMode(input?.voiceMode),
     uiTheme: normalizeUITheme(input?.uiTheme),
     cameraSource: normalizeCameraSource(input?.cameraSource),
@@ -294,6 +307,10 @@ export function saveRuntimeSettings(
     next.volumeLevel = normalizeVolumeLevel(update.volumeLevel);
   }
 
+  if (typeof update.scrollSpeedLevel === "number") {
+    next.scrollSpeedLevel = normalizeScrollSpeedLevel(update.scrollSpeedLevel);
+  }
+
   if (typeof update.voiceMode === "string") {
     next.voiceMode = normalizeVoiceMode(update.voiceMode);
   }
@@ -347,6 +364,16 @@ export function getVoiceModeLabel(value: string): string {
 export function getVolumeLevelLabel(value: number): string {
   const normalized = normalizeVolumeLevel(value);
   return `${normalized}/10`;
+}
+
+export function getScrollSpeedLevelLabel(value: number): string {
+  const normalized = normalizeScrollSpeedLevel(value);
+  return `${normalized}/10`;
+}
+
+export function getScrollSpeedFactor(value: number): number {
+  const normalized = normalizeScrollSpeedLevel(value);
+  return 0.4 + (normalized - 1) * 0.1777777778;
 }
 
 export function getUIThemeLabel(value: string): string {
@@ -427,6 +454,7 @@ export function getPublicRuntimeSettings(): {
   personalityPrompt: string;
   personalityPresetId: string;
   volumeLevel: number;
+  scrollSpeedLevel: number;
   voiceMode: VoiceMode;
   uiTheme: UITheme;
   cameraSource: CameraSource;
@@ -445,6 +473,7 @@ export function getPublicRuntimeSettings(): {
       settings.personalityPrompt,
     ),
     volumeLevel: settings.volumeLevel,
+    scrollSpeedLevel: settings.scrollSpeedLevel,
     voiceMode: settings.voiceMode,
     uiTheme: settings.uiTheme,
     cameraSource: settings.cameraSource,
