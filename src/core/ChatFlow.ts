@@ -58,6 +58,7 @@ class ChatFlow implements ChatFlowContext {
   pendingExternalReply: string = "";
   pendingExternalEmoji: string = "";
   pendingExternalImageUrl: string = "";
+  pendingExternalForceSpeech: boolean = false;
   currentExternalEmoji: string = "";
   stateMachine: FlowStateMachine;
   isFromWakeListening: boolean = false;
@@ -234,28 +235,41 @@ class ChatFlow implements ChatFlowContext {
     );
   };
 
-  streamExternalReply = async (text: string, emoji?: string): Promise<void> => {
-    if (!text) {
+  streamExternalReply = async (
+    text: string,
+    emoji?: string,
+    forceSpeech: boolean = false,
+  ): Promise<void> => {
+    const run = async (): Promise<void> => {
+      if (!text) {
+        this.streamResponser.endPartial();
+        return;
+      }
+      if (emoji) {
+        display({
+          status: "answering",
+          emoji,
+          scroll_speed: 3,
+        });
+      }
+      const { sentences, remaining } = splitSentences(text);
+      const parts = [...sentences];
+      if (remaining.trim()) {
+        parts.push(remaining);
+      }
+      for (const part of parts) {
+        this.streamResponser.partial(part);
+        await new Promise((resolve) => setTimeout(resolve, 120));
+      }
       this.streamResponser.endPartial();
+    };
+
+    if (forceSpeech) {
+      await this.streamResponser.withForcedSpeech(run);
       return;
     }
-    if (emoji) {
-      display({
-        status: "answering",
-        emoji,
-        scroll_speed: 3,
-      });
-    }
-    const { sentences, remaining } = splitSentences(text);
-    const parts = [...sentences];
-    if (remaining.trim()) {
-      parts.push(remaining);
-    }
-    for (const part of parts) {
-      this.streamResponser.partial(part);
-      await new Promise((resolve) => setTimeout(resolve, 120));
-    }
-    this.streamResponser.endPartial();
+
+    await run();
   };
 
   startWakeSession = (): void => {
@@ -427,6 +441,21 @@ class ChatFlow implements ChatFlowContext {
       scroll_speed: 3,
       text_input_enabled: true,
     });
+  };
+
+  repeatLastAnswerAloud = (): void => {
+    if (!this.lastAnswerText) {
+      return;
+    }
+    this.answerId += 1;
+    this.streamResponser.stop();
+    stopMusicPlayback();
+    this.endWakeSession();
+    this.pendingExternalReply = this.lastAnswerText;
+    this.pendingExternalEmoji = this.lastAnswerEmoji;
+    this.pendingExternalImageUrl = "";
+    this.pendingExternalForceSpeech = true;
+    this.transitionTo("external_answer");
   };
 }
 

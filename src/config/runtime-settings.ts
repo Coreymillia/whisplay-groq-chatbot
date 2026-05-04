@@ -26,6 +26,7 @@ export interface RuntimeSettings {
   groqApiKey: string;
   geminiApiKey: string;
   personalityPrompt: string;
+  volumeLevel: number;
   voiceMode: VoiceMode;
   uiTheme: UITheme;
   cameraSource: CameraSource;
@@ -41,6 +42,7 @@ export interface RuntimeSettingsUpdate {
   clearGroqApiKey?: boolean;
   geminiApiKey?: string;
   personalityPrompt?: string;
+  volumeLevel?: number;
   voiceMode?: string;
   uiTheme?: string;
   cameraSource?: string;
@@ -58,6 +60,7 @@ const SETTINGS_PATH = path.resolve(
 );
 
 const DEFAULT_VOICE_MODE: VoiceMode = "text-only";
+const DEFAULT_VOLUME_LEVEL = 9;
 const DEFAULT_UI_THEME: UITheme = "default";
 const DEFAULT_CAMERA_SOURCE: CameraSource = "pi-camera";
 const DEFAULT_ESP32_CAM_URL = "http://esp32-cam.local";
@@ -66,7 +69,8 @@ const DEFAULT_HEADER_MODE: HeaderMode = "emoji";
 const DEFAULT_SCREENSAVER_MODE: ScreensaverMode = "retro-geometry";
 const DEFAULT_IDLE_TIMEOUT_SEC = 120;
 export const RECORD_TIMEOUT_OPTIONS = [10, 15, 20, 30, 45, 60];
-export const IDLE_TIMEOUT_OPTIONS = [0, 30, 60, 120, 300, 600];
+export const VOLUME_LEVEL_OPTIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+export const IDLE_TIMEOUT_OPTIONS = [0, 60, 120, 180, 240, 300, 360, 420, 480, 540, 600];
 export const VOICE_MODES: VoiceMode[] = [
   "text-only",
   "speak-on-demand",
@@ -139,6 +143,14 @@ function normalizeVoiceMode(value: unknown): VoiceMode {
     return value as VoiceMode;
   }
   return DEFAULT_VOICE_MODE;
+}
+
+function normalizeVolumeLevel(value: unknown): number {
+  const numeric = typeof value === "number" ? value : parseInt(String(value), 10);
+  if (!Number.isFinite(numeric)) {
+    return DEFAULT_VOLUME_LEVEL;
+  }
+  return Math.max(1, Math.min(10, Math.round(numeric)));
 }
 
 function normalizeUITheme(value: unknown): UITheme {
@@ -219,6 +231,7 @@ function sanitizeSettings(input: Partial<RuntimeSettings> | null | undefined): R
       typeof input?.personalityPrompt === "string"
         ? input.personalityPrompt.trim()
         : "",
+    volumeLevel: normalizeVolumeLevel(input?.volumeLevel),
     voiceMode: normalizeVoiceMode(input?.voiceMode),
     uiTheme: normalizeUITheme(input?.uiTheme),
     cameraSource: normalizeCameraSource(input?.cameraSource),
@@ -277,6 +290,10 @@ export function saveRuntimeSettings(
     next.personalityPrompt = update.personalityPrompt.trim();
   }
 
+  if (typeof update.volumeLevel === "number") {
+    next.volumeLevel = normalizeVolumeLevel(update.volumeLevel);
+  }
+
   if (typeof update.voiceMode === "string") {
     next.voiceMode = normalizeVoiceMode(update.voiceMode);
   }
@@ -325,6 +342,11 @@ export function getVoiceModeLabel(value: string): string {
     default:
       return "Text only";
   }
+}
+
+export function getVolumeLevelLabel(value: number): string {
+  const normalized = normalizeVolumeLevel(value);
+  return `${normalized}/10`;
 }
 
 export function getUIThemeLabel(value: string): string {
@@ -392,7 +414,11 @@ export function getScreensaverModeLabel(value: string): string {
 }
 
 export function getIdleTimeoutLabel(value: number): string {
-  return value <= 0 ? "Off" : `${value}s`;
+  if (value <= 0) {
+    return "Off";
+  }
+  const minutes = Math.round(value / 60);
+  return `${minutes} min`;
 }
 
 export function getPublicRuntimeSettings(): {
@@ -400,6 +426,7 @@ export function getPublicRuntimeSettings(): {
   geminiApiKeyConfigured: boolean;
   personalityPrompt: string;
   personalityPresetId: string;
+  volumeLevel: number;
   voiceMode: VoiceMode;
   uiTheme: UITheme;
   cameraSource: CameraSource;
@@ -417,6 +444,7 @@ export function getPublicRuntimeSettings(): {
     personalityPresetId: getCurrentPersonalityPresetId(
       settings.personalityPrompt,
     ),
+    volumeLevel: settings.volumeLevel,
     voiceMode: settings.voiceMode,
     uiTheme: settings.uiTheme,
     cameraSource: settings.cameraSource,

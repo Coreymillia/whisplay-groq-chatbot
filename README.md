@@ -238,11 +238,12 @@ Current HAT settings items:
 
 - Preset personality
 - Record time
+- Volume
 - Voice mode
 - UI theme
 - Header mode
 - Screensaver mode
-- Idle timeout
+- Screen timeout
 - Shutdown
 - Exit
 
@@ -256,12 +257,18 @@ The browser UI and HAT menu share the same stored settings.
 - **open settings** = open the HAT settings menu
 - **talk to me** / **speak now** / **voice on** = enable spoken replies
 - **don't talk to me** / **stop speaking** / **voice off** / **be quiet** = disable spoken replies
+- **read that aloud** / **read that out loud** / **say that again** / **repeat that** = speak the last reply on demand, even in text-only mode
+- **set volume to 1-10** / **volume 1-10** = set speaker volume on a 1-10 scale
+- **volume up** / **volume down** = raise or lower the current speaker volume by one step
+- **screen timeout 1-10 minutes** / **display timeout 1-10 minutes** = set the HAT screen/saver timeout
+- **screen timeout off** / **display timeout off** = disable the HAT screen/saver timeout
 - **shutdown** / **shutdown raspberry** / **shutdown pi** = request Raspberry Pi shutdown
 - **browse photos** / **browse images** = open the saved-photo browser on the HAT
 - **take photo** / **capture image** = capture a still image from the configured camera source
 
 ### HAT voice command cheat sheet controls
 
+- The cheat sheet pages are generated from the same shared voice-command catalog used by the app, so the on-device list stays in sync with the current command set.
 - **short press** = next cheat-sheet page
 - **long press** = exit back to the chatbot
 
@@ -297,7 +304,7 @@ The animated headers run only on the physical HAT. The matrix-family headers sti
 There is also now a set of **full-screen HAT screensavers**:
 
 - Enable it from the browser settings or HAT settings menu
-- Set the **Idle timeout** to choose how long the device waits before the saver takes over
+- Set the **Screen timeout** to choose how long the device waits before the saver takes over
 - Set the timeout to **Off** in the browser UI or use the saver setting on the HAT if you do not want the full-screen effect
 - Current saver choices:
   - **Matrix**

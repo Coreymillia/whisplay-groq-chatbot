@@ -37,6 +37,7 @@ export interface ChatFlowContext {
   pendingExternalReply: string;
   pendingExternalEmoji: string;
   pendingExternalImageUrl: string;
+  pendingExternalForceSpeech: boolean;
   currentExternalEmoji: string;
   isFromWakeListening: boolean;
   enterMusicAfterAnswer: boolean;
@@ -55,7 +56,11 @@ export interface ChatFlowContext {
   shouldEndAfterAnswer: (text: string) => boolean;
   shouldOpenSettingsMenu: (text: string) => boolean;
   shutdownDevice: () => Promise<void>;
-  streamExternalReply: (text: string, emoji?: string) => Promise<void>;
+  streamExternalReply: (
+    text: string,
+    emoji?: string,
+    forceSpeech?: boolean,
+  ) => Promise<void>;
   openSettingsMenu: (ignoreNextRelease?: boolean) => void;
   closeSettingsMenu: () => void;
   renderSettingsMenu: (message?: string) => void;
@@ -70,4 +75,5 @@ export interface ChatFlowContext {
   }) => void;
   hasLastAnswer: () => boolean;
   replayLastAnswer: () => void;
+  repeatLastAnswerAloud: () => void;
 }

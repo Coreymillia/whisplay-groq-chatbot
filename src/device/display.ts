@@ -5,6 +5,7 @@ import { getCurrentTimeTag } from "../utils";
 import { getRuntimeSettings } from "../config/runtime-settings";
 import { WebDisplayServer } from "./web-display";
 import { webAudioBridge } from "./web-audio-bridge";
+import { setVolumeByLevel } from "../utils/volume";
 import dotEnv from "dotenv";
 
 dotEnv.config();
@@ -92,6 +93,11 @@ export class WhisplayDisplay {
   constructor() {
     this.deviceEnabled = parseBoolEnv("WHISPLAY_DEVICE_ENABLED", true);
     this.cameraEnabled = parseBoolEnv("ENABLE_CAMERA", false);
+    try {
+      setVolumeByLevel(getRuntimeSettings().volumeLevel);
+    } catch (error) {
+      console.warn("[volume] Failed to apply startup volume:", error);
+    }
     const webCameraEnabled = parseBoolEnv("WEB_CAMERA_ENABLED", false);
     if (this.cameraEnabled && !webCameraEnabled) {
       this.ensureCameraDaemon();
@@ -107,6 +113,11 @@ export class WhisplayDisplay {
         onButtonRelease: () => this.handleButtonReleasedEvent(),
         onTextInput: (text: string) => this.handleTextInputEvent(text),
         onSettingsSaved: (settings) => {
+          try {
+            setVolumeByLevel(settings.volumeLevel);
+          } catch (error) {
+            console.warn("[volume] Failed to apply saved volume:", error);
+          }
           void this.display({
             header_mode: settings.headerMode,
             screensaver_mode: settings.screensaverMode,

@@ -34,6 +34,7 @@ export class StreamResponser {
   private ttsChain: Promise<void> = Promise.resolve();
   private hasStartedTTS: boolean = false;
   private streamEnded: boolean = false;
+  private forcedSpeechDepth: number = 0;
 
   constructor(
     ttsFunc: TTSFunc,
@@ -60,7 +61,19 @@ export class StreamResponser {
   }
 
   private isTextOnlyMode = (): boolean => {
-    return getRuntimeSettings().voiceMode === "text-only";
+    return (
+      this.forcedSpeechDepth === 0 &&
+      getRuntimeSettings().voiceMode === "text-only"
+    );
+  };
+
+  withForcedSpeech = async <T>(callback: () => Promise<T> | T): Promise<T> => {
+    this.forcedSpeechDepth += 1;
+    try {
+      return await callback();
+    } finally {
+      this.forcedSpeechDepth = Math.max(0, this.forcedSpeechDepth - 1);
+    }
   };
 
   private finishResponse = (): void => {

@@ -160,6 +160,12 @@
           <option value="voice-chat">Voice chat</option>
         </select>
 
+        <label class="field-label" for="volumeLevelSelect">Volume</label>
+        <select class="settings-select" id="volumeLevelSelect"></select>
+        <div class="field-hint">
+          1 is very quiet, 10 is full volume. The range never fully mutes the speaker.
+        </div>
+
         <label class="field-label" for="recordTimeSelect">Button Record Time</label>
         <select class="settings-select" id="recordTimeSelect"></select>
         <div class="field-hint">
@@ -225,10 +231,10 @@
           <option value="neon-rain">Neon Rain</option>
         </select>
 
-        <label class="field-label" for="idleTimeoutSelect">HAT Idle Timeout</label>
+        <label class="field-label" for="idleTimeoutSelect">HAT Screen Timeout</label>
         <select class="settings-select" id="idleTimeoutSelect"></select>
         <div class="field-hint">
-          After this much idle time, the HAT can switch to the full-screen saver.
+          After this much idle time, the HAT can switch to the full-screen saver. Set Off to disable it.
         </div>
 
         <div class="settings-actions">

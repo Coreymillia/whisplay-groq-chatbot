@@ -27,6 +27,7 @@ import {
   getPublicRuntimeSettings,
   IDLE_TIMEOUT_OPTIONS,
   RECORD_TIMEOUT_OPTIONS,
+  VOLUME_LEVEL_OPTIONS,
   saveRuntimeSettings,
 } from "../config/runtime-settings";
 import { PERSONALITY_PRESETS } from "../config/personality-presets";
@@ -412,6 +413,7 @@ export class WebDisplayServer implements WebAudioBridgeServer {
       ctx.body = {
         settings: getPublicRuntimeSettings(),
         presets: PERSONALITY_PRESETS,
+        volumeLevelOptions: VOLUME_LEVEL_OPTIONS,
         recordTimeoutOptions: RECORD_TIMEOUT_OPTIONS,
         idleTimeoutOptions: IDLE_TIMEOUT_OPTIONS,
       };
@@ -424,6 +426,7 @@ export class WebDisplayServer implements WebAudioBridgeServer {
         clearGroqApiKey: getBodyBoolean(body, "clearGroqApiKey"),
         geminiApiKey: getBodyString(body, "geminiApiKey"),
         personalityPrompt: getBodyString(body, "personalityPrompt"),
+        volumeLevel: getBodyNumber(body, "volumeLevel"),
         voiceMode: getBodyString(body, "voiceMode"),
         uiTheme: getBodyString(body, "uiTheme"),
         cameraSource: getBodyString(body, "cameraSource"),
@@ -442,6 +445,7 @@ export class WebDisplayServer implements WebAudioBridgeServer {
           geminiApiKeyConfigured: Boolean(settings.geminiApiKey),
           personalityPrompt: settings.personalityPrompt,
           personalityPresetId: getPublicRuntimeSettings().personalityPresetId,
+          volumeLevel: settings.volumeLevel,
           voiceMode: settings.voiceMode,
           uiTheme: settings.uiTheme,
           cameraSource: settings.cameraSource,
@@ -452,6 +456,7 @@ export class WebDisplayServer implements WebAudioBridgeServer {
           idleTimeoutSec: settings.idleTimeoutSec,
         },
         presets: PERSONALITY_PRESETS,
+        volumeLevelOptions: VOLUME_LEVEL_OPTIONS,
         recordTimeoutOptions: RECORD_TIMEOUT_OPTIONS,
         idleTimeoutOptions: IDLE_TIMEOUT_OPTIONS,
       };

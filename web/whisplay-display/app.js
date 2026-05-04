@@ -33,6 +33,7 @@ const geminiKeyHint = document.getElementById("geminiKeyHint");
 const personalityPresetSelect = document.getElementById("personalityPresetSelect");
 const personalityInput = document.getElementById("personalityInput");
 const voiceModeSelect = document.getElementById("voiceModeSelect");
+const volumeLevelSelect = document.getElementById("volumeLevelSelect");
 const recordTimeSelect = document.getElementById("recordTimeSelect");
 const uiThemeSelect = document.getElementById("uiThemeSelect");
 const cameraSourceSelect = document.getElementById("cameraSourceSelect");
@@ -70,6 +71,7 @@ const DEFAULT_CAMERA_SOURCE = "pi-camera";
 const DEFAULT_ESP32_CAM_URL = "http://esp32-cam.local";
 const CUSTOM_PERSONALITY_PRESET_ID = "custom";
 let personalityPresets = [];
+let volumeLevelOptions = [];
 let recordTimeoutOptions = [];
 let idleTimeoutOptions = [];
 
@@ -521,8 +523,33 @@ function populateRecordTimeoutOptions(selectedValue) {
   recordTimeSelect.value = fallbackValue;
 }
 
+function formatVolumeLevelLabel(value) {
+  return `${value}/10`;
+}
+
+function populateVolumeLevelOptions(selectedValue) {
+  if (!volumeLevelSelect) return;
+  volumeLevelSelect.innerHTML = "";
+  volumeLevelOptions.forEach((value) => {
+    const option = document.createElement("option");
+    option.value = String(value);
+    option.textContent = formatVolumeLevelLabel(value);
+    volumeLevelSelect.appendChild(option);
+  });
+  const fallbackValue = String(
+    Number.isFinite(selectedValue) ? selectedValue : 9,
+  );
+  if (![...volumeLevelSelect.options].some((option) => option.value === fallbackValue)) {
+    const option = document.createElement("option");
+    option.value = fallbackValue;
+    option.textContent = formatVolumeLevelLabel(parseInt(fallbackValue, 10));
+    volumeLevelSelect.appendChild(option);
+  }
+  volumeLevelSelect.value = fallbackValue;
+}
+
 function formatIdleTimeoutLabel(value) {
-  return value <= 0 ? "Off" : `${value} seconds`;
+  return value <= 0 ? "Off" : `${Math.round(value / 60)} minute${value === 60 ? "" : "s"}`;
 }
 
 function populateIdleTimeoutOptions(selectedValue) {
@@ -555,6 +582,7 @@ function syncPresetSelectionFromPrompt(prompt) {
 function applySettings(settings) {
   if (!settings) return;
   populatePersonalityPresets(settings.personalityPresetId);
+  populateVolumeLevelOptions(settings.volumeLevel || 9);
   populateRecordTimeoutOptions(settings.manualRecordMaxSec || 15);
   if (personalityInput) {
     personalityInput.value = settings.personalityPrompt || "";
@@ -608,6 +636,9 @@ async function loadSettings() {
     }
     const payload = await response.json();
     personalityPresets = Array.isArray(payload.presets) ? payload.presets : [];
+    volumeLevelOptions = Array.isArray(payload.volumeLevelOptions)
+      ? payload.volumeLevelOptions
+      : [];
     recordTimeoutOptions = Array.isArray(payload.recordTimeoutOptions)
       ? payload.recordTimeoutOptions
       : [];
@@ -769,6 +800,7 @@ async function saveSettings({ clearGroqApiKey = false } = {}) {
     geminiApiKey: (geminiKeyInput?.value || "").trim(),
     personalityPrompt: (personalityInput?.value || "").trim(),
     voiceMode: voiceModeSelect?.value || "text-only",
+    volumeLevel: parseInt(volumeLevelSelect?.value || "9", 10),
     manualRecordMaxSec: parseInt(recordTimeSelect?.value || "15", 10),
     uiTheme: uiThemeSelect?.value || DEFAULT_UI_THEME,
     cameraSource: cameraSourceSelect?.value || DEFAULT_CAMERA_SOURCE,

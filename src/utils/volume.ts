@@ -10,6 +10,7 @@ import { execSync } from "child_process";
 
 const soundCardIndex = process.env.SOUND_CARD_INDEX || "1";
 console.log(`Using sound card index: ${soundCardIndex}`);
+const DEFAULT_MIXER_CONTROL = process.env.SOUND_MIXER_CONTROL || "Speaker";
 
 // curve
 const percentToAmixerValueMap = [
@@ -26,8 +27,29 @@ const percentToAmixerValueMap = [
   [100, 127],
 ];
 
+const volumeLevelToPercentMap = [5, 10, 20, 30, 40, 50, 60, 75, 90, 100];
+
+function runAmixer(command: string): string {
+  const candidates = [
+    `amixer -c ${soundCardIndex} ${command}`,
+    `amixer ${command}`,
+  ];
+
+  let lastError: unknown = null;
+  for (const candidate of candidates) {
+    try {
+      return execSync(candidate, { stdio: ["ignore", "pipe", "pipe"] }).toString();
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError instanceof Error
+    ? lastError
+    : new Error(`amixer command failed: ${command}`);
+}
+
 const getVolumeValueFromAmixer = (): number => {
-  const output = execSync(`amixer -c ${soundCardIndex} get Speaker`).toString();
+  const output = runAmixer(`get '${DEFAULT_MIXER_CONTROL}'`);
   const regex = /Front Left: Playback (\d+) \[(\d+)%\] \[([-\d.]+)dB\]/;
   const match = output.match(regex);
   if (match && match[1]) {
@@ -77,5 +99,37 @@ export const getCurrentLogPercent = (): number => {
 
 export const setVolumeByAmixer = (logPercent: number): void => {
   const value = logPercentToAmixerValue(logPercent);
-  execSync(`amixer -c ${soundCardIndex} set Speaker ${value}`);
+  runAmixer(`set '${DEFAULT_MIXER_CONTROL}' ${value}`);
+};
+
+export const getPercentFromVolumeLevel = (volumeLevel: number): number => {
+  const normalized = Math.max(1, Math.min(10, Math.round(volumeLevel)));
+  return volumeLevelToPercentMap[normalized - 1];
+};
+
+export const getVolumeLevelFromPercent = (logPercent: number): number => {
+  const percent = Math.max(0, Math.min(100, Math.round(logPercent)));
+  let bestLevel = 1;
+  let bestDistance = Number.POSITIVE_INFINITY;
+
+  volumeLevelToPercentMap.forEach((value, index) => {
+    const distance = Math.abs(value - percent);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestLevel = index + 1;
+    }
+  });
+
+  return bestLevel;
+};
+
+export const getCurrentVolumeLevel = (): number => {
+  return getVolumeLevelFromPercent(getCurrentLogPercent());
+};
+
+export const setVolumeByLevel = (volumeLevel: number): number => {
+  const normalized = Math.max(1, Math.min(10, Math.round(volumeLevel)));
+  const percent = getPercentFromVolumeLevel(normalized);
+  setVolumeByAmixer(percent);
+  return normalized;
 };

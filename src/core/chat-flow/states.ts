@@ -49,8 +49,11 @@ import { autoSaveExchange } from "../../config/mempalace";
 import { STATE_EMOJIS } from "../../config/state-emojis";
 import { llmFuncMap } from "../../config/llm-tools";
 import {
+  getIdleTimeoutLabel,
+  getRuntimeSettings,
   getVoiceModeLabel,
   saveRuntimeSettings,
+  VOLUME_LEVEL_OPTIONS,
 } from "../../config/runtime-settings";
 import {
   SETTINGS_OPEN_GRACE_MS,
@@ -60,6 +63,12 @@ import { ToolReturnTag } from "../../type";
 import { setLatestVisionAnalysis } from "../../utils/vision-analysis";
 import { clearLatestVisionAnalysis } from "../../utils/vision-analysis";
 import { captureCameraImage } from "../../device/camera-daemon";
+import {
+  buildVoiceCommandHelpPages,
+} from "./voice-command-catalog";
+import {
+  setVolumeByLevel,
+} from "../../utils/volume";
 
 const imageIntentPatterns = [
   /\bwhat do you see\b/i,
@@ -101,15 +110,21 @@ const voiceOffIntentPatterns = [
   /^\s*(?:don't\s+talk\s+to\s+me|do\s+not\s+talk\s+to\s+me|stop\s+(?:speaking|talking)|don't\s+speak|do\s+not\s+speak|be\s+quiet|voice\s+off|turn\s+(?:the\s+)?voice\s+off|disable\s+(?:voice|speech)|mute(?:\s+voice)?)\s*[.!?]*$/i,
 ];
 
+const replaySpeechIntentPatterns = [
+  /^\s*(?:read(?:\s+that)?\s+aloud|read(?:\s+that)?\s+out\s+loud|say\s+that\s+again|repeat\s+that|repeat\s+the\s+last\s+answer)\s*[.!?]*$/i,
+];
+
+const volumeUpIntentPatterns = [
+  /^\s*(?:volume\s+up|turn\s+(?:the\s+)?volume\s+up|increase\s+(?:the\s+)?volume|louder)\s*[.!?]*$/i,
+];
+
+const volumeDownIntentPatterns = [
+  /^\s*(?:volume\s+down|turn\s+(?:the\s+)?volume\s+down|decrease\s+(?:the\s+)?volume|lower\s+(?:the\s+)?volume|quieter)\s*[.!?]*$/i,
+];
+
 const PHOTO_BROWSER_EXIT_HOLD_MS = 1800;
 const VOICE_HELP_EXIT_HOLD_MS = 1800;
-
-const VOICE_COMMAND_HELP_PAGES = [
-  "VOICE CMDS 1/4\nhelp\nvoice commands\nopen settings\n\nShort: next\nHold: exit",
-  "VOICE CMDS 2/4\ntalk to me\nspeak now\nvoice on",
-  "VOICE CMDS 3/4\ndon't talk to me\nstop speaking\nvoice off\nbe quiet",
-  "VOICE CMDS 4/4\ntake photo\ncapture image\nbrowse photos\nbrowse images\nshutdown pi",
-];
+const VOICE_COMMAND_HELP_PAGES = buildVoiceCommandHelpPages();
 
 function shouldRouteToVision(prompt: string): boolean {
   const trimmed = prompt.trim();
@@ -145,6 +160,59 @@ function shouldOpenSettings(prompt: string): boolean {
 function shouldOpenVoiceHelp(prompt: string): boolean {
   const trimmed = prompt.trim();
   return voiceHelpIntentPatterns.some((pattern) => pattern.test(trimmed));
+}
+
+function shouldReplayLastAnswerAloud(prompt: string): boolean {
+  const trimmed = prompt.trim();
+  return replaySpeechIntentPatterns.some((pattern) => pattern.test(trimmed));
+}
+
+function parseVolumeCommand(
+  prompt: string,
+): { action: "set"; value: number } | { action: "step"; delta: -1 | 1 } | null {
+  const trimmed = prompt.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const setMatch = trimmed.match(
+    /^\s*(?:set\s+)?volume(?:\s+(?:to\s+)?)?(10|[1-9])\s*[.!?]*$/i,
+  );
+  if (setMatch) {
+    return {
+      action: "set",
+      value: parseInt(setMatch[1], 10),
+    };
+  }
+
+  if (volumeUpIntentPatterns.some((pattern) => pattern.test(trimmed))) {
+    return { action: "step", delta: 1 };
+  }
+  if (volumeDownIntentPatterns.some((pattern) => pattern.test(trimmed))) {
+    return { action: "step", delta: -1 };
+  }
+
+  return null;
+}
+
+function parseScreenTimeoutCommand(prompt: string): number | null {
+  const trimmed = prompt.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const match = trimmed.match(
+    /^\s*(?:set\s+)?(?:screen|display)\s+timeout(?:\s+(?:to\s+)?)?(off|10|[1-9])(?:\s*(?:m|min|minute|minutes))?\s*[.!?]*$/i,
+  );
+  if (!match) {
+    return null;
+  }
+
+  if (match[1].toLowerCase() === "off") {
+    return 0;
+  }
+
+  return parseInt(match[1], 10) * 60;
 }
 
 function getVoiceModeCommand(prompt: string): "voice-chat" | "text-only" | null {
@@ -787,6 +855,44 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
       ctx.transitionTo("voice_command_help");
       return;
     }
+    if (shouldReplayLastAnswerAloud(ctx.asrText)) {
+      if (!ctx.lastAnswerText) {
+        finishDirectMessage("I don't have anything to read back yet.");
+        return;
+      }
+      ctx.repeatLastAnswerAloud();
+      return;
+    }
+    const volumeCommand = parseVolumeCommand(ctx.asrText);
+    if (volumeCommand) {
+      let nextLevel = getRuntimeSettings().volumeLevel;
+      if (volumeCommand.action === "set") {
+        nextLevel = volumeCommand.value;
+      } else {
+        nextLevel = Math.max(
+          VOLUME_LEVEL_OPTIONS[0],
+          Math.min(
+            VOLUME_LEVEL_OPTIONS[VOLUME_LEVEL_OPTIONS.length - 1],
+            nextLevel + volumeCommand.delta,
+          ),
+        );
+      }
+      const appliedLevel = setVolumeByLevel(nextLevel);
+      saveRuntimeSettings({ volumeLevel: appliedLevel });
+      finishDirectMessage(`Volume ${appliedLevel} out of 10.`);
+      return;
+    }
+    const screenTimeoutCommand = parseScreenTimeoutCommand(ctx.asrText);
+    if (screenTimeoutCommand !== null) {
+      saveRuntimeSettings({ idleTimeoutSec: screenTimeoutCommand });
+      display({ idle_timeout_sec: screenTimeoutCommand });
+      finishDirectMessage(
+        screenTimeoutCommand <= 0
+          ? "Screen timeout off."
+          : `Screen timeout ${getIdleTimeoutLabel(screenTimeoutCommand)}.`,
+      );
+      return;
+    }
     if (shouldShutdown(ctx.asrText)) {
       void ctx.shutdownDevice();
       return;
@@ -1053,10 +1159,12 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
     const replyText = ctx.pendingExternalReply;
     const replyEmoji = ctx.pendingExternalEmoji;
     const replyImageUrl = ctx.pendingExternalImageUrl;
+    const replyForceSpeech = ctx.pendingExternalForceSpeech;
     ctx.currentExternalEmoji = replyEmoji;
     ctx.pendingExternalReply = "";
     ctx.pendingExternalEmoji = "";
     ctx.pendingExternalImageUrl = "";
+    ctx.pendingExternalForceSpeech = false;
 
     // Display the image if one was provided
     if (replyImageUrl) {
@@ -1064,7 +1172,7 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
     }
 
     if (replyText) {
-      void ctx.streamExternalReply(replyText, replyEmoji);
+      void ctx.streamExternalReply(replyText, replyEmoji, replyForceSpeech);
       ctx.streamResponser.getPlayEndPromise().then(() => {
         if (ctx.currentFlowName !== "external_answer") return;
         ctx.rememberLastAnswer({

@@ -12,11 +12,14 @@ import {
   SCREENSAVER_MODES,
   getScreensaverModeLabel,
   saveRuntimeSettings,
+  VOLUME_LEVEL_OPTIONS,
+  getVolumeLevelLabel,
   VOICE_MODES,
   UI_THEMES,
   getVoiceModeLabel,
   getUIThemeLabel,
 } from "../../config/runtime-settings";
+import { setVolumeByLevel } from "../../utils/volume";
 
 export const SETTINGS_SELECT_HOLD_MS = 3_000;
 export const SETTINGS_OPEN_GRACE_MS = 3_000;
@@ -24,6 +27,7 @@ export const SETTINGS_OPEN_GRACE_MS = 3_000;
 export type SettingsMenuItemId =
   | "personality"
   | "record-time"
+  | "volume"
   | "voice-mode"
   | "ui-theme"
   | "header-mode"
@@ -116,6 +120,11 @@ export function buildSettingsMenuItems(): SettingsMenuItem[] {
       value: `${settings.manualRecordMaxSec}s`,
     },
     {
+      id: "volume",
+      label: "Volume",
+      value: getVolumeLevelLabel(settings.volumeLevel),
+    },
+    {
       id: "voice-mode",
       label: "Voice",
       value: getCompactVoiceLabel(settings.voiceMode),
@@ -137,7 +146,7 @@ export function buildSettingsMenuItems(): SettingsMenuItem[] {
     },
     {
       id: "idle-timeout",
-      label: "Idle",
+      label: "Screen",
       value: getIdleTimeoutLabel(settings.idleTimeoutSec),
     },
     {
@@ -176,6 +185,16 @@ function getNextRecordTimeoutSec(current: number): number {
   }
   return RECORD_TIMEOUT_OPTIONS[
     (currentIndex + 1) % RECORD_TIMEOUT_OPTIONS.length
+  ];
+}
+
+function getNextVolumeLevel(current: number): number {
+  const currentIndex = VOLUME_LEVEL_OPTIONS.findIndex((value) => value === current);
+  if (currentIndex === -1) {
+    return VOLUME_LEVEL_OPTIONS[0];
+  }
+  return VOLUME_LEVEL_OPTIONS[
+    (currentIndex + 1) % VOLUME_LEVEL_OPTIONS.length
   ];
 }
 
@@ -244,6 +263,15 @@ export function applySettingsMenuAction(id: SettingsMenuItemId): {
         shouldExit: false,
       };
     }
+    case "volume": {
+      const nextValue = getNextVolumeLevel(settings.volumeLevel);
+      saveRuntimeSettings({ volumeLevel: nextValue });
+      setVolumeByLevel(nextValue);
+      return {
+        message: `Volume ${getVolumeLevelLabel(nextValue)}`,
+        shouldExit: false,
+      };
+    }
     case "voice-mode": {
       const nextValue = getNextVoiceMode(settings.voiceMode);
       saveRuntimeSettings({ voiceMode: nextValue });
@@ -280,7 +308,7 @@ export function applySettingsMenuAction(id: SettingsMenuItemId): {
       const nextValue = getNextIdleTimeout(settings.idleTimeoutSec);
       saveRuntimeSettings({ idleTimeoutSec: nextValue });
       return {
-        message: `Idle ${getIdleTimeoutLabel(nextValue)}`,
+        message: `Screen ${getIdleTimeoutLabel(nextValue)}`,
         shouldExit: false,
       };
     }
