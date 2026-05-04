@@ -26,6 +26,7 @@ const visionPreview = document.getElementById("visionPreview");
 const visionStatus = document.getElementById("visionStatus");
 const savedPhotosList = document.getElementById("savedPhotosList");
 const savedPhotosStatus = document.getElementById("savedPhotosStatus");
+const savedPhotosToggleBtn = document.getElementById("savedPhotosToggleBtn");
 const groqKeyInput = document.getElementById("groqKeyInput");
 const groqKeyHint = document.getElementById("groqKeyHint");
 const geminiKeyInput = document.getElementById("geminiKeyInput");
@@ -66,6 +67,7 @@ let settingsLoaded = false;
 let visionAnalysisVisible = false;
 let latestVisionAnalysisStamp = 0;
 let savedPhotos = [];
+let showAllSavedPhotos = false;
 const DEFAULT_UI_THEME = "default";
 const DEFAULT_CAMERA_SOURCE = "pi-camera";
 const DEFAULT_ESP32_CAM_URL = "http://esp32-cam.local";
@@ -389,42 +391,53 @@ function renderSavedPhotos() {
   savedPhotosList.innerHTML = "";
   if (!savedPhotos.length) {
     setSavedPhotosStatus("No saved photos yet.");
+    const empty = document.createElement("div");
+    empty.className = "saved-photos-empty";
+    empty.textContent = "No saved photos yet.";
+    savedPhotosList.appendChild(empty);
+    if (savedPhotosToggleBtn) {
+      savedPhotosToggleBtn.disabled = true;
+      savedPhotosToggleBtn.textContent = "Gallery";
+    }
     return;
   }
-  setSavedPhotosStatus(`${savedPhotos.length} saved photo${savedPhotos.length === 1 ? "" : "s"}.`);
-  for (const photo of savedPhotos) {
+  const visiblePhotos = showAllSavedPhotos ? savedPhotos : savedPhotos.slice(0, 4);
+  const hiddenCount = Math.max(0, savedPhotos.length - visiblePhotos.length);
+  const countLabel = `${savedPhotos.length} saved photo${savedPhotos.length === 1 ? "" : "s"}.`;
+  setSavedPhotosStatus(
+    showAllSavedPhotos || hiddenCount === 0
+      ? countLabel
+      : `${countLabel} Showing ${visiblePhotos.length} recent.`,
+  );
+  if (savedPhotosToggleBtn) {
+    savedPhotosToggleBtn.disabled = savedPhotos.length <= 4;
+    savedPhotosToggleBtn.textContent =
+      savedPhotos.length <= 4
+        ? "Gallery"
+        : showAllSavedPhotos
+          ? "Recent Only"
+          : `Gallery (${savedPhotos.length})`;
+  }
+  for (const photo of visiblePhotos) {
     const card = document.createElement("div");
-    card.style.border = "1px solid rgba(255,255,255,0.12)";
-    card.style.borderRadius = "12px";
-    card.style.padding = "8px";
-    card.style.background = "rgba(255,255,255,0.03)";
+    card.className = "saved-photo-card";
 
     const img = document.createElement("img");
     img.src = `${photo.imageUrl}?ts=${photo.updatedAt}`;
     img.alt = photo.fileName;
-    img.style.width = "100%";
-    img.style.aspectRatio = "1 / 1";
-    img.style.objectFit = "cover";
-    img.style.borderRadius = "8px";
-    img.style.display = "block";
 
     const label = document.createElement("div");
+    label.className = "saved-photo-name";
     label.textContent = photo.fileName;
-    label.style.fontSize = "12px";
-    label.style.marginTop = "8px";
-    label.style.wordBreak = "break-word";
 
     const meta = document.createElement("div");
+    meta.className = "saved-photo-meta";
     meta.textContent = new Date(photo.updatedAt).toLocaleString();
-    meta.style.fontSize = "11px";
-    meta.style.opacity = "0.7";
-    meta.style.marginTop = "4px";
 
     const deleteBtn = document.createElement("button");
     deleteBtn.type = "button";
-    deleteBtn.className = "button secondary compact";
+    deleteBtn.className = "button secondary compact saved-photo-delete";
     deleteBtn.textContent = "Delete";
-    deleteBtn.style.marginTop = "8px";
     deleteBtn.addEventListener("click", () => {
       deleteSavedPhoto(photo.fileName);
     });
@@ -987,6 +1000,16 @@ if (visionAnalysisToggleBtn) {
     if (visionAnalysisVisible) {
       loadVisionAnalysis();
     }
+  });
+}
+
+if (savedPhotosToggleBtn) {
+  savedPhotosToggleBtn.addEventListener("click", () => {
+    if (savedPhotos.length <= 4) {
+      return;
+    }
+    showAllSavedPhotos = !showAllSavedPhotos;
+    renderSavedPhotos();
   });
 }
 

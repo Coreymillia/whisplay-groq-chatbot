@@ -12,9 +12,9 @@
   />
   <link rel="stylesheet" href="/styles.css" />
 </head>
-<body>
-  <div class="wrap">
-    <div class="screen">
+  <body>
+    <div class="wrap">
+      <div class="screen">
       <div class="screen-inner">
         <div class="header">
           <div class="status-bar">
@@ -53,205 +53,244 @@
         </div>
         <div class="dim" id="dim"></div>
       </div>
-    </div>
-    <div class="side">
-      <div class="card">
-        <div class="title">RGB LED</div>
-        <div class="led" id="led"></div>
-        <div class="status-text" id="ledText">--</div>
       </div>
-      <div class="card">
-        <div class="title">Button</div>
-        <button class="button" id="btn">PRESS</button>
-        <div class="status-text" id="btnText">released</div>
-      </div>
-      <div class="card" id="webAudioCard" style="display:none">
-        <div class="title">Web Audio</div>
-        <div class="status-text" id="micIndicator" style="display:none;color:#f55">● REC</div>
-        <div class="status-text" id="camIndicator" style="display:none;color:#5af">● CAM</div>
-      </div>
-      <div class="card" id="textInputCard">
-        <div class="title">Text Input</div>
-        <div class="text-input-wrap">
-          <textarea id="textInput" placeholder="Type a message..." rows="6"></textarea>
-          <button id="textSendBtn" title="Send">➤</button>
-        </div>
-      </div>
-      <div class="card" id="visionCard">
-        <div class="title">Vision Test</div>
-        <label class="field-label" for="visionImageInput">Upload Image</label>
-        <input class="settings-input" id="visionImageInput" type="file" accept="image/*" />
-        <div class="field-hint">
-          Pick a photo from your PC, or capture one from the configured camera source, then ask the bot what it sees.
-        </div>
-        <div class="settings-actions">
-          <button class="button compact" id="visionUploadBtn" type="button">Use for Vision</button>
-          <button class="button secondary compact" id="visionCaptureBtn" type="button">Capture Camera</button>
-          <button class="button secondary compact" id="visionAnalysisToggleBtn" type="button">Show Gemini Output</button>
-        </div>
-        <img
-          id="visionPreview"
-          alt="Vision preview"
-          style="display:none;width:100%;border-radius:12px;margin-top:10px;border:1px solid rgba(255,255,255,0.12);"
-        />
-        <div class="status-text" id="visionStatus">No image uploaded.</div>
-        <div
-          id="visionAnalysisWrap"
-          style="display:none;margin-top:10px;padding:10px;border-radius:12px;border:1px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.03);"
-        >
-          <div class="field-label" style="margin-top:0">Gemini Output</div>
-          <div class="field-hint" id="visionAnalysisMeta">No Gemini analysis yet.</div>
-          <pre
-            id="visionAnalysisText"
-            style="margin:8px 0 0;white-space:pre-wrap;word-break:break-word;font:inherit;max-height:220px;overflow:auto;"
-          ></pre>
-        </div>
-        <div
-          id="savedPhotosWrap"
-          style="margin-top:12px;padding-top:12px;border-top:1px solid rgba(255,255,255,0.08);"
-        >
-          <div class="field-label" style="margin-top:0">Saved Photos</div>
-          <div class="field-hint" id="savedPhotosStatus">Loading saved photos...</div>
-          <div
-            id="savedPhotosList"
-            style="display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px;margin-top:10px;"
-          ></div>
-        </div>
-      </div>
-      <div class="card" id="settingsCard">
-        <div class="title">Settings</div>
-        <label class="field-label" for="groqKeyInput">Groq API Key</label>
-        <input
-          class="settings-input"
-          id="groqKeyInput"
-          type="password"
-          placeholder="Leave blank to keep the saved key"
-          autocomplete="off"
-        />
-        <div class="field-hint" id="groqKeyHint">No key stored</div>
-
-        <label class="field-label" for="geminiKeyInput">Gemini API Key</label>
-        <input
-          class="settings-input"
-          id="geminiKeyInput"
-          type="password"
-          placeholder="Leave blank to keep the saved key"
-          autocomplete="off"
-        />
-        <div class="field-hint" id="geminiKeyHint">No key stored</div>
-
-        <label class="field-label" for="personalityPresetSelect">Preset Personality</label>
-        <select class="settings-select" id="personalityPresetSelect">
-          <option value="custom">Custom</option>
-        </select>
-
-        <label class="field-label" for="personalityInput">Personality</label>
-        <textarea
-          class="settings-textarea"
-          id="personalityInput"
-          rows="5"
-          placeholder="Describe how the bot should respond..."
-        ></textarea>
-
-        <label class="field-label" for="voiceModeSelect">Voice Mode</label>
-        <select class="settings-select" id="voiceModeSelect">
-          <option value="text-only">Text only</option>
-          <option value="speak-on-demand">Speak on demand</option>
-          <option value="voice-chat">Voice chat</option>
-        </select>
-
-        <label class="field-label" for="volumeLevelSelect">Volume</label>
-        <select class="settings-select" id="volumeLevelSelect"></select>
-        <div class="field-hint">
-          1 is very quiet, 10 is full volume. The range never fully mutes the speaker.
-        </div>
-
-        <label class="field-label" for="recordTimeSelect">Button Record Time</label>
-        <select class="settings-select" id="recordTimeSelect"></select>
-        <div class="field-hint">
-          Hold for this long to finish recording. Keep holding 3 more seconds to open HAT settings.
-        </div>
-
-        <label class="field-label" for="uiThemeSelect">UI Theme</label>
-        <select class="settings-select" id="uiThemeSelect">
-          <option value="default">Default</option>
-          <option value="matrix">Matrix</option>
-          <option value="plasma">Plasma</option>
-          <option value="amber-terminal">Amber Terminal</option>
-        </select>
-        <div class="field-hint">
-          Themes change the simulator background, fonts, and color palette.
-        </div>
-
-        <label class="field-label" for="cameraSourceSelect">Camera Source</label>
-        <select class="settings-select" id="cameraSourceSelect">
-          <option value="pi-camera">Pi Camera</option>
-          <option value="esp32-cam">ESP32-CAM</option>
-        </select>
-        <div class="field-hint">
-          Optional vision hardware path. This selector is meant to grow later for sources like Arducam too.
-        </div>
-
-        <div id="esp32CamUrlWrap">
-          <label class="field-label" for="esp32CamUrlInput">ESP32-CAM URL</label>
-          <input
-            class="settings-input"
-            id="esp32CamUrlInput"
-            type="text"
-            placeholder="http://esp32-cam.local"
-            autocomplete="off"
-          />
-          <div class="field-hint">
-            Used for `/status` and `/latest.jpg` on the ESP32-CAM firmware.
+      <div class="side">
+        <div class="utility-grid">
+          <div class="card utility-card">
+            <div class="title">RGB LED</div>
+            <div class="led" id="led"></div>
+            <div class="status-text" id="ledText">--</div>
+          </div>
+          <div class="card utility-card">
+            <div class="title">Button</div>
+            <button class="button" id="btn">PRESS</button>
+            <div class="status-text" id="btnText">released</div>
+          </div>
+          <div class="card utility-card" id="webAudioCard" style="display:none">
+            <div class="title">Web Audio</div>
+            <div class="status-text" id="micIndicator" style="display:none;color:#f55">● REC</div>
+            <div class="status-text" id="camIndicator" style="display:none;color:#5af">● CAM</div>
           </div>
         </div>
+        <div class="card" id="textInputCard">
+          <div class="title">Text Input</div>
+        <div class="text-input-wrap">
+            <textarea id="textInput" placeholder="Type a message..." rows="6"></textarea>
+            <button id="textSendBtn" title="Send">➤</button>
+          </div>
+        </div>
+        <div class="workspace-grid">
+          <div class="card" id="visionCard">
+            <div class="title">Vision Test</div>
+            <div class="vision-grid">
+              <div class="vision-main">
+                <label class="field-label" for="visionImageInput">Upload Image</label>
+                <input class="settings-input" id="visionImageInput" type="file" accept="image/*" />
+                <div class="field-hint">
+                  Pick a photo from your PC, or capture one from the configured camera source, then ask the bot what it sees.
+                </div>
+                <div class="settings-actions vision-actions">
+                  <button class="button compact" id="visionUploadBtn" type="button">Use for Vision</button>
+                  <button class="button secondary compact" id="visionCaptureBtn" type="button">Capture Camera</button>
+                  <button class="button secondary compact" id="visionAnalysisToggleBtn" type="button">Show Gemini Output</button>
+                </div>
+                <img
+                  id="visionPreview"
+                  alt="Vision preview"
+                  style="display:none;width:100%;border-radius:12px;margin-top:10px;border:1px solid rgba(255,255,255,0.12);"
+                />
+                <div class="status-text vision-status" id="visionStatus">No image uploaded.</div>
+                <div
+                  id="visionAnalysisWrap"
+                  style="display:none;margin-top:10px;padding:10px;border-radius:12px;border:1px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.03);"
+                >
+                  <div class="field-label" style="margin-top:0">Gemini Output</div>
+                  <div class="field-hint" id="visionAnalysisMeta">No Gemini analysis yet.</div>
+                  <pre
+                    id="visionAnalysisText"
+                    style="margin:8px 0 0;white-space:pre-wrap;word-break:break-word;font:inherit;max-height:220px;overflow:auto;"
+                  ></pre>
+                </div>
+              </div>
+              <div class="vision-sidebar">
+                <div class="saved-photos-header">
+                  <div>
+                    <div class="field-label saved-photos-title">Recent Photos</div>
+                    <div class="field-hint saved-photos-subtitle" id="savedPhotosStatus">Loading saved photos...</div>
+                  </div>
+                  <button
+                    class="button secondary compact"
+                    id="savedPhotosToggleBtn"
+                    type="button"
+                  >
+                    Gallery
+                  </button>
+                </div>
+                <div id="savedPhotosList" class="saved-photos-grid"></div>
+              </div>
+            </div>
+          </div>
+          <div class="card" id="settingsCard">
+            <div class="title">Settings</div>
+            <div class="settings-grid">
+              <div class="settings-field">
+                <label class="field-label" for="groqKeyInput">Groq API Key</label>
+                <input
+                  class="settings-input"
+                  id="groqKeyInput"
+                  type="password"
+                  placeholder="Leave blank to keep the saved key"
+                  autocomplete="off"
+                />
+                <div class="field-hint" id="groqKeyHint">No key stored</div>
+              </div>
 
-        <label class="field-label" for="headerModeSelect">HAT Header</label>
-        <select class="settings-select" id="headerModeSelect">
-          <option value="emoji">Emoji</option>
-          <option value="matrix">Matrix</option>
-          <option value="matrix-binary">Matrix Binary</option>
-          <option value="matrix-blue">Blue Matrix</option>
-          <option value="retro-geometry">Retro Geometry</option>
-          <option value="plasma">Plasma</option>
-          <option value="neon-rain">Neon Rain</option>
-        </select>
-        <div class="field-hint">
-          Lets the physical HAT header use emoji or a matching animated effect strip.
-        </div>
+              <div class="settings-field">
+                <label class="field-label" for="geminiKeyInput">Gemini API Key</label>
+                <input
+                  class="settings-input"
+                  id="geminiKeyInput"
+                  type="password"
+                  placeholder="Leave blank to keep the saved key"
+                  autocomplete="off"
+                />
+                <div class="field-hint" id="geminiKeyHint">No key stored</div>
+              </div>
 
-        <label class="field-label" for="screensaverModeSelect">HAT Screensaver</label>
-        <select class="settings-select" id="screensaverModeSelect">
-          <option value="off">Off</option>
-          <option value="matrix">Matrix</option>
-          <option value="matrix-binary">Matrix Binary</option>
-          <option value="matrix-blue">Blue Matrix</option>
-          <option value="retro-geometry">Retro Geometry</option>
-          <option value="plasma">Plasma</option>
-          <option value="neon-rain">Neon Rain</option>
-        </select>
+              <div class="settings-field">
+                <label class="field-label" for="personalityPresetSelect">Preset Personality</label>
+                <select class="settings-select" id="personalityPresetSelect">
+                  <option value="custom">Custom</option>
+                </select>
+              </div>
 
-        <label class="field-label" for="idleTimeoutSelect">HAT Screen Timeout</label>
-        <select class="settings-select" id="idleTimeoutSelect"></select>
-        <div class="field-hint">
-          After this much idle time, the HAT can switch to the full-screen saver. Set Off to disable it.
-        </div>
+              <div class="settings-field">
+                <label class="field-label" for="voiceModeSelect">Voice Mode</label>
+                <select class="settings-select" id="voiceModeSelect">
+                  <option value="text-only">Text only</option>
+                  <option value="speak-on-demand">Speak on demand</option>
+                  <option value="voice-chat">Voice chat</option>
+                </select>
+              </div>
 
-        <div class="settings-actions">
-          <button class="button secondary compact" id="clearKeyBtn" type="button">Clear Groq Key</button>
-          <button class="button compact" id="saveSettingsBtn" type="button">Save</button>
-        </div>
-        <div class="settings-actions">
-          <button class="button secondary compact" id="shutdownBtn" type="button">Shutdown Pi</button>
-        </div>
-        <div class="field-hint">
-          Use this to power the device down cleanly from the browser instead of SSH.
-        </div>
-        <div class="status-text" id="settingsStatus">
-          Settings apply to new replies without waiting for the HAT.
+              <div class="settings-field settings-field-wide">
+                <label class="field-label" for="personalityInput">Personality</label>
+                <textarea
+                  class="settings-textarea"
+                  id="personalityInput"
+                  rows="5"
+                  placeholder="Describe how the bot should respond..."
+                ></textarea>
+              </div>
+
+              <div class="settings-field">
+                <label class="field-label" for="volumeLevelSelect">Volume</label>
+                <select class="settings-select" id="volumeLevelSelect"></select>
+                <div class="field-hint">
+                  1 is very quiet, 10 is full volume. The range never fully mutes the speaker.
+                </div>
+              </div>
+
+              <div class="settings-field">
+                <label class="field-label" for="recordTimeSelect">Button Record Time</label>
+                <select class="settings-select" id="recordTimeSelect"></select>
+                <div class="field-hint">
+                  Hold for this long to finish recording. Keep holding 3 more seconds to open HAT settings.
+                </div>
+              </div>
+
+              <div class="settings-field">
+                <label class="field-label" for="uiThemeSelect">UI Theme</label>
+                <select class="settings-select" id="uiThemeSelect">
+                  <option value="default">Default</option>
+                  <option value="matrix">Matrix</option>
+                  <option value="plasma">Plasma</option>
+                  <option value="amber-terminal">Amber Terminal</option>
+                </select>
+                <div class="field-hint">
+                  Themes change the simulator background, fonts, and color palette.
+                </div>
+              </div>
+
+              <div class="settings-field">
+                <label class="field-label" for="cameraSourceSelect">Camera Source</label>
+                <select class="settings-select" id="cameraSourceSelect">
+                  <option value="pi-camera">Pi Camera</option>
+                  <option value="esp32-cam">ESP32-CAM</option>
+                </select>
+                <div class="field-hint">
+                  Optional vision hardware path. This selector is meant to grow later for sources like Arducam too.
+                </div>
+              </div>
+
+              <div class="settings-field" id="esp32CamUrlWrap">
+                <label class="field-label" for="esp32CamUrlInput">ESP32-CAM URL</label>
+                <input
+                  class="settings-input"
+                  id="esp32CamUrlInput"
+                  type="text"
+                  placeholder="http://esp32-cam.local"
+                  autocomplete="off"
+                />
+                <div class="field-hint">
+                  Used for `/status` and `/latest.jpg` on the ESP32-CAM firmware.
+                </div>
+              </div>
+
+              <div class="settings-field">
+                <label class="field-label" for="headerModeSelect">HAT Header</label>
+                <select class="settings-select" id="headerModeSelect">
+                  <option value="emoji">Emoji</option>
+                  <option value="matrix">Matrix</option>
+                  <option value="matrix-binary">Matrix Binary</option>
+                  <option value="matrix-blue">Blue Matrix</option>
+                  <option value="retro-geometry">Retro Geometry</option>
+                  <option value="plasma">Plasma</option>
+                  <option value="neon-rain">Neon Rain</option>
+                </select>
+                <div class="field-hint">
+                  Lets the physical HAT header use emoji or a matching animated effect strip.
+                </div>
+              </div>
+
+              <div class="settings-field">
+                <label class="field-label" for="screensaverModeSelect">HAT Screensaver</label>
+                <select class="settings-select" id="screensaverModeSelect">
+                  <option value="off">Off</option>
+                  <option value="matrix">Matrix</option>
+                  <option value="matrix-binary">Matrix Binary</option>
+                  <option value="matrix-blue">Blue Matrix</option>
+                  <option value="retro-geometry">Retro Geometry</option>
+                  <option value="plasma">Plasma</option>
+                  <option value="neon-rain">Neon Rain</option>
+                </select>
+              </div>
+
+              <div class="settings-field">
+                <label class="field-label" for="idleTimeoutSelect">HAT Screen Timeout</label>
+                <select class="settings-select" id="idleTimeoutSelect"></select>
+                <div class="field-hint">
+                  After this much idle time, the HAT can switch to the full-screen saver. Set Off to disable it.
+                </div>
+              </div>
+
+              <div class="settings-field settings-field-wide">
+                <div class="settings-actions settings-actions-wrap">
+                  <button class="button secondary compact" id="clearKeyBtn" type="button">Clear Groq Key</button>
+                  <button class="button compact" id="saveSettingsBtn" type="button">Save</button>
+                  <button class="button secondary compact" id="shutdownBtn" type="button">Shutdown Pi</button>
+                </div>
+                <div class="field-hint">
+                  Use this to power the device down cleanly from the browser instead of SSH.
+                </div>
+                <div class="status-text settings-status" id="settingsStatus">
+                  Settings apply to new replies without waiting for the HAT.
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
-    </div>
   </div>
 
   <script src="/app.js"></script>
