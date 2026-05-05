@@ -472,6 +472,65 @@ body::before {
   text-align: left;
 }
 
+.music-upload-row,
+.music-controls-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.music-controls-row {
+  margin-top: 12px;
+}
+
+.music-shuffle-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.music-track-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.music-track-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.music-track-row.current {
+  border-color: rgba(68, 242, 138, 0.35);
+  box-shadow: inset 0 0 0 1px rgba(68, 242, 138, 0.18);
+}
+
+.music-track-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.music-track-badge {
+  flex: 0 0 auto;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
 .text-input-wrap {
   position: relative;
 }

@@ -46,6 +46,9 @@ ensureDirExists(cameraDir);
 export const cameraFeedDir = path.join(dataDir, "camera_feed");
 ensureDirExists(cameraFeedDir);
 
+export const musicDir = path.join(dataDir, "music");
+ensureDirExists(musicDir);
+
 
 export const knowledgeDir = path.join(__dirname, "../..", "knowledge");
 ensureDirExists(knowledgeDir);

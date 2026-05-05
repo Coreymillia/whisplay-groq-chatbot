@@ -49,6 +49,13 @@ import {
 } from "./web-audio-bridge";
 import type { Status } from "./display";
 import { requestSystemShutdown } from "./system-control";
+import {
+  getManagedMusicPlayer,
+  getCurrentTrackTitle,
+  isMusicPlaying,
+  stopMusicPlayback,
+} from "./music-player";
+import { musicDir } from "../utils/dir";
 
 type ButtonHandler = () => void;
 
@@ -167,7 +174,7 @@ export class WebDisplayServer implements WebAudioBridgeServer {
 
     const staticRoot = this.resolveWebRoot();
     this.registerRoutes(staticRoot);
-    this.app.use(bodyParser({ jsonLimit: "15mb", formLimit: "15mb", textLimit: "15mb" }));
+    this.app.use(bodyParser({ jsonLimit: "60mb", formLimit: "60mb", textLimit: "60mb" }));
     this.app.use(this.router.routes());
     this.app.use(this.router.allowedMethods());
     this.app.use(serve(staticRoot));
@@ -251,6 +258,24 @@ export class WebDisplayServer implements WebAudioBridgeServer {
   }
 
   private registerRoutes(staticRoot: string): void {
+    const buildMusicPayload = async () => {
+      const player = getManagedMusicPlayer(process.env);
+      const tracks = await player.listTracks();
+      const settings = getPublicRuntimeSettings();
+      return {
+        tracks: tracks.map((track) => ({
+          fileName: track.fileName,
+          title: track.title,
+          current:
+            Boolean(isMusicPlaying()) &&
+            track.title === getCurrentTrackTitle(),
+        })),
+        isPlaying: isMusicPlaying(),
+        currentTrackTitle: getCurrentTrackTitle(),
+        musicShuffle: settings.musicShuffle,
+      };
+    };
+
     this.router.get("/", (ctx) => {
       ctx.set("Cache-Control", "no-store");
       ctx.type = "text/html";
@@ -442,6 +467,94 @@ export class WebDisplayServer implements WebAudioBridgeServer {
       ctx.body = { ok: true };
     });
 
+    this.router.get("/api/music/tracks", async (ctx) => {
+      ctx.set("Cache-Control", "no-store");
+      ctx.body = await buildMusicPayload();
+    });
+
+    this.router.post("/api/music/upload", async (ctx) => {
+      const body = normalizeRequestBody((ctx.request as any).body);
+      const fileName = getBodyString(body, "fileName") || "track.mp3";
+      const dataUrl = getBodyString(body, "dataUrl") || "";
+      const match = /^data:(audio\/mpeg|audio\/mp3);base64,(.+)$/i.exec(dataUrl);
+      if (!match) {
+        ctx.status = 400;
+        ctx.body = { ok: false, error: "Invalid MP3 payload." };
+        return;
+      }
+      const extension = path.extname(fileName).toLowerCase();
+      if (extension !== ".mp3") {
+        ctx.status = 400;
+        ctx.body = { ok: false, error: "Only MP3 files are supported." };
+        return;
+      }
+      const safeBaseName =
+        path
+          .basename(fileName, extension)
+          .replace(/[^a-z0-9\-_ ]/gi, " ")
+          .replace(/\s+/g, "-")
+          .replace(/-+/g, "-")
+          .replace(/^-|-$/g, "")
+          .slice(0, 80) || `track-${Date.now()}`;
+      const savedName = `${Date.now()}-${safeBaseName}.mp3`;
+      const savedPath = path.join(musicDir, savedName);
+      const buffer = Buffer.from(match[2], "base64");
+      if (!buffer.length) {
+        ctx.status = 400;
+        ctx.body = { ok: false, error: "Empty MP3 payload." };
+        return;
+      }
+      fs.writeFileSync(savedPath, buffer);
+      await getManagedMusicPlayer(process.env).refreshLibrary();
+      ctx.body = {
+        ok: true,
+        fileName: savedName,
+        music: await buildMusicPayload(),
+      };
+    });
+
+    this.router.post("/api/music/control", async (ctx) => {
+      const body = normalizeRequestBody((ctx.request as any).body);
+      const action = getBodyString(body, "action")?.trim().toLowerCase() || "";
+      const player = getManagedMusicPlayer(process.env);
+
+      let result:
+        | { ok: boolean; message: string; trackPath?: string; trackTitle?: string }
+        | null = null;
+
+      switch (action) {
+        case "play": {
+          result = await player.playManagedLibrary(getPublicRuntimeSettings().musicShuffle);
+          break;
+        }
+        case "stop": {
+          stopMusicPlayback();
+          result = { ok: true, message: "Stopped music." };
+          break;
+        }
+        case "next": {
+          result = await player.nextTrack();
+          break;
+        }
+        case "previous": {
+          result = await player.previousTrack();
+          break;
+        }
+        default:
+          ctx.status = 400;
+          ctx.body = { ok: false, error: "Unsupported music action." };
+          return;
+      }
+
+      if (!result.ok) {
+        ctx.status = 400;
+      }
+      ctx.body = {
+        ...result,
+        music: await buildMusicPayload(),
+      };
+    });
+
     this.router.get("/api/chat/histories", (ctx) => {
       ctx.set("Cache-Control", "no-store");
       ctx.body = {
@@ -602,6 +715,7 @@ export class WebDisplayServer implements WebAudioBridgeServer {
         clearGroqApiKey: getBodyBoolean(body, "clearGroqApiKey"),
         geminiApiKey: getBodyString(body, "geminiApiKey"),
         personalityPrompt: getBodyString(body, "personalityPrompt"),
+        musicShuffle: getBodyBoolean(body, "musicShuffle"),
         volumeLevel: getBodyNumber(body, "volumeLevel"),
         scrollSpeedLevel: getBodyNumber(body, "scrollSpeedLevel"),
         voiceMode: getBodyString(body, "voiceMode"),
@@ -624,6 +738,7 @@ export class WebDisplayServer implements WebAudioBridgeServer {
           geminiApiKeyConfigured: Boolean(settings.geminiApiKey),
           personalityPrompt: settings.personalityPrompt,
           personalityPresetId: getPublicRuntimeSettings().personalityPresetId,
+          musicShuffle: settings.musicShuffle,
           volumeLevel: settings.volumeLevel,
           scrollSpeedLevel: settings.scrollSpeedLevel,
           voiceMode: settings.voiceMode,

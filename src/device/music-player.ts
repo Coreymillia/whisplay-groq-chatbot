@@ -3,6 +3,7 @@ import path from "path";
 import { spawn, ChildProcessWithoutNullStreams } from "child_process";
 import { getAudioDurationInSeconds } from "get-audio-duration";
 import { webAudioBridge } from "./web-audio-bridge";
+import { musicDir } from "../utils/dir";
 
 // Lazy imports to avoid circular dependencies
 const lazyAudio = () => require("./audio") as { releaseAudioPlayer: () => Promise<void>; restoreAudioPlayer: () => void };
@@ -19,6 +20,14 @@ type MatchResult = {
   score: number;
 };
 
+type PlaybackMode = "single" | "ordered" | "shuffle";
+
+export type ManagedMusicTrack = {
+  fileName: string;
+  title: string;
+  filePath: string;
+};
+
 const DEFAULT_EXTENSIONS = ["mp3", "wav", "flac", "m4a", "aac", "ogg"];
 const DEFAULT_MIN_SCORE = 0.35;
 const DEFAULT_RESCAN_SECONDS = 30;
@@ -26,6 +35,14 @@ const DEFAULT_RESCAN_SECONDS = 30;
 const stripFileExtension = (name: string): string => {
   const ext = path.extname(name);
   return ext ? name.slice(0, -ext.length) : name;
+};
+
+const prettifyStoredTrackTitle = (name: string): string => {
+  return stripFileExtension(name)
+    .replace(/^\d{13,}-/, "")
+    .replace(/[\-_]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 };
 
 const normalizeForSearch = (value: string): string => {
@@ -104,6 +121,11 @@ class LocalMusicPlayer {
   private continuousPlay: boolean = false; // Whether to auto-play next track
   private pendingTrack: Track | null = null;
   private pendingContinuous: boolean = false;
+  private playbackMode: PlaybackMode = "single";
+  private pendingPlaybackMode: PlaybackMode = "single";
+  private currentTrackIndex: number = -1;
+  private pendingTrackIndex: number | null = null;
+  private playbackHistory: number[] = [];
   private playbackGeneration: number = 0;
   private playbackRetries: number = 0;
   private trackChangeCallback: ((title: string) => void) | null = null;
@@ -189,7 +211,7 @@ class LocalMusicPlayer {
           if (visitedFiles.has(normalizedFile)) continue;
           visitedFiles.add(normalizedFile);
 
-          const title = stripFileExtension(entry.name);
+          const title = prettifyStoredTrackTitle(entry.name);
           foundTracks.push({
             filePath: normalizedFile,
             title,
@@ -199,6 +221,7 @@ class LocalMusicPlayer {
       }
     }
 
+    foundTracks.sort((a, b) => a.filePath.localeCompare(b.filePath));
     this.tracks = foundTracks;
   }
 
@@ -214,6 +237,20 @@ class LocalMusicPlayer {
         });
     }
     return this.preloadPromise;
+  }
+
+  async refreshLibrary(): Promise<void> {
+    this.preloadPromise = null;
+    await this.preloadLibrary();
+  }
+
+  async listTracks(): Promise<ManagedMusicTrack[]> {
+    await this.preloadLibrary();
+    return this.tracks.map((track) => ({
+      fileName: path.basename(track.filePath),
+      title: track.title,
+      filePath: track.filePath,
+    }));
   }
 
   private findBestMatch(query: string): MatchResult | null {
@@ -233,6 +270,22 @@ class LocalMusicPlayer {
     if (this.tracks.length === 0) return null;
     const index = Math.floor(Math.random() * this.tracks.length);
     return this.tracks[index];
+  }
+
+  private getRandomTrackIndex(excludeCurrent = false): number {
+    if (this.tracks.length === 0) return -1;
+    if (this.tracks.length === 1) return 0;
+    let index = Math.floor(Math.random() * this.tracks.length);
+    if (excludeCurrent && this.currentTrackIndex >= 0) {
+      while (index === this.currentTrackIndex) {
+        index = Math.floor(Math.random() * this.tracks.length);
+      }
+    }
+    return index;
+  }
+
+  private getTrackIndex(track: Track): number {
+    return this.tracks.findIndex((item) => item.filePath === track.filePath);
   }
 
   private stopProgressTimer(): void {
@@ -309,6 +362,11 @@ class LocalMusicPlayer {
     this.currentTrack = null;
   }
 
+  private finalizePlayback(): void {
+    this.isPlaying = false;
+    this.playbackEndCallback?.();
+  }
+
   /**
    * Spawn mpg123/sox for a track. On abnormal exit (code != 0), retries
    * the same track up to MAX_PLAYBACK_RETRIES times with a delay.
@@ -356,6 +414,12 @@ class LocalMusicPlayer {
     });
 
     console.log(`[Music] Playing: ${track.title}`);
+    try {
+      lazyDisplay().display({
+        status: "music",
+        text: `Now playing: ${track.title}`,
+      });
+    } catch {}
     this.trackChangeCallback?.(track.title);
   }
 
@@ -401,46 +465,29 @@ class LocalMusicPlayer {
 
   private async playNextRandomTrack(): Promise<void> {
     if (!this.isPlaying) return;
-
-    const track = this.getRandomTrack();
-    if (!track) return;
-
-    this.stopCurrentProcess();
-    this.stopProgressTimer();
-    this.currentTrack = track;
-    this.playbackRetries = 0;
-
-    const durationMs = await this.getTrackDurationMs(track.filePath);
-    if (!this.isPlaying) return;
-
-    // Callback when playback ends - continue with next random track
-    const onEnded = () => {
-      this.stopProgressTimer();
-      if (this.isPlaying) {
-        void this.playNextRandomTrack();
-      }
-    };
-
-    const playedViaWeb = await this.playViaWeb(track.filePath, onEnded);
-    if (playedViaWeb) {
-      console.log(`[Music] Playing: ${track.title}`);
-      this.trackChangeCallback?.(track.title);
-      if (durationMs > 0) this.startProgressTimer(durationMs);
+    const nextIndex = this.getRandomTrackIndex(true);
+    if (nextIndex < 0) {
+      this.finalizePlayback();
       return;
     }
-
-    const gen = this.playbackGeneration;
-    this.spawnAndPlay(track, gen, onEnded);
-    if (durationMs > 0) this.startProgressTimer(durationMs);
+    await this.playTrackByIndex(nextIndex, "shuffle", true);
   }
 
-  private async startPlayback(track: Track, continuous: boolean = false): Promise<void> {
+  private async startPlayback(
+    track: Track,
+    continuous: boolean = false,
+    playbackMode: PlaybackMode = continuous ? "shuffle" : "single",
+    trackIndex: number = this.getTrackIndex(track),
+  ): Promise<void> {
     this.stopCurrentProcess();
     this.stopProgressTimer();
     this.currentTrack = track;
+    this.currentTrackIndex = trackIndex;
     this.isPlaying = true;
     this.continuousPlay = continuous;
+    this.playbackMode = playbackMode;
     this.playbackRetries = 0;
+    preferredMusicPlayer = this;
 
     const durationMs = await this.getTrackDurationMs(track.filePath);
     if (!this.isPlaying) return;
@@ -448,12 +495,20 @@ class LocalMusicPlayer {
     // Callback when playback ends normally
     const onEnded = () => {
       this.stopProgressTimer();
-      if (this.isPlaying && this.continuousPlay) {
-        void this.playNextRandomTrack();
-      } else {
-        this.isPlaying = false;
-        this.playbackEndCallback?.();
+      if (!this.isPlaying) {
+        return;
       }
+      if (this.playbackMode === "ordered") {
+        const nextIndex = this.currentTrackIndex + 1;
+        if (nextIndex >= 0 && nextIndex < this.tracks.length) {
+          void this.playTrackByIndex(nextIndex, "ordered", true);
+          return;
+        }
+      } else if (this.playbackMode === "shuffle" || this.continuousPlay) {
+        void this.playNextRandomTrack();
+        return;
+      }
+      this.finalizePlayback();
     };
 
     const playedViaWeb = await this.playViaWeb(track.filePath, onEnded);
@@ -471,6 +526,36 @@ class LocalMusicPlayer {
     const gen = this.playbackGeneration;
     this.spawnAndPlay(track, gen, onEnded);
     if (durationMs > 0) this.startProgressTimer(durationMs);
+  }
+
+  private async playTrackByIndex(
+    index: number,
+    mode: PlaybackMode,
+    pushHistory: boolean,
+  ): Promise<{
+    ok: boolean;
+    message: string;
+    trackPath?: string;
+    trackTitle?: string;
+  }> {
+    await this.preloadLibrary();
+    if (this.tracks.length === 0) {
+      return { ok: false, message: "No music files found." };
+    }
+    if (index < 0 || index >= this.tracks.length) {
+      return { ok: false, message: "Track index out of range." };
+    }
+    if (pushHistory && this.currentTrackIndex >= 0) {
+      this.playbackHistory.push(this.currentTrackIndex);
+    }
+    const track = this.tracks[index];
+    await this.startPlayback(track, mode !== "single", mode, index);
+    return {
+      ok: true,
+      message: `Playing: ${track.title}`,
+      trackPath: track.filePath,
+      trackTitle: track.title,
+    };
   }
 
   async playByQuery(query: string, continuous: boolean = false): Promise<{
@@ -493,7 +578,12 @@ class LocalMusicPlayer {
       return { ok: false, message: `No matching track found for "${query}"` };
     }
 
-    await this.startPlayback(best.track, continuous);
+    await this.startPlayback(
+      best.track,
+      continuous,
+      continuous ? "shuffle" : "single",
+      this.getTrackIndex(best.track),
+    );
 
     return {
       ok: true,
@@ -523,7 +613,12 @@ class LocalMusicPlayer {
       return { ok: false, message: "Could not select a random track." };
     }
 
-    await this.startPlayback(track, continuous);
+    await this.startPlayback(
+      track,
+      continuous,
+      continuous ? "shuffle" : "single",
+      this.getTrackIndex(track),
+    );
 
     return {
       ok: true,
@@ -555,6 +650,9 @@ class LocalMusicPlayer {
 
     this.pendingTrack = best.track;
     this.pendingContinuous = continuous;
+    this.pendingPlaybackMode = continuous ? "shuffle" : "single";
+    this.pendingTrackIndex = this.getTrackIndex(best.track);
+    preferredMusicPlayer = this;
 
     return {
       ok: true,
@@ -586,6 +684,9 @@ class LocalMusicPlayer {
 
     this.pendingTrack = track;
     this.pendingContinuous = continuous;
+    this.pendingPlaybackMode = continuous ? "shuffle" : "single";
+    this.pendingTrackIndex = this.getTrackIndex(track);
+    preferredMusicPlayer = this;
 
     return {
       ok: true,
@@ -599,13 +700,164 @@ class LocalMusicPlayer {
     if (!this.pendingTrack) return;
     const track = this.pendingTrack;
     const continuous = this.pendingContinuous;
+    const playbackMode = this.pendingPlaybackMode;
+    const trackIndex = this.pendingTrackIndex ?? this.getTrackIndex(track);
     this.pendingTrack = null;
-    void this.startPlayback(track, continuous);
+    this.pendingTrackIndex = null;
+    void this.startPlayback(track, continuous, playbackMode, trackIndex);
+  }
+
+  hasPendingPlayback(): boolean {
+    return Boolean(this.pendingTrack);
+  }
+
+  async prepareManagedLibraryPlayback(
+    shuffle: boolean,
+  ): Promise<{
+    ok: boolean;
+    message: string;
+    trackPath?: string;
+    trackTitle?: string;
+  }> {
+    if (!this.isConfigured()) {
+      return { ok: false, message: "Music library not configured." };
+    }
+    await this.preloadLibrary();
+    if (this.tracks.length === 0) {
+      return { ok: false, message: "No MP3 files uploaded yet." };
+    }
+    this.playbackHistory = [];
+    const nextIndex = shuffle ? this.getRandomTrackIndex(false) : 0;
+    if (nextIndex < 0) {
+      return { ok: false, message: "No music files found." };
+    }
+    this.pendingTrack = this.tracks[nextIndex];
+    this.pendingContinuous = true;
+    this.pendingPlaybackMode = shuffle ? "shuffle" : "ordered";
+    this.pendingTrackIndex = nextIndex;
+    preferredMusicPlayer = this;
+    return {
+      ok: true,
+      message: `Playing: ${this.tracks[nextIndex].title}`,
+      trackPath: this.tracks[nextIndex].filePath,
+      trackTitle: this.tracks[nextIndex].title,
+    };
+  }
+
+  async playManagedLibrary(
+    shuffle: boolean,
+  ): Promise<{
+    ok: boolean;
+    message: string;
+    trackPath?: string;
+    trackTitle?: string;
+  }> {
+    const prepared = await this.prepareManagedLibraryPlayback(shuffle);
+    if (!prepared.ok) {
+      return prepared;
+    }
+    this.startPendingPlayback();
+    return prepared;
+  }
+
+  async prepareNextTrack(): Promise<{
+    ok: boolean;
+    message: string;
+    trackPath?: string;
+    trackTitle?: string;
+  }> {
+    await this.preloadLibrary();
+    if (this.tracks.length === 0) {
+      return { ok: false, message: "No MP3 files uploaded yet." };
+    }
+    const baseMode = this.playbackMode === "shuffle" ? "shuffle" : "ordered";
+    const nextIndex =
+      baseMode === "shuffle"
+        ? this.getRandomTrackIndex(true)
+        : this.currentTrackIndex >= 0
+          ? (this.currentTrackIndex + 1) % this.tracks.length
+          : 0;
+    if (nextIndex < 0) {
+      return { ok: false, message: "No next track available." };
+    }
+    if (this.currentTrackIndex >= 0) {
+      this.playbackHistory.push(this.currentTrackIndex);
+    }
+    this.pendingTrack = this.tracks[nextIndex];
+    this.pendingContinuous = true;
+    this.pendingPlaybackMode = baseMode;
+    this.pendingTrackIndex = nextIndex;
+    preferredMusicPlayer = this;
+    return {
+      ok: true,
+      message: `Playing: ${this.tracks[nextIndex].title}`,
+      trackPath: this.tracks[nextIndex].filePath,
+      trackTitle: this.tracks[nextIndex].title,
+    };
+  }
+
+  async nextTrack(): Promise<{
+    ok: boolean;
+    message: string;
+    trackPath?: string;
+    trackTitle?: string;
+  }> {
+    const prepared = await this.prepareNextTrack();
+    if (!prepared.ok) {
+      return prepared;
+    }
+    this.startPendingPlayback();
+    return prepared;
+  }
+
+  async preparePreviousTrack(): Promise<{
+    ok: boolean;
+    message: string;
+    trackPath?: string;
+    trackTitle?: string;
+  }> {
+    await this.preloadLibrary();
+    if (this.tracks.length === 0) {
+      return { ok: false, message: "No MP3 files uploaded yet." };
+    }
+    let previousIndex = this.playbackHistory.pop();
+    if (previousIndex === undefined) {
+      previousIndex =
+        this.currentTrackIndex > 0
+          ? this.currentTrackIndex - 1
+          : 0;
+    }
+    this.pendingTrack = this.tracks[previousIndex];
+    this.pendingContinuous = true;
+    this.pendingPlaybackMode = this.playbackMode === "shuffle" ? "shuffle" : "ordered";
+    this.pendingTrackIndex = previousIndex;
+    preferredMusicPlayer = this;
+    return {
+      ok: true,
+      message: `Playing: ${this.tracks[previousIndex].title}`,
+      trackPath: this.tracks[previousIndex].filePath,
+      trackTitle: this.tracks[previousIndex].title,
+    };
+  }
+
+  async previousTrack(): Promise<{
+    ok: boolean;
+    message: string;
+    trackPath?: string;
+    trackTitle?: string;
+  }> {
+    const prepared = await this.preparePreviousTrack();
+    if (!prepared.ok) {
+      return prepared;
+    }
+    this.startPendingPlayback();
+    return prepared;
   }
 
   stop(): void {
     this.isPlaying = false;
     this.pendingTrack = null;
+    this.pendingTrackIndex = null;
     this.stopProgressTimer();
     this.stopCurrentProcess();
     // Restore the persistent TTS player after releasing
@@ -624,6 +876,8 @@ class LocalMusicPlayer {
 
 let localMusicPlayerInstance: LocalMusicPlayer | null = null;
 let localMusicPlayerKey = "";
+let managedMusicPlayerInstance: LocalMusicPlayer | null = null;
+let preferredMusicPlayer: LocalMusicPlayer | null = null;
 
 export const getLocalMusicPlayer = (env: Record<string, string | undefined>): LocalMusicPlayer => {
   const dirs = parseDirectories(env.MUSIC_LIBRARY_DIRS);
@@ -651,26 +905,63 @@ export const getLocalMusicPlayer = (env: Record<string, string | undefined>): Lo
   return localMusicPlayerInstance;
 };
 
+export const getManagedMusicPlayer = (
+  env: Record<string, string | undefined>,
+): LocalMusicPlayer => {
+  if (!managedMusicPlayerInstance) {
+    managedMusicPlayerInstance = new LocalMusicPlayer(
+      [musicDir],
+      new Set(["mp3"]),
+      DEFAULT_MIN_SCORE,
+      DEFAULT_RESCAN_SECONDS,
+      env.SOUND_CARD_INDEX || "1",
+    );
+    void managedMusicPlayerInstance.preloadLibrary();
+  }
+  return managedMusicPlayerInstance;
+};
+
+const getPreferredMusicPlayer = (): LocalMusicPlayer | null => {
+  if (preferredMusicPlayer) {
+    return preferredMusicPlayer;
+  }
+  if (managedMusicPlayerInstance?.isMusicPlaying() || managedMusicPlayerInstance?.hasPendingPlayback()) {
+    return managedMusicPlayerInstance;
+  }
+  if (localMusicPlayerInstance?.isMusicPlaying() || localMusicPlayerInstance?.hasPendingPlayback()) {
+    return localMusicPlayerInstance;
+  }
+  return managedMusicPlayerInstance || localMusicPlayerInstance;
+};
+
 export const stopMusicPlayback = (): void => {
+  managedMusicPlayerInstance?.stop();
   localMusicPlayerInstance?.stop();
 };
 
 export const isMusicPlaying = (): boolean => {
-  return localMusicPlayerInstance?.isMusicPlaying() ?? false;
+  return Boolean(
+    managedMusicPlayerInstance?.isMusicPlaying() ||
+    localMusicPlayerInstance?.isMusicPlaying(),
+  );
 };
 
 export const getCurrentTrackTitle = (): string => {
-  return localMusicPlayerInstance?.getCurrentTrack()?.title || "";
+  return (
+    managedMusicPlayerInstance?.getCurrentTrack()?.title ||
+    localMusicPlayerInstance?.getCurrentTrack()?.title ||
+    ""
+  );
 };
 
 export const startPendingMusicPlayback = (): void => {
-  localMusicPlayerInstance?.startPendingPlayback();
+  getPreferredMusicPlayer()?.startPendingPlayback();
 };
 
 export const onMusicTrackChange = (callback: ((title: string) => void) | null): void => {
-  localMusicPlayerInstance?.onTrackChange(callback);
+  getPreferredMusicPlayer()?.onTrackChange(callback);
 };
 
 export const onMusicPlaybackEnd = (callback: (() => void) | null): void => {
-  localMusicPlayerInstance?.onPlaybackEnd(callback);
+  getPreferredMusicPlayer()?.onPlaybackEnd(callback);
 };

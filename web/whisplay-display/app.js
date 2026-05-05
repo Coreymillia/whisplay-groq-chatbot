@@ -31,6 +31,15 @@ const chatHistorySelect = document.getElementById("chatHistorySelect");
 const loadChatBtn = document.getElementById("loadChatBtn");
 const newChatBtn = document.getElementById("newChatBtn");
 const chatStatus = document.getElementById("chatStatus");
+const musicFileInput = document.getElementById("musicFileInput");
+const musicUploadBtn = document.getElementById("musicUploadBtn");
+const musicPlayBtn = document.getElementById("musicPlayBtn");
+const musicStopBtn = document.getElementById("musicStopBtn");
+const musicPrevBtn = document.getElementById("musicPrevBtn");
+const musicNextBtn = document.getElementById("musicNextBtn");
+const musicShuffleCheckbox = document.getElementById("musicShuffleCheckbox");
+const musicTrackList = document.getElementById("musicTrackList");
+const musicStatus = document.getElementById("musicStatus");
 const groqKeyInput = document.getElementById("groqKeyInput");
 const groqKeyHint = document.getElementById("groqKeyHint");
 const geminiKeyInput = document.getElementById("geminiKeyInput");
@@ -77,6 +86,7 @@ let latestVisionAnalysisStamp = 0;
 let savedPhotos = [];
 let showAllSavedPhotos = false;
 let savedChatHistories = [];
+let musicTracks = [];
 const DEFAULT_UI_THEME = "default";
 const DEFAULT_CAMERA_SOURCE = "pi-camera";
 const DEFAULT_ESP32_CAM_URL = "http://esp32-cam.local";
@@ -781,6 +791,9 @@ function applySettings(settings) {
   if (voiceModeSelect) {
     voiceModeSelect.value = settings.voiceMode || "text-only";
   }
+  if (musicShuffleCheckbox) {
+    musicShuffleCheckbox.checked = Boolean(settings.musicShuffle);
+  }
   if (uiThemeSelect) {
     uiThemeSelect.value = settings.uiTheme || DEFAULT_UI_THEME;
   }
@@ -918,6 +931,135 @@ function parseOptionalFloat(value) {
   return Number.isFinite(numeric) ? numeric : null;
 }
 
+function setMusicStatus(message, isError = false) {
+  if (!musicStatus) return;
+  musicStatus.textContent = message;
+  musicStatus.style.color = isError ? "#ff8a8a" : "";
+}
+
+function renderMusicTracks() {
+  if (!musicTrackList) return;
+  if (!musicTracks.length) {
+    musicTrackList.innerHTML = "";
+    return;
+  }
+  musicTrackList.innerHTML = musicTracks
+    .map(
+      (track) => `
+        <div class="music-track-row${track.current ? " current" : ""}">
+          <span class="music-track-title">${track.title || track.fileName}</span>
+          <span class="music-track-badge">${track.current ? "Now Playing" : "MP3"}</span>
+        </div>
+      `,
+    )
+    .join("");
+}
+
+function applyMusicPayload(payload) {
+  const music = payload?.music || payload || {};
+  musicTracks = Array.isArray(music.tracks) ? music.tracks : [];
+  if (musicShuffleCheckbox) {
+    musicShuffleCheckbox.checked = Boolean(music.musicShuffle);
+  }
+  renderMusicTracks();
+  if (musicTracks.length === 0) {
+    setMusicStatus("No uploaded MP3s yet.");
+    return;
+  }
+  if (music.isPlaying && music.currentTrackTitle) {
+    setMusicStatus(`Playing: ${music.currentTrackTitle}`);
+    return;
+  }
+  if (music.currentTrackTitle) {
+    setMusicStatus(`Ready: ${music.currentTrackTitle}`);
+    return;
+  }
+  setMusicStatus(`${musicTracks.length} MP3${musicTracks.length === 1 ? "" : "s"} ready.`);
+}
+
+async function loadMusicLibrary() {
+  try {
+    const response = await fetch("/api/music/tracks", { cache: "no-store" });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload.error || `HTTP ${response.status}`);
+    }
+    applyMusicPayload(payload);
+  } catch (error) {
+    console.error("Failed to load music library:", error);
+    const message = error instanceof Error ? error.message : String(error);
+    setMusicStatus(`Failed to load MP3 library: ${message}`, true);
+  }
+}
+
+async function uploadMusicFile() {
+  const file = musicFileInput?.files?.[0];
+  if (!file) {
+    setMusicStatus("Choose an MP3 first.", true);
+    return;
+  }
+  if (!/\.mp3$/i.test(file.name) || !/^audio\/(?:mpeg|mp3)$/i.test(file.type || "audio/mpeg")) {
+    setMusicStatus("Only MP3 files are supported.", true);
+    return;
+  }
+  setMusicStatus("Uploading MP3...");
+  if (musicUploadBtn) {
+    musicUploadBtn.disabled = true;
+  }
+  try {
+    const dataUrl = await readFileAsDataUrl(file);
+    const response = await fetch("/api/music/upload", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        fileName: file.name,
+        dataUrl,
+      }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || payload.ok === false) {
+      throw new Error(payload.error || `HTTP ${response.status}`);
+    }
+    if (musicFileInput) {
+      musicFileInput.value = "";
+    }
+    applyMusicPayload(payload);
+    setMusicStatus(`Uploaded: ${payload.fileName || file.name}`);
+  } catch (error) {
+    console.error("Failed to upload MP3:", error);
+    const message = error instanceof Error ? error.message : String(error);
+    setMusicStatus(`MP3 upload failed: ${message}`, true);
+  } finally {
+    if (musicUploadBtn) {
+      musicUploadBtn.disabled = false;
+    }
+  }
+}
+
+async function sendMusicControl(action) {
+  try {
+    const response = await fetch("/api/music/control", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ action }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || payload.ok === false) {
+      throw new Error(payload.error || payload.message || `HTTP ${response.status}`);
+    }
+    applyMusicPayload(payload);
+    setMusicStatus(payload.message || "Music updated.");
+  } catch (error) {
+    console.error("Failed to control music:", error);
+    const message = error instanceof Error ? error.message : String(error);
+    setMusicStatus(`Music control failed: ${message}`, true);
+  }
+}
+
 async function uploadVisionImage() {
   const file = visionImageInput?.files?.[0];
   if (!file) {
@@ -1012,6 +1154,7 @@ async function saveSettings({ clearGroqApiKey = false } = {}) {
     geminiApiKey: (geminiKeyInput?.value || "").trim(),
     personalityPrompt: (personalityInput?.value || "").trim(),
     voiceMode: voiceModeSelect?.value || "text-only",
+    musicShuffle: Boolean(musicShuffleCheckbox?.checked),
     volumeLevel: parseInt(volumeLevelSelect?.value || "9", 10),
     manualRecordMaxSec: parseInt(recordTimeSelect?.value || "15", 10),
     scrollSpeedLevel: parseInt(scrollSpeedSelect?.value || "5", 10),
@@ -1106,6 +1249,7 @@ async function requestShutdown() {
 
 connectWebSocket();
 loadSettings();
+loadMusicLibrary();
 loadVisionPreview();
 loadVisionAnalysis();
 loadSavedPhotos();
@@ -1188,6 +1332,42 @@ if (saveSettingsBtn) {
 if (visionUploadBtn) {
   visionUploadBtn.addEventListener("click", () => {
     uploadVisionImage();
+  });
+}
+
+if (musicUploadBtn) {
+  musicUploadBtn.addEventListener("click", () => {
+    uploadMusicFile();
+  });
+}
+
+if (musicPlayBtn) {
+  musicPlayBtn.addEventListener("click", () => {
+    sendMusicControl("play");
+  });
+}
+
+if (musicStopBtn) {
+  musicStopBtn.addEventListener("click", () => {
+    sendMusicControl("stop");
+  });
+}
+
+if (musicPrevBtn) {
+  musicPrevBtn.addEventListener("click", () => {
+    sendMusicControl("previous");
+  });
+}
+
+if (musicNextBtn) {
+  musicNextBtn.addEventListener("click", () => {
+    sendMusicControl("next");
+  });
+}
+
+if (musicShuffleCheckbox) {
+  musicShuffleCheckbox.addEventListener("change", () => {
+    setSettingsStatus("Shuffle changed. Save settings to keep it.");
   });
 }
 

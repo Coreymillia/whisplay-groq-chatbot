@@ -91,6 +91,28 @@
             New chat starts a fresh conversation. Load brings an older saved chat back into memory.
           </div>
         </div>
+        <div class="card" id="musicCard">
+          <div class="title">MP3 Player</div>
+          <div class="music-upload-row">
+            <input class="settings-input" id="musicFileInput" type="file" accept=".mp3,audio/mpeg" />
+            <button class="button compact" id="musicUploadBtn" type="button">Upload MP3</button>
+          </div>
+          <div class="music-controls-row">
+            <button class="button compact" id="musicPlayBtn" type="button">Play Music</button>
+            <button class="button secondary compact" id="musicStopBtn" type="button">Stop Music</button>
+            <button class="button secondary compact" id="musicPrevBtn" type="button">Last Song</button>
+            <button class="button secondary compact" id="musicNextBtn" type="button">Next Song</button>
+          </div>
+          <label class="music-shuffle-toggle" for="musicShuffleCheckbox">
+            <input id="musicShuffleCheckbox" type="checkbox" />
+            <span>Shuffle playback</span>
+          </label>
+          <div class="field-hint">
+            Default is ordered playback through all uploaded MP3s. Voice controls: play music, stop music, next song, previous song.
+          </div>
+          <div class="status-text vision-status" id="musicStatus">No uploaded MP3s yet.</div>
+          <div class="music-track-list" id="musicTrackList"></div>
+        </div>
         <div class="workspace-grid">
           <div class="card" id="visionCard">
             <div class="title">Vision Test</div>

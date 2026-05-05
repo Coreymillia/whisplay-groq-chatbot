@@ -34,6 +34,7 @@ This project starts from the official PiSugar Whisplay chatbot, but is being tai
 - **Voice controls:** settings, voice on/off, photo capture, photo browsing, shutdown, and an on-device voice-command cheat sheet
 - **Vision flow:** upload a photo or capture one from the configured camera source, then ask **"what do you see?"**
 - **NWS weather bot:** save a latitude/longitude in Settings, then ask **"what's the weather?"** or **"weather alerts"** to get a National Weather Service forecast answered in the currently selected chatbot personality
+- **MP3 player:** upload MP3 files from the browser UI, play the full library in order by default or enable shuffle, and control playback from the browser or voice
 - **Local photo effects:** apply deterministic voice-triggered filters such as **retro**, **comic**, **sketch**, **pixelate**, **spooky**, **dreamy**, **warm**, **cyberpunk**, **glitch**, and more to the currently shown image
 - **Preset personalities:** Neutral, Friendly, Cranky, Roast Bot, Sleepy Pi, Affirmation, Philosopher, Mythic Oracle, Joke Bot, Tutor, Detective, and Zen
 - **HAT visuals:** switchable header effects plus full-screen screensavers such as Matrix, Retro Geometry, Plasma, Neon Rain, and new VU-style mic meters
@@ -198,7 +199,7 @@ TTS_SERVER=espeak-ng
 
 ## Settings UI notes
 
-The browser simulator includes a settings panel for the Groq key, Gemini key, preset personalities, freeform personality editing, voice mode, record time, text scroll speed, UI theme, HAT header mode, HAT screensaver mode, HAT idle timeout, **weather latitude/longitude**, and a shutdown button for clean power-off without SSH.
+The browser simulator includes a settings panel for the Groq key, Gemini key, preset personalities, freeform personality editing, voice mode, record time, text scroll speed, UI theme, HAT header mode, HAT screensaver mode, HAT idle timeout, **weather latitude/longitude**, the saved **music shuffle** toggle, and a shutdown button for clean power-off without SSH.
 
 The Groq and Gemini keys can be stored there without editing `.env`. Runtime settings are saved to the local settings file on the Pi, and both **Gemini vision** and **Gemini image generation** in this fork will use the saved browser key before falling back to `GEMINI_API_KEY` from `.env`.
 
@@ -211,6 +212,18 @@ For the local Pi camera path, this fork now supports either the Python **Picamer
 Captured photos are now kept in the project camera storage and exposed in the browser UI as a **Saved Photos** list. The browser UI can delete saved photos; the HAT browse mode is read-only.
 
 The saved **Text Scroll Speed** setting applies to both the browser simulator and the physical HAT, so you can speed up long replies without changing the existing button behavior.
+
+## MP3 player for this fork
+
+This fork now includes a simple built-in **MP3 player** for the Whisplay browser UI and HAT flow.
+
+- upload **MP3 files only** from the browser UI
+- use **Play Music**, **Stop Music**, **Last Song**, and **Next Song** from the browser card
+- leave **Shuffle** off to play all uploaded songs in stable order
+- enable **Shuffle** in Settings if you want the managed library to randomize playback order
+- voice commands now include **"play music"**, **"stop music"**, **"next song"**, and **"previous song"**
+
+The uploaded library is stored locally on the Pi, shown back in the browser UI with a current-track indicator, and played through the Whisplay audio path instead of only in the browser. Direct voice-triggered music commands now jump straight into music mode instead of getting stuck waiting on the normal answering flow first.
 
 ## NWS weather bot for this fork
 

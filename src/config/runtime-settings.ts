@@ -29,6 +29,7 @@ export interface RuntimeSettings {
   groqApiKey: string;
   geminiApiKey: string;
   personalityPrompt: string;
+  musicShuffle: boolean;
   volumeLevel: number;
   scrollSpeedLevel: number;
   voiceMode: VoiceMode;
@@ -48,6 +49,7 @@ export interface RuntimeSettingsUpdate {
   clearGroqApiKey?: boolean;
   geminiApiKey?: string;
   personalityPrompt?: string;
+  musicShuffle?: boolean;
   volumeLevel?: number;
   scrollSpeedLevel?: number;
   voiceMode?: string;
@@ -69,6 +71,7 @@ const SETTINGS_PATH = path.resolve(
 );
 
 const DEFAULT_VOICE_MODE: VoiceMode = "text-only";
+const DEFAULT_MUSIC_SHUFFLE = false;
 const DEFAULT_VOLUME_LEVEL = 9;
 const DEFAULT_SCROLL_SPEED_LEVEL = 5;
 const DEFAULT_UI_THEME: UITheme = "default";
@@ -273,6 +276,10 @@ function sanitizeSettings(input: Partial<RuntimeSettings> | null | undefined): R
       typeof input?.personalityPrompt === "string"
         ? input.personalityPrompt.trim()
         : "",
+    musicShuffle:
+      typeof input?.musicShuffle === "boolean"
+        ? input.musicShuffle
+        : DEFAULT_MUSIC_SHUFFLE,
     volumeLevel: normalizeVolumeLevel(input?.volumeLevel),
     scrollSpeedLevel: normalizeScrollSpeedLevel(input?.scrollSpeedLevel),
     voiceMode: normalizeVoiceMode(input?.voiceMode),
@@ -333,6 +340,10 @@ export function saveRuntimeSettings(
 
   if (typeof update.personalityPrompt === "string") {
     next.personalityPrompt = update.personalityPrompt.trim();
+  }
+
+  if (typeof update.musicShuffle === "boolean") {
+    next.musicShuffle = update.musicShuffle;
   }
 
   if (typeof update.volumeLevel === "number") {
@@ -499,6 +510,7 @@ export function getPublicRuntimeSettings(): {
   geminiApiKeyConfigured: boolean;
   personalityPrompt: string;
   personalityPresetId: string;
+  musicShuffle: boolean;
   volumeLevel: number;
   scrollSpeedLevel: number;
   voiceMode: VoiceMode;
@@ -520,6 +532,7 @@ export function getPublicRuntimeSettings(): {
     personalityPresetId: getCurrentPersonalityPresetId(
       settings.personalityPrompt,
     ),
+    musicShuffle: settings.musicShuffle,
     volumeLevel: settings.volumeLevel,
     scrollSpeedLevel: settings.scrollSpeedLevel,
     voiceMode: settings.voiceMode,

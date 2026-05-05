@@ -77,6 +77,14 @@ export const VOICE_COMMAND_HELP_ENTRIES: VoiceCommandHelpEntry[] = [
     summary: "auto contrast / colors pop",
   },
   {
+    id: "music-play-stop",
+    summary: "play music / stop music",
+  },
+  {
+    id: "music-skip",
+    summary: "next song / previous song",
+  },
+  {
     id: "shutdown",
     summary: "shutdown / shutdown pi",
   },

@@ -44,7 +44,15 @@ import {
   resetCameraModeControl,
 } from "./camera-mode";
 import { DEFAULT_EMOJI } from "../../utils";
-import { isMusicPlaying, getCurrentTrackTitle, stopMusicPlayback, startPendingMusicPlayback, onMusicTrackChange, onMusicPlaybackEnd } from "../../device/music-player";
+import {
+  isMusicPlaying,
+  getCurrentTrackTitle,
+  stopMusicPlayback,
+  startPendingMusicPlayback,
+  onMusicTrackChange,
+  onMusicPlaybackEnd,
+  getManagedMusicPlayer,
+} from "../../device/music-player";
 import { autoSaveExchange } from "../../config/mempalace";
 import { STATE_EMOJIS } from "../../config/state-emojis";
 import { llmFuncMap } from "../../config/llm-tools";
@@ -270,6 +278,22 @@ const volumeDownIntentPatterns = [
   /^\s*(?:volume\s+down|turn\s+(?:the\s+)?volume\s+down|decrease\s+(?:the\s+)?volume|lower\s+(?:the\s+)?volume|quieter)\s*[.!?]*$/i,
 ];
 
+const playMusicIntentPatterns = [
+  /^\s*(?:play|start)(?:\s+the)?\s+(?:music|songs?|mp3s?)\s*[.!?]*$/i,
+];
+
+const stopMusicIntentPatterns = [
+  /^\s*(?:stop|pause)(?:\s+the)?\s+(?:music|songs?|mp3s?)\s*[.!?]*$/i,
+];
+
+const nextSongIntentPatterns = [
+  /^\s*(?:next\s+(?:song|track)|skip(?:\s+(?:song|track))?)\s*[.!?]*$/i,
+];
+
+const previousSongIntentPatterns = [
+  /^\s*(?:previous|last|back)\s+(?:song|track)\s*[.!?]*$/i,
+];
+
 const PHOTO_BROWSER_EXIT_HOLD_MS = 1800;
 const VOICE_HELP_EXIT_HOLD_MS = 1800;
 const VOICE_COMMAND_HELP_PAGES = buildVoiceCommandHelpPages();
@@ -355,6 +379,28 @@ function shouldReplayLastAnswerAloud(prompt: string): boolean {
 function shouldClearChat(prompt: string): boolean {
   const trimmed = prompt.trim();
   return clearChatIntentPatterns.some((pattern) => pattern.test(trimmed));
+}
+
+function getMusicControlCommand(
+  prompt: string,
+): "play" | "stop" | "next" | "previous" | null {
+  const trimmed = prompt.trim();
+  if (!trimmed) {
+    return null;
+  }
+  if (playMusicIntentPatterns.some((pattern) => pattern.test(trimmed))) {
+    return "play";
+  }
+  if (stopMusicIntentPatterns.some((pattern) => pattern.test(trimmed))) {
+    return "stop";
+  }
+  if (nextSongIntentPatterns.some((pattern) => pattern.test(trimmed))) {
+    return "next";
+  }
+  if (previousSongIntentPatterns.some((pattern) => pattern.test(trimmed))) {
+    return "previous";
+  }
+  return null;
 }
 
 function parseVolumeCommand(
@@ -1091,6 +1137,18 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
       endPartial();
       finishDirectAnswer(showImageAfter);
     };
+    const transitionDirectlyToMusic = (message: string): void => {
+      llmResponseText = message;
+      stopPlaying();
+      ctx.rememberLastAnswer({
+        text: message,
+        emoji: STATE_EMOJIS.music,
+        image: "",
+      });
+      clearPendingCapturedImgForChat();
+      display({ image_icon_visible: false });
+      ctx.transitionTo("music");
+    };
     if (shouldOpenSettings(ctx.asrText)) {
       ctx.openSettingsMenu();
       return;
@@ -1114,6 +1172,47 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
       ctx.clearLastAnswer();
       clearPendingCapturedImgForChat();
       finishDirectMessage("Started a new chat.");
+      return;
+    }
+    const musicCommand = getMusicControlCommand(ctx.asrText);
+    if (musicCommand) {
+      const player = getManagedMusicPlayer(process.env);
+      if (musicCommand === "stop") {
+        stopMusicPlayback();
+        finishDirectMessage("Stopped music.");
+        return;
+      }
+
+      const actionPromise =
+        musicCommand === "play"
+          ? player.prepareManagedLibraryPlayback(getRuntimeSettings().musicShuffle)
+          : musicCommand === "next"
+            ? player.prepareNextTrack()
+            : player.preparePreviousTrack();
+
+      void actionPromise
+        .then((result) => {
+          if (currentAnswerId !== ctx.answerId) {
+            return;
+          }
+          if (!result.ok) {
+            finishDirectMessage(result.message);
+            return;
+          }
+          ctx.musicDisplayText = result.message;
+          transitionDirectlyToMusic(result.message);
+        })
+        .catch((error) => {
+          console.error("Music command failed:", error);
+          if (currentAnswerId !== ctx.answerId) {
+            return;
+          }
+          const message =
+            error instanceof Error && error.message
+              ? error.message
+              : "I couldn't control the music right now.";
+          finishDirectMessage(message);
+        });
       return;
     }
     const volumeCommand = parseVolumeCommand(ctx.asrText);
