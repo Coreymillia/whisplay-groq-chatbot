@@ -12,7 +12,10 @@ export type HeaderMode =
   | "matrix-blue"
   | "retro-geometry"
   | "plasma"
-  | "neon-rain";
+  | "neon-rain"
+  | "vu-bars"
+  | "vu-scope"
+  | "vu-wave";
 export type ScreensaverMode =
   | "off"
   | "matrix"
@@ -104,6 +107,9 @@ export const HEADER_MODES: HeaderMode[] = [
   "retro-geometry",
   "plasma",
   "neon-rain",
+  "vu-bars",
+  "vu-scope",
+  "vu-wave",
 ];
 export const SCREENSAVER_MODES: ScreensaverMode[] = [
   "off",
@@ -137,6 +143,9 @@ const VALID_HEADER_MODES = new Set<HeaderMode>([
   "retro-geometry",
   "plasma",
   "neon-rain",
+  "vu-bars",
+  "vu-scope",
+  "vu-wave",
 ]);
 const VALID_SCREENSAVER_MODES = new Set<ScreensaverMode>([
   "off",
@@ -423,6 +432,12 @@ export function getUIThemeLabel(value: string): string {
 
 export function getHeaderModeLabel(value: string): string {
   switch (value) {
+    case "vu-bars":
+      return "VU Bars";
+    case "vu-scope":
+      return "VU Scope";
+    case "vu-wave":
+      return "VU Wave";
     case "matrix-binary":
       return "Binary Matrix";
     case "matrix-blue":

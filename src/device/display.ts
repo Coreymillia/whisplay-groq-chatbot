@@ -1,4 +1,4 @@
-import { exec } from "child_process";
+import { exec, spawn, type ChildProcess } from "child_process";
 import { resolve } from "path";
 import { Socket } from "net";
 import { getCurrentTimeTag } from "../utils";
@@ -38,6 +38,7 @@ export interface Status {
   image_icon_visible: boolean;
   music_progress: number | undefined;
   music_duration_ms: number | undefined;
+  audio_level: number;
   header_mode: string;
   screensaver_mode: string;
   idle_timeout_sec: number;
@@ -66,6 +67,7 @@ function getInitialStatus(): Status {
     image_icon_visible: false,
     music_progress: undefined,
     music_duration_ms: undefined,
+    audio_level: 0,
     header_mode: settings.headerMode,
     screensaver_mode: settings.screensaverMode,
     idle_timeout_sec: settings.idleTimeoutSec,
@@ -94,6 +96,10 @@ export class WhisplayDisplay {
   private textCounterTimer: NodeJS.Timeout | null = null;
   private textCounterTemplate: string | null = null;
   private textCounterStartAt = 0;
+  private audioLevelTimer: NodeJS.Timeout | null = null;
+  private audioLevelSampleProcess: ChildProcess | null = null;
+  private audioLevelSamplePending = false;
+  private audioLevelMonitorFailed = false;
 
   constructor() {
     this.deviceEnabled = parseBoolEnv("WHISPLAY_DEVICE_ENABLED", true);
@@ -423,6 +429,7 @@ export class WhisplayDisplay {
       image_icon_visible,
       music_progress,
       music_duration_ms,
+      audio_level,
       header_mode,
       screensaver_mode,
       idle_timeout_sec,
@@ -457,9 +464,11 @@ export class WhisplayDisplay {
     this.currentStatus.image_icon_visible = image_icon_visible;
     this.currentStatus.music_progress = music_progress;
     this.currentStatus.music_duration_ms = music_duration_ms;
+    this.currentStatus.audio_level = audio_level;
     this.currentStatus.header_mode = header_mode;
     this.currentStatus.screensaver_mode = screensaver_mode;
     this.currentStatus.idle_timeout_sec = idle_timeout_sec;
+    this.syncAudioLevelMonitor(status, header_mode);
     
     const changedValuesObj = Object.fromEntries(changedValues);
     changedValuesObj.brightness = 100;
@@ -531,6 +540,135 @@ export class WhisplayDisplay {
     this.webDisplay = null;
   }
 
+  private isVuHeaderMode(headerMode: string): boolean {
+    return (
+      headerMode === "vu-bars" ||
+      headerMode === "vu-scope" ||
+      headerMode === "vu-wave"
+    );
+  }
+
+  private shouldRunAudioLevelMonitor(status: string, headerMode: string): boolean {
+    return this.deviceEnabled && this.isVuHeaderMode(headerMode) && status === "listening";
+  }
+
+  private parseAudioLevel(soxOutput: string): number | null {
+    const match = soxOutput.match(/RMS\s+amplitude:\s+([0-9.eE+-]+)/i);
+    if (!match) {
+      return null;
+    }
+    const rms = parseFloat(match[1]);
+    if (!Number.isFinite(rms) || rms < 0) {
+      return null;
+    }
+    return Math.max(0, Math.min(100, Math.round(Math.sqrt(rms) * 140)));
+  }
+
+  private pushAudioLevel(level: number): void {
+    const normalizedLevel = Math.max(0, Math.min(100, Math.round(level)));
+    if (this.currentStatus.audio_level === normalizedLevel) {
+      return;
+    }
+    this.currentStatus.audio_level = normalizedLevel;
+    const data = JSON.stringify({ audio_level: normalizedLevel, brightness: 100 });
+    this.sendToDisplay(data);
+    this.webDisplay?.updateStatus(this.currentStatus);
+  }
+
+  private sampleAudioLevel(): void {
+    if (this.audioLevelSamplePending || this.audioLevelMonitorFailed) {
+      return;
+    }
+    this.audioLevelSamplePending = true;
+    let output = "";
+    const sampleProcess = spawn("sox", [
+      "-q",
+      "-t",
+      "alsa",
+      "default",
+      "-n",
+      "trim",
+      "0",
+      "0.10",
+      "stat",
+    ]);
+    this.audioLevelSampleProcess = sampleProcess;
+
+    sampleProcess.stdout?.on("data", (data: Buffer) => {
+      output += data.toString();
+    });
+    sampleProcess.stderr?.on("data", (data: Buffer) => {
+      output += data.toString();
+    });
+
+    sampleProcess.on("error", (error) => {
+      if (!this.audioLevelMonitorFailed) {
+        console.warn("[audio-level] monitor failed:", error.message);
+      }
+      this.audioLevelMonitorFailed = true;
+      this.audioLevelSamplePending = false;
+      this.audioLevelSampleProcess = null;
+      this.stopAudioLevelMonitor();
+    });
+
+    sampleProcess.on("close", (code) => {
+      this.audioLevelSamplePending = false;
+      this.audioLevelSampleProcess = null;
+      if (code && code !== 0) {
+        if (!this.audioLevelMonitorFailed) {
+          console.warn(`[audio-level] sample exited with code ${code}`);
+        }
+        this.audioLevelMonitorFailed = true;
+        this.stopAudioLevelMonitor();
+        return;
+      }
+
+      const detectedLevel = this.parseAudioLevel(output) ?? 0;
+      const currentLevel = this.currentStatus.audio_level;
+      const smoothedLevel =
+        detectedLevel >= currentLevel
+          ? Math.round(currentLevel * 0.35 + detectedLevel * 0.65)
+          : Math.round(currentLevel * 0.8 + detectedLevel * 0.2);
+      this.pushAudioLevel(smoothedLevel);
+    });
+  }
+
+  private startAudioLevelMonitor(): void {
+    if (this.audioLevelTimer) {
+      return;
+    }
+    this.audioLevelMonitorFailed = false;
+    this.sampleAudioLevel();
+    this.audioLevelTimer = setInterval(() => {
+      this.sampleAudioLevel();
+    }, 140);
+  }
+
+  stopAudioLevelMonitor(): void {
+    if (this.audioLevelTimer) {
+      clearInterval(this.audioLevelTimer);
+      this.audioLevelTimer = null;
+    }
+    if (this.audioLevelSampleProcess) {
+      try {
+        this.audioLevelSampleProcess.kill("SIGINT");
+      } catch {
+        // Process already exited.
+      }
+      this.audioLevelSampleProcess = null;
+    }
+    this.audioLevelSamplePending = false;
+    this.pushAudioLevel(0);
+  }
+
+  private syncAudioLevelMonitor(status: string, headerMode: string): void {
+    if (this.shouldRunAudioLevelMonitor(status, headerMode)) {
+      this.startAudioLevelMonitor();
+      return;
+    }
+    this.stopAudioLevelMonitor();
+  }
+
   private ensureCameraDaemon(): void {
     const command = `cd ${resolve(
       __dirname,
@@ -591,6 +729,7 @@ export const isButtonDown =
 
 function cleanup() {
   console.log("Cleaning up display process before exit...");
+  displayInstance.stopAudioLevelMonitor();
   displayInstance.killPythonProcess();
   displayInstance.stopWebDisplay();
 }

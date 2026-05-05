@@ -33,48 +33,44 @@ This project starts from the official PiSugar Whisplay chatbot, but is being tai
 - **One-button device flow:** long press to talk, double press to replay the last answer, and voice shortcuts for settings and help
 - **Voice controls:** settings, voice on/off, photo capture, photo browsing, shutdown, and an on-device voice-command cheat sheet
 - **Vision flow:** upload a photo or capture one from the configured camera source, then ask **"what do you see?"**
+- **NWS weather bot:** save a latitude/longitude in Settings, then ask **"what's the weather?"** or **"weather alerts"** to get a National Weather Service forecast answered in the currently selected chatbot personality
 - **Local photo effects:** apply deterministic voice-triggered filters such as **retro**, **comic**, **sketch**, **pixelate**, **spooky**, **dreamy**, **warm**, **cyberpunk**, **glitch**, and more to the currently shown image
 - **Preset personalities:** Neutral, Friendly, Cranky, Roast Bot, Sleepy Pi, Affirmation, Philosopher, Mythic Oracle, Joke Bot, Tutor, Detective, and Zen
-- **HAT visuals:** switchable header effects plus full-screen screensavers such as Matrix, Retro Geometry, Plasma, and Neon Rain
+- **HAT visuals:** switchable header effects plus full-screen screensavers such as Matrix, Retro Geometry, Plasma, Neon Rain, and new VU-style mic meters
 - **Improved HAT readability:** reply text now wraps more naturally on the device instead of breaking as aggressively mid-word
 - **Companion CYD controls:** touch actions for **New Chat**, **Repeat**, **Capture**, **Voice**, plus an on-screen **Setup** button for reopening the Wi-Fi portal
 - **Companion Cardputer controls:** keyboard text send, message viewing, local setup portal, saved text sizes, and a split receive/send screen layout
 
 ## Device screenshots
 
-These are a few representative shots of the current build. They intentionally show only a small sample so the README stays readable.
+These are a few representative shots of the current build. GitHub README pages allow inline HTML, so some of the shots below are paired side by side to keep the page easier to scan.
 
-### Browser simulator and basic HAT idle view
+### Browser simulator and HAT basics
 
-![Updated browser simulator view](images/IMG_20260505_133554046_HDR.jpg)
+<p align="center">
+  <img src="images/IMG_20260505_133554046_HDR.jpg" alt="Updated browser simulator view" width="48%" />
+  <img src="images/IMG_20260503_164937203_HDR.jpg" alt="Whisplay HAT idle screen" width="48%" />
+</p>
 
-![Whisplay HAT idle screen](images/IMG_20260503_164937203_HDR.jpg)
-
-### Early CYD companion build
-
-![Early Whisplay CYD companion build](images/IMG_20260504_155914704_HDR.jpg)
-
-### Matrix screensaver on the Whisplay HAT
-
-![Matrix screensaver on the Whisplay HAT](images/IMG_20260503_164718210_HDR.jpg)
+<p align="center">
+  <img src="images/IMG_20260503_164718210_HDR.jpg" alt="Matrix screensaver on the Whisplay HAT" width="48%" />
+  <img src="images/IMG_20260505_134146692.jpg" alt="Whisplay help screen with the updated 3D printed case and Arducam photo" width="48%" />
+</p>
 
 ### Vision example: uploaded shop photo and Cranky Bot reaction
 
-![Shop photo shown on the Whisplay HAT for vision analysis](images/IMG_20260503_171337860_HDR.jpg)
+<p align="center">
+  <img src="images/IMG_20260503_171337860_HDR.jpg" alt="Shop photo shown on the Whisplay HAT for vision analysis" width="32%" />
+  <img src="images/IMG_20260503_171358433_HDR.jpg" alt="Cranky Bot starting its reaction to the uploaded shop photo" width="32%" />
+  <img src="images/IMG_20260503_171402454_HDR.jpg" alt="Cranky Bot continuing its complaint about the shop mess" width="32%" />
+</p>
 
-![Cranky Bot starting its reaction to the uploaded shop photo](images/IMG_20260503_171358433_HDR.jpg)
+### Local photo effects and reply style
 
-![Cranky Bot continuing its complaint about the shop mess](images/IMG_20260503_171402454_HDR.jpg)
-
-### Cranky Bot reply example
-
-![Cranky Bot giving a sarcastic GitHub-flavored reply](images/IMG_20260503_171835378_HDR.jpg)
-
-### New local photo effects and updated case/help view
-
-![Sketch-style photo effect example](images/IMG_20260505_133314327_HDR.jpg)
-
-![Whisplay help screen with the updated 3D printed case and Arducam photo](images/IMG_20260505_134146692.jpg)
+<p align="center">
+  <img src="images/IMG_20260505_133314327_HDR.jpg" alt="Sketch-style photo effect example" width="48%" />
+  <img src="images/IMG_20260503_171835378_HDR.jpg" alt="Cranky Bot giving a sarcastic GitHub-flavored reply" width="48%" />
+</p>
 
 ## Quick start for this fork
 
@@ -120,6 +116,8 @@ This repo now also includes an early companion firmware project under `Companion
 - current actions include **New Chat**, **Repeat**, **Capture**, **Voice**, and **Setup**
 - Wi-Fi credentials and Pi host settings are handled from the CYD's own captive portal
 - both **normal** and **inverted** display variants are included
+
+![Early Whisplay CYD companion build](images/IMG_20260504_155914704_HDR.jpg)
 
 This is intentionally a **rough start**, not a polished final companion UI. It is already usable, but more tuning is planned around layout, diagnostics, and overall interaction flow.
 
@@ -200,7 +198,7 @@ TTS_SERVER=espeak-ng
 
 ## Settings UI notes
 
-The browser simulator includes a settings panel for the Groq key, Gemini key, preset personalities, freeform personality editing, voice mode, record time, text scroll speed, UI theme, HAT header mode, HAT screensaver mode, HAT idle timeout, and a shutdown button for clean power-off without SSH.
+The browser simulator includes a settings panel for the Groq key, Gemini key, preset personalities, freeform personality editing, voice mode, record time, text scroll speed, UI theme, HAT header mode, HAT screensaver mode, HAT idle timeout, **weather latitude/longitude**, and a shutdown button for clean power-off without SSH.
 
 The Groq and Gemini keys can be stored there without editing `.env`. Runtime settings are saved to the local settings file on the Pi, and both **Gemini vision** and **Gemini image generation** in this fork will use the saved browser key before falling back to `GEMINI_API_KEY` from `.env`.
 
@@ -213,6 +211,17 @@ For the local Pi camera path, this fork now supports either the Python **Picamer
 Captured photos are now kept in the project camera storage and exposed in the browser UI as a **Saved Photos** list. The browser UI can delete saved photos; the HAT browse mode is read-only.
 
 The saved **Text Scroll Speed** setting applies to both the browser simulator and the physical HAT, so you can speed up long replies without changing the existing button behavior.
+
+## NWS weather bot for this fork
+
+This fork now includes a first-pass **National Weather Service forecast bot** using a saved latitude/longitude from the browser settings.
+
+- save **Weather Latitude** and **Weather Longitude** in the browser settings panel
+- ask **"what's the weather?"**, **"weather forecast"**, **"weather alerts"**, or **"is it going to snow?"**
+- the app pulls the current **NWS forecast** and **active alerts** for that location
+- the final spoken/text reply still comes through the currently selected chatbot personality, so **Cranky**, **Oracle**, **Tutor**, and the rest each interpret the same forecast in their own voice
+
+This keeps the weather data grounded in the NWS feed while still letting the personality you chose shape how the answer sounds.
 
 ## Local photo effects for this fork
 
@@ -337,6 +346,9 @@ The browser UI and HAT menu share the same stored settings.
 - **shutdown** / **shutdown raspberry** / **shutdown pi** = request Raspberry Pi shutdown
 - **browse photos** / **browse images** = open the saved-photo browser on the HAT
 - **take photo** / **capture image** = capture a still image from the configured camera source
+- **what's the weather** / **weather forecast** = fetch the saved-location NWS forecast and answer in the current chatbot personality
+- **weather alerts** / **any alerts** = fetch active NWS alerts for the saved location
+- **is it going to snow** / **snow forecast** = ask for a snow-focused forecast summary for the saved location
 
 ### HAT voice command cheat sheet controls
 
@@ -374,8 +386,18 @@ The HAT now supports a switchable **header mode**:
 - **Retro Geometry**
 - **Plasma**
 - **Neon Rain**
+- **VU Bars**
+- **VU Scope**
+- **VU Wave**
 
 The animated headers run only on the physical HAT. The matrix-family headers still change speed depending on what the device is doing, so they stay calmer while idle and speed up more while listening, thinking, or answering.
+
+The new **VU** header modes are meant to show mic strength while the bot is listening:
+
+- Select them from the existing **HAT Header** dropdown in the browser UI or cycle to them from the HAT settings menu
+- **VU Bars** is the clearest "am I speaking loud enough?" option
+- **VU Scope** gives a moving oscilloscope-style trace
+- **VU Wave** gives a smoother wave-style meter
 
 There is also now a set of **full-screen HAT screensavers**:
 

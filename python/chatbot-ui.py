@@ -59,6 +59,7 @@ current_rag_icon_visible = False
 current_image_icon_visible = False
 current_music_progress = None
 current_music_duration_ms = None
+current_audio_level = 0
 current_header_mode = "emoji"
 current_screensaver_mode = "off"
 current_idle_timeout_sec = 120
@@ -144,6 +145,9 @@ class RenderThread(threading.Thread):
         self.header_neon_streams = self.create_neon_streams(5, self.header_effect_height)
         self.retro_shapes = [self.create_retro_shape(self.whisplay.LCD_HEIGHT) for _ in range(8)]
         self.header_retro_shapes = [self.create_retro_shape(self.header_effect_height) for _ in range(4)]
+        self.header_vu_history = [0.0] * 48
+        self.header_vu_phase = 0.0
+        self.header_vu_level = 0.0
 
     def render_init_screen(self):
         # Display logo on startup
@@ -681,6 +685,12 @@ class RenderThread(threading.Thread):
         elif mode == "neon-rain":
             streams = self.header_neon_streams if header else self.neon_streams
             self.draw_neon_streams(image, streams, y_offset, height)
+        elif mode == "vu-bars":
+            self.draw_vu_bars(draw, width, height, y_offset)
+        elif mode == "vu-scope":
+            self.draw_vu_scope(draw, width, height, y_offset)
+        elif mode == "vu-wave":
+            self.draw_vu_wave(draw, width, height, y_offset)
         else:
             self.draw_matrix_region(
                 draw,
@@ -690,6 +700,76 @@ class RenderThread(threading.Thread):
                 self.get_matrix_speed(status, screensaver=True),
                 y_offset,
             )
+
+    def get_header_vu_level(self):
+        global current_audio_level
+        try:
+            target_level = max(0.0, min(1.0, float(current_audio_level) / 100.0))
+        except (TypeError, ValueError):
+            target_level = 0.0
+        if target_level >= self.header_vu_level:
+            self.header_vu_level = (self.header_vu_level * 0.35) + (target_level * 0.65)
+        else:
+            self.header_vu_level = (self.header_vu_level * 0.82) + (target_level * 0.18)
+        return max(0.0, min(1.0, self.header_vu_level))
+
+    def draw_vu_bars(self, draw, width, height, y_offset):
+        level = self.get_header_vu_level()
+        bar_count = 10
+        margin_x = 10
+        gap = 4
+        usable_width = max(10, width - (margin_x * 2))
+        bar_width = max(6, (usable_width - (gap * (bar_count - 1))) // bar_count)
+        for index in range(bar_count):
+            x0 = margin_x + index * (bar_width + gap)
+            x1 = x0 + bar_width
+            fill_ratio = max(0.0, min(1.0, (level * bar_count) - index))
+            draw.rounded_rectangle((x0, y_offset, x1, y_offset + height), radius=2, outline=(20, 40, 30, 220), fill=(0, 0, 0, 0))
+            if fill_ratio <= 0:
+                continue
+            lit_height = max(3, int(fill_ratio * (height - 2)))
+            y0 = y_offset + height - lit_height
+            if index >= 8:
+                color = (255, 96, 96, 235)
+            elif index >= 6:
+                color = (255, 210, 90, 230)
+            else:
+                color = (64, 255, 140, 225)
+            draw.rounded_rectangle((x0 + 1, y0, x1 - 1, y_offset + height - 1), radius=2, fill=color)
+
+    def draw_vu_scope(self, draw, width, height, y_offset):
+        level = self.get_header_vu_level()
+        self.header_vu_phase += 0.6 + level * 0.45
+        sample = math.sin(self.header_vu_phase) * (0.25 + level * 0.75)
+        self.header_vu_history.append(sample)
+        history_length = max(20, min(width // 4, 60))
+        self.header_vu_history = self.header_vu_history[-history_length:]
+        center_y = y_offset + (height / 2.0)
+        amplitude = max(4.0, (height / 2.0 - 4.0) * (0.3 + level * 0.7))
+        draw.line((0, center_y, width, center_y), fill=(28, 58, 44, 180), width=1)
+        points = []
+        for index, sample_value in enumerate(self.header_vu_history):
+            x = int(index * (width - 1) / max(1, history_length - 1))
+            y = center_y - (sample_value * amplitude)
+            points.append((x, y))
+        if len(points) > 1:
+            draw.line(points, fill=(80, 255, 160, 235), width=2)
+            last_x, last_y = points[-1]
+            draw.ellipse((last_x - 2, last_y - 2, last_x + 2, last_y + 2), fill=(220, 255, 235, 240))
+
+    def draw_vu_wave(self, draw, width, height, y_offset):
+        level = self.get_header_vu_level()
+        self.header_vu_phase += 0.22 + level * 0.18
+        center_y = y_offset + (height / 2.0)
+        amplitude = max(3.0, (height / 2.0 - 4.0) * (0.2 + level * 0.8))
+        points = []
+        for x in range(width):
+            phase = self.header_vu_phase + (x / max(1, width - 1)) * (math.pi * 2.0)
+            harmonic = math.sin((phase * 2.0) + (level * 3.0)) * 0.22
+            y = center_y - ((math.sin(phase) + harmonic) * amplitude)
+            points.append((x, y))
+        draw.line((0, center_y, width, center_y), fill=(34, 28, 62, 160), width=1)
+        draw.line(points, fill=(110, 170, 255, 235), width=2)
 
     def render_screensaver_frame(self, image, draw, width, height, status):
         self.render_visual_mode(current_screensaver_mode, image, draw, width, height, status)
@@ -835,7 +915,7 @@ class RenderThread(threading.Thread):
 def update_display_data(status=None, emoji=None, text=None,
                    scroll_speed=None, scroll_speed_factor=None, scroll_sync=None, battery_level=None, battery_color=None, image_path=None,
                    network_connected=None, vpn_connected=None, rag_icon_visible=None, image_icon_visible=None, transaction_id=None,
-                   wifi_signal_level=None,
+                   wifi_signal_level=None, audio_level=None,
                    music_progress=None, music_duration_ms=None, header_mode=None,
                    screensaver_mode=None, idle_timeout_sec=None):
     global current_status, current_emoji, current_text, current_battery_level
@@ -847,6 +927,7 @@ def update_display_data(status=None, emoji=None, text=None,
     global current_network_connected, current_vpn_connected, current_rag_icon_visible, current_image_icon_visible, current_transaction_id
     global current_wifi_signal_level
     global current_music_progress, current_music_duration_ms
+    global current_audio_level
     global current_header_mode, current_screensaver_mode, current_idle_timeout_sec
     global render_thread
 
@@ -934,6 +1015,11 @@ def update_display_data(status=None, emoji=None, text=None,
             current_wifi_signal_level = max(0, min(3, int(wifi_signal_level)))
         except (TypeError, ValueError):
             print(f"[Display] Invalid wifi_signal_level payload: {wifi_signal_level}")
+    if audio_level is not None:
+        try:
+            current_audio_level = max(0, min(100, int(audio_level)))
+        except (TypeError, ValueError):
+            print(f"[Display] Invalid audio_level payload: {audio_level}")
     if vpn_connected is not None:
         current_vpn_connected = vpn_connected
     if rag_icon_visible is not None:
@@ -1042,6 +1128,7 @@ def handle_client(client_socket, addr, whisplay):
                     image_path = content.get("image", None)
                     network_connected = content.get("network_connected", None)
                     wifi_signal_level = content.get("wifi_signal_level", None)
+                    audio_level = content.get("audio_level", None)
                     vpn_connected = content.get("vpn_connected", None)
                     rag_icon_visible = content.get("rag_icon_visible", None)
                     image_icon_visible = content.get("image_icon_visible", None)
@@ -1096,6 +1183,7 @@ def handle_client(client_socket, addr, whisplay):
                        (battery_level is not None) or (battery_color is not None) or \
                               (image_path is not None) or (network_connected is not None) or \
                              (wifi_signal_level is not None) or \
+                             (audio_level is not None) or \
                              (vpn_connected is not None) or \
                              (rag_icon_visible is not None) or (image_icon_visible is not None) or (scroll_sync is not None) or \
                              (music_progress is not None) or (music_duration_ms is not None) or \
@@ -1103,9 +1191,10 @@ def handle_client(client_socket, addr, whisplay):
                         update_display_data(status=status, emoji=emoji,
                                      text=text, scroll_speed=scroll_speed, scroll_speed_factor=scroll_speed_factor, scroll_sync=scroll_sync,
                                      battery_level=battery_level, battery_color=battery_tuple,
-                                                  image_path=image_path, network_connected=network_connected,
-                                                  wifi_signal_level=wifi_signal_level,
-                                      vpn_connected=vpn_connected,
+                                                   image_path=image_path, network_connected=network_connected,
+                                                   wifi_signal_level=wifi_signal_level,
+                                                   audio_level=audio_level,
+                                       vpn_connected=vpn_connected,
                                                   rag_icon_visible=rag_icon_visible,
                                           image_icon_visible=image_icon_visible,
                                                   transaction_id=transaction_id,

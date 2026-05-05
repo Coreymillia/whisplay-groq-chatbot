@@ -73,6 +73,12 @@ function getCompactThemeLabel(value: string): string {
 
 function getCompactHeaderLabel(value: string): string {
   switch (value) {
+    case "vu-bars":
+      return "VU Bars";
+    case "vu-scope":
+      return "VU Scope";
+    case "vu-wave":
+      return "VU Wave";
     case "matrix-binary":
       return "Binary";
     case "matrix-blue":
