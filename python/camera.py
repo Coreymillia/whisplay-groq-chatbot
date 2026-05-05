@@ -1,10 +1,12 @@
 import argparse
 import json
 import os
+import shutil
 import socket
 import socketserver
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from io import BytesIO
@@ -68,14 +70,21 @@ class SharedCameraService:
 
         self.capture_width = max(64, int(os.getenv("WHISPLAY_CAMERA_WIDTH", "560")))
         self.capture_height = max(64, int(os.getenv("WHISPLAY_CAMERA_HEIGHT", "480")))
+        self.capture_quality = max(30, min(100, int(os.getenv("WHISPLAY_CAMERA_QUALITY", "95"))))
+        self.stream_quality = max(20, min(95, int(os.getenv("WHISPLAY_CAMERA_STREAM_QUALITY", "80"))))
         interval_ms = int(os.getenv("WHISPLAY_CAMERA_DAEMON_INTERVAL_MS", "200"))
         self.stream_interval_sec = max(0.05, interval_ms / 1000)
         self.network_timeout_sec = max(
             1.0,
             float(os.getenv("WHISPLAY_CAMERA_NETWORK_TIMEOUT_SEC", "5")),
         )
+        self.pi_camera_timeout_sec = max(
+            2.0,
+            float(os.getenv("WHISPLAY_PI_CAMERA_TIMEOUT_SEC", "8")),
+        )
 
         self.picam2 = None
+        self.rpicam_still = shutil.which("rpicam-still")
         self.running = True
         self.stream_ref_count = 0
         self.state_lock = threading.Lock()
@@ -171,13 +180,92 @@ class SharedCameraService:
         self.picam2.start()
 
     def _capture_picamera_image(self) -> Image.Image:
-        with self.camera_lock:
-            self._ensure_camera_ready()
-            frame = self.picam2.capture_array()
+        self._ensure_camera_ready()
+        frame = self.picam2.capture_array()
         image = Image.fromarray(frame)
         if image.mode != "RGB":
             image = image.convert("RGB")
         return image
+
+    def _capture_rpicam_image(
+        self,
+        width: int,
+        height: int,
+        quality: int,
+    ) -> Image.Image:
+        if self.rpicam_still is None:
+            raise RuntimeError("rpicam-still is unavailable")
+
+        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as temp_file:
+            temp_path = temp_file.name
+
+        try:
+            subprocess.run(
+                [
+                    self.rpicam_still,
+                    "--output",
+                    temp_path,
+                    "--nopreview",
+                    "--immediate",
+                    "--encoding",
+                    "jpg",
+                    "--width",
+                    str(width),
+                    "--height",
+                    str(height),
+                    "--quality",
+                    str(quality),
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=self.pi_camera_timeout_sec,
+            )
+            with Image.open(temp_path) as captured:
+                if captured.mode != "RGB":
+                    return captured.convert("RGB")
+                return captured.copy()
+        except subprocess.TimeoutExpired as error:
+            raise RuntimeError("Pi camera capture timed out.") from error
+        except subprocess.CalledProcessError as error:
+            stderr = error.stderr.strip() if error.stderr else "unknown camera error"
+            raise RuntimeError(f"Pi camera capture failed: {stderr}") from error
+        finally:
+            try:
+                os.unlink(temp_path)
+            except OSError:
+                pass
+
+    def _current_pi_camera_backend(self) -> str | None:
+        if Picamera2 is not None:
+            return "picamera2"
+        if self.rpicam_still is not None:
+            return "rpicam-still"
+        return None
+
+    def _capture_local_pi_image(self, quality: int) -> Image.Image:
+        with self.camera_lock:
+            backend = self._current_pi_camera_backend()
+            if backend == "picamera2":
+                try:
+                    return self._capture_picamera_image()
+                except Exception:
+                    if self.rpicam_still is None:
+                        raise
+                    return self._capture_rpicam_image(
+                        self.capture_width,
+                        self.capture_height,
+                        quality,
+                    )
+            if backend == "rpicam-still":
+                return self._capture_rpicam_image(
+                    self.capture_width,
+                    self.capture_height,
+                    quality,
+                )
+        raise RuntimeError(
+            "Pi camera backend is unavailable. Install Picamera2 or ensure rpicam-still is available."
+        )
 
     def _capture_network_image(self) -> Image.Image:
         data = self._fetch_network_image_bytes_safe()
@@ -186,11 +274,11 @@ class SharedCameraService:
             image = image.convert("RGB")
         return image
 
-    def _capture_frame_image(self) -> Image.Image:
+    def _capture_frame_image(self, quality: int | None = None) -> Image.Image:
         source = self._current_camera_source()
         if source == "esp32-cam":
             return self._capture_network_image()
-        return self._capture_picamera_image()
+        return self._capture_local_pi_image(quality or self.stream_quality)
 
     def _write_web_frame(self, image: Image.Image) -> None:
         temp_path = f"{self.web_frame_path}.tmp"
@@ -230,7 +318,12 @@ class SharedCameraService:
         if cmd == "ping":
             with self.state_lock:
                 active = self.stream_ref_count
-            return {"ok": True, "stream_ref_count": active, "source": self._current_camera_source()}
+            return {
+                "ok": True,
+                "stream_ref_count": active,
+                "source": self._current_camera_source(),
+                "pi_camera_backend": self._current_pi_camera_backend(),
+            }
 
         if cmd == "status":
             with self.state_lock:
@@ -238,17 +331,19 @@ class SharedCameraService:
             source = self._current_camera_source()
             ready = False
             error = ""
+            pi_camera_backend = self._current_pi_camera_backend()
             if source == "esp32-cam":
                 ready, error = self._network_camera_ready()
             else:
-                ready = Picamera2 is not None
+                ready = pi_camera_backend is not None
                 if not ready:
-                    error = "Picamera2 is unavailable"
+                    error = "No Pi camera backend is available (Picamera2 or rpicam-still)."
             return {
                 "ok": True,
                 "stream_ref_count": active,
                 "ready": ready,
                 "source": source,
+                "pi_camera_backend": pi_camera_backend,
                 "esp32_cam_url": self._current_network_camera_url(),
                 "error": error,
             }
@@ -272,12 +367,13 @@ class SharedCameraService:
             target_path = os.path.abspath(target)
             os.makedirs(os.path.dirname(target_path), exist_ok=True)
             try:
-                image = self._capture_frame_image()
+                image = self._capture_frame_image(self.capture_quality)
                 image.save(target_path, format="JPEG", quality=95)
                 return {
                     "ok": True,
                     "path": target_path,
                     "source": self._current_camera_source(),
+                    "pi_camera_backend": self._current_pi_camera_backend(),
                 }
             except Exception as e:
                 return {"ok": False, "error": str(e)}
