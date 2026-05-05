@@ -855,6 +855,10 @@ class LocalMusicPlayer {
   }
 
   stop(): void {
+    const hadActivePlayback =
+      this.isPlaying ||
+      this.pendingTrack !== null ||
+      this.currentTrack !== null;
     this.isPlaying = false;
     this.pendingTrack = null;
     this.pendingTrackIndex = null;
@@ -863,6 +867,9 @@ class LocalMusicPlayer {
     // Restore the persistent TTS player after releasing
     lazyAudio().restoreAudioPlayer();
     console.log("[Music] Playback stopped");
+    if (hadActivePlayback) {
+      this.playbackEndCallback?.();
+    }
   }
 
   isMusicPlaying(): boolean {

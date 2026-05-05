@@ -791,7 +791,12 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
       }
     });
 
-    onButtonDoubleClick(null);
+    onButtonDoubleClick(() => {
+      onMusicTrackChange(null);
+      onMusicPlaybackEnd(null);
+      stopMusicPlayback();
+      ctx.transitionTo("sleep");
+    });
     onButtonPressed(() => {
       // Stop music immediately when button is pressed
       onMusicTrackChange(null);
@@ -1137,6 +1142,18 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
       endPartial();
       finishDirectAnswer(showImageAfter);
     };
+    const transitionDirectlyToSleep = (message: string, emoji = STATE_EMOJIS.answering): void => {
+      llmResponseText = message;
+      stopPlaying();
+      ctx.rememberLastAnswer({
+        text: message,
+        emoji,
+        image: "",
+      });
+      clearPendingCapturedImgForChat();
+      display({ image_icon_visible: false });
+      ctx.transitionTo("sleep");
+    };
     const transitionDirectlyToMusic = (message: string): void => {
       llmResponseText = message;
       stopPlaying();
@@ -1179,7 +1196,8 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
       const player = getManagedMusicPlayer(process.env);
       if (musicCommand === "stop") {
         stopMusicPlayback();
-        finishDirectMessage("Stopped music.");
+        ctx.musicDisplayText = "";
+        transitionDirectlyToSleep("Stopped music.");
         return;
       }
 
