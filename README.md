@@ -25,6 +25,7 @@ This project starts from the official PiSugar Whisplay chatbot, but is being tai
 - **Spoken photo capture:** working
 - **Captured still image on HAT display:** working
 - **Companion CYD touchscreen client:** working as an early rough-start build, with more tuning planned
+- **Companion Cardputer client:** working as an early rough-start build, with text chat confirmed and more settings/UI work planned
 - **Web simulator/debug UI:** still available at `http://<host-or-pi-ip>:17880`
 
 ## Current feature highlights
@@ -36,6 +37,7 @@ This project starts from the official PiSugar Whisplay chatbot, but is being tai
 - **HAT visuals:** switchable header effects plus full-screen screensavers such as Matrix, Retro Geometry, Plasma, and Neon Rain
 - **Improved HAT readability:** reply text now wraps more naturally on the device instead of breaking as aggressively mid-word
 - **Companion CYD controls:** touch actions for **New Chat**, **Repeat**, **Capture**, **Voice**, plus an on-screen **Setup** button for reopening the Wi-Fi portal
+- **Companion Cardputer controls:** keyboard text send, message viewing, local setup portal, saved text sizes, and a split receive/send screen layout
 
 ## Device screenshots
 
@@ -113,6 +115,17 @@ This repo now also includes an early companion firmware project under `Companion
 - both **normal** and **inverted** display variants are included
 
 This is intentionally a **rough start**, not a polished final companion UI. It is already usable, but more tuning is planned around layout, diagnostics, and overall interaction flow.
+
+## Companion Cardputer status
+
+This repo also now includes an early companion firmware project under `CompanionCARDPUTER/` for the **M5Stack Cardputer**.
+
+- the **Pi stays the chatbot brain**
+- the **Cardputer acts as a keyboard-first text companion**
+- current text chat is confirmed working in both directions
+- the firmware includes a local Wi-Fi + Pi setup portal, receive/send screen split, message scrolling, and saved text-size controls
+
+This is also intentionally a **rough start**, not a polished final Cardputer UX. It is already useful for text chat, and more settings/polish are planned. The audio path is implemented in the firmware, but hardware validation is still pending.
 
 ## Getting a Groq API key
 

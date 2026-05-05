@@ -2,6 +2,7 @@ import fs from "fs";
 import path from "path";
 import http from "http";
 import { Socket } from "net";
+import { IncomingMessage } from "http";
 import Koa from "koa";
 import Router from "@koa/router";
 import bodyParser from "koa-bodyparser";
@@ -20,6 +21,7 @@ import {
   getLatestVisionAnalysis,
 } from "../utils/vision-analysis";
 import {
+  recognizeAudio,
   listSavedChatHistories,
   loadSavedChatHistory,
   resetChatHistory,
@@ -107,6 +109,29 @@ function getBodyNumber(
     }
   }
   return undefined;
+}
+
+function readRawRequest(
+  request: IncomingMessage,
+  maxBytes: number,
+): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let total = 0;
+
+    request.on("data", (chunk: Buffer | string) => {
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      total += buffer.length;
+      if (total > maxBytes) {
+        reject(new Error(`Audio upload exceeds ${maxBytes} bytes.`));
+        request.destroy();
+        return;
+      }
+      chunks.push(buffer);
+    });
+    request.on("end", () => resolve(Buffer.concat(chunks)));
+    request.on("error", reject);
+  });
 }
 
 export class WebDisplayServer implements WebAudioBridgeServer {
@@ -461,6 +486,51 @@ export class WebDisplayServer implements WebAudioBridgeServer {
       }
       this.onTextInput(text);
       ctx.body = { ok: true };
+    });
+
+    this.router.post("/api/input/audio", async (ctx) => {
+      const contentType = String(ctx.get("content-type") || "").toLowerCase();
+      if (!contentType.includes("audio/wav") && !contentType.includes("audio/x-wav")) {
+        ctx.status = 415;
+        ctx.body = { ok: false, error: "Audio upload must use audio/wav." };
+        return;
+      }
+
+      const audioDir = path.resolve(dataDir, "companion_audio");
+      fs.mkdirSync(audioDir, { recursive: true });
+      const tempPath = path.join(audioDir, `cardputer-${Date.now()}.wav`);
+
+      try {
+        const audioBuffer = await readRawRequest(ctx.req, 2 * 1024 * 1024);
+        if (!audioBuffer.length) {
+          ctx.status = 400;
+          ctx.body = { ok: false, error: "Missing audio payload." };
+          return;
+        }
+
+        fs.writeFileSync(tempPath, audioBuffer);
+        const transcript = (await recognizeAudio(tempPath)).trim();
+        if (!transcript) {
+          ctx.status = 422;
+          ctx.body = { ok: false, error: "Speech recognition returned no transcript." };
+          return;
+        }
+
+        this.onTextInput(transcript);
+        ctx.body = { ok: true, transcript };
+      } catch (error) {
+        ctx.status = 500;
+        ctx.body = {
+          ok: false,
+          error: error instanceof Error ? error.message : "Audio input failed.",
+        };
+      } finally {
+        try {
+          fs.unlinkSync(tempPath);
+        } catch {
+          // ignore cleanup failure
+        }
+      }
     });
 
     this.router.post("/api/companion/action", (ctx) => {
