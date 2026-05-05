@@ -69,6 +69,11 @@ import {
 import {
   setVolumeByLevel,
 } from "../../utils/volume";
+import {
+  applyImageEffect,
+  getImageEffectLabel,
+  type ImageEffectId,
+} from "../../device/image-effects";
 
 const imageIntentPatterns = [
   /\bwhat do you see\b/i,
@@ -78,6 +83,133 @@ const imageIntentPatterns = [
   /\bdo you see\b/i,
   /\bread (the )?text\b/i,
   /\bocr\b/i,
+];
+
+const imageGenerationIntentPatterns = [
+  /^\s*(?:draw|illustrate|paint)\b/i,
+  /\b(?:generate|create|make)\s+(?:me\s+)?(?:an?\s+)?(?:image|picture|photo|drawing|illustration|artwork|logo|poster|wallpaper)\b/i,
+  /^\s*edit\s+(?:this|the|that)\s+(?:image|photo|picture)\b/i,
+];
+
+const imageGenerationContextPattern =
+  /\b(?:this|the|that)\s+(?:image|picture|photo)\b/i;
+
+const imageEffectCommandMatchers: Array<{
+  effect: ImageEffectId;
+  patterns: RegExp[];
+}> = [
+  {
+    effect: "retro",
+    patterns: [
+      /\bmake (?:it|this)\s+retro\b/i,
+      /\bmake (?:it|this)\s+vintage\b/i,
+      /\bapply (?:a\s+)?retro\b/i,
+    ],
+  },
+  {
+    effect: "comic",
+    patterns: [
+      /\bcomic(?:\s+book)?\s+(?:this|it)\b/i,
+      /\bmake (?:it|this)\s+(?:a\s+)?comic(?:\s+book)?\b/i,
+      /\bcartoon(?:ize)?\s+(?:this|it)\b/i,
+    ],
+  },
+  {
+    effect: "sketch",
+    patterns: [
+      /\bsketch(?:\s+it|\s+this)?\b/i,
+      /\bpencil\s+sketch\b/i,
+      /\bmake (?:it|this)\s+(?:a\s+)?sketch\b/i,
+    ],
+  },
+  {
+    effect: "pixelate",
+    patterns: [
+      /\bpixelate(?:\s+it|\s+this)?\b/i,
+      /\bminecraft\b/i,
+      /\b8[\s-]?bit\b/i,
+    ],
+  },
+  {
+    effect: "halftone",
+    patterns: [
+      /\bhalftone\b/i,
+      /\bnewspaper\s+print\b/i,
+      /\bdot\s+screen\b/i,
+    ],
+  },
+  {
+    effect: "edge",
+    patterns: [
+      /\bedge\s+detection\b/i,
+      /\bshow (?:the\s+)?edges\b/i,
+      /\boutline (?:it|this)\b/i,
+    ],
+  },
+  {
+    effect: "spooky",
+    patterns: [
+      /\bmake (?:it|this)\s+spooky\b/i,
+      /\bmake (?:it|this)\s+creepy\b/i,
+      /\bhaunted\b/i,
+    ],
+  },
+  {
+    effect: "dreamy",
+    patterns: [
+      /\bmake (?:it|this)\s+dreamy\b/i,
+      /\bdreamy\b/i,
+      /\bethereal\b/i,
+    ],
+  },
+  {
+    effect: "warm",
+    patterns: [
+      /\bmake (?:it|this)\s+warm\b/i,
+      /\bwarm and cozy\b/i,
+      /\bcozy\b/i,
+    ],
+  },
+  {
+    effect: "cyberpunk",
+    patterns: [
+      /\bmake (?:it|this)\s+cyberpunk\b/i,
+      /\bcyberpunk\b/i,
+      /\bneon\b/i,
+    ],
+  },
+  {
+    effect: "glitch",
+    patterns: [
+      /\bglitch(?:\s+it|\s+this)?\b/i,
+      /\bcorrupt (?:it|this|the image)\b/i,
+      /\bmake (?:it|this)\s+look\s+hacked\b/i,
+    ],
+  },
+  {
+    effect: "vhs",
+    patterns: [
+      /\bvhs\b/i,
+      /\btape\b/i,
+      /\bold\s+camcorder\b/i,
+    ],
+  },
+  {
+    effect: "auto-contrast",
+    patterns: [
+      /\bauto\s+contrast\b/i,
+      /\bfix (?:the\s+)?contrast\b/i,
+    ],
+  },
+  {
+    effect: "colors-pop",
+    patterns: [
+      /\bmake (?:the\s+)?colors pop\b/i,
+      /\bsaturation boost\b/i,
+      /\bboost (?:the\s+)?saturation\b/i,
+      /\bboost (?:the\s+)?colors\b/i,
+    ],
+  },
 ];
 
 const captureIntentPatterns = [
@@ -138,6 +270,35 @@ function shouldRouteToVision(prompt: string): boolean {
     return false;
   }
   return imageIntentPatterns.some((pattern) => pattern.test(trimmed));
+}
+
+function shouldRouteToImageGeneration(prompt: string): boolean {
+  const trimmed = prompt.trim();
+  if (!trimmed) {
+    return false;
+  }
+  return imageGenerationIntentPatterns.some((pattern) => pattern.test(trimmed));
+}
+
+function shouldUseImageContextForGeneration(prompt: string): boolean {
+  const trimmed = prompt.trim();
+  if (!trimmed || !getLatestShowedImage()) {
+    return false;
+  }
+  return imageGenerationContextPattern.test(trimmed);
+}
+
+function parseImageEffectCommand(prompt: string): ImageEffectId | null {
+  const trimmed = prompt.trim();
+  if (!trimmed) {
+    return null;
+  }
+  for (const matcher of imageEffectCommandMatchers) {
+    if (matcher.patterns.some((pattern) => pattern.test(trimmed))) {
+      return matcher.effect;
+    }
+  }
+  return null;
 }
 
 function shouldCaptureImage(prompt: string): boolean {
@@ -984,9 +1145,93 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
         });
       return;
     }
+    const imageEffectCommand = parseImageEffectCommand(ctx.asrText);
+    if (imageEffectCommand) {
+      const currentImagePath = getLatestShowedImage();
+      if (!currentImagePath) {
+        finishDirectMessage("Show or capture a photo first.");
+        return;
+      }
+      display({
+        text: `[effects]Applying ${getImageEffectLabel(imageEffectCommand)} effect...`,
+      });
+      void applyImageEffect(currentImagePath, imageEffectCommand)
+        .then((editedImagePath) => {
+          if (currentAnswerId !== ctx.answerId) {
+            return;
+          }
+          setLatestCapturedImg(editedImagePath);
+          clearLatestVisionAnalysis();
+          display({
+            image: editedImagePath,
+            text: `[effects]Applied ${getImageEffectLabel(imageEffectCommand)} effect.`,
+          });
+          finishDirectMessage(
+            `Applied ${getImageEffectLabel(imageEffectCommand)} effect.`,
+            true,
+          );
+        })
+        .catch((error) => {
+          console.error("Image effect failed:", error);
+          if (currentAnswerId !== ctx.answerId) {
+            return;
+          }
+          const message =
+            error instanceof Error && error.message
+              ? error.message
+              : "I couldn't edit that image right now.";
+          display({
+            text: `[effects]${message}`,
+          });
+          finishDirectMessage(message);
+        });
+      return;
+    }
     [() => Promise.resolve().then(() => ""), getSystemPromptWithKnowledge]
     [enableRAG ? 1 : 0](ctx.asrText)
       .then((res: string) => {
+        if (
+          shouldRouteToImageGeneration(ctx.asrText) &&
+          typeof llmFuncMap.generateImage === "function"
+        ) {
+          display({
+            text: "[generateImage]Creating image...",
+          });
+          void runReplyFlow(async () => {
+            await llmFuncMap.generateImage({
+              prompt: ctx.asrText,
+              withImageContext: shouldUseImageContextForGeneration(ctx.asrText),
+            })
+              .then((result) => {
+                if (currentAnswerId !== ctx.answerId) {
+                  return;
+                }
+                const cleaned = stripToolTag(result);
+                if (result.startsWith(ToolReturnTag.Error)) {
+                  trackingPartial(
+                    cleaned || "I couldn't create that image right now.",
+                  );
+                  endPartial();
+                  return;
+                }
+                const generatedImagePath = getLatestGenImg();
+                if (generatedImagePath) {
+                  display({ image: generatedImagePath });
+                }
+                trackingPartial(cleaned || "Image created. Take a look.");
+                endPartial();
+              })
+              .catch((error) => {
+                console.error("Image generation routing failed:", error);
+                if (currentAnswerId !== ctx.answerId) {
+                  return;
+                }
+                trackingPartial("I couldn't create that image right now.");
+                endPartial();
+              });
+          });
+          return;
+        }
         if (shouldRouteToVision(ctx.asrText) && typeof llmFuncMap.describeImage === "function") {
           display({
             text: "[describeImage]Analyzing uploaded image...",

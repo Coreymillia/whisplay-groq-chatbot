@@ -4,11 +4,25 @@ import {
   getLatestShowedImage,
   setLatestGenImg,
 } from "../../utils/image";
-import { gemini, geminiImageModel } from "./gemini";
-import { GenerateContentResponse } from "@google/genai";
+import { geminiImageModel } from "./gemini";
+import { GenerateContentResponse, GoogleGenAI } from "@google/genai";
 import path from "path";
 import { imageDir } from "../../utils/dir";
 import { readFileSync, writeFileSync } from "fs";
+import { getRuntimeSettings } from "../../config/runtime-settings";
+import { undiciProxyFetch } from "../proxy-fetch";
+
+const getGeminiImageClient = (): GoogleGenAI | null => {
+  const runtimeKey = getRuntimeSettings().geminiApiKey;
+  const apiKey = runtimeKey || process.env.GEMINI_API_KEY || "";
+  if (!apiKey) {
+    return null;
+  }
+  return new GoogleGenAI({
+    apiKey,
+    fetch: undiciProxyFetch as any,
+  });
+};
 
 
 export const addGeminiGenerationTool = (imageGenerationTools: LLMTool[]) => {
@@ -34,6 +48,10 @@ export const addGeminiGenerationTool = (imageGenerationTools: LLMTool[]) => {
       },
     },
     func: async (params: { prompt: string; withImageContext: boolean }) => {
+      const gemini = getGeminiImageClient();
+      if (!gemini) {
+        return `${ToolReturnTag.Error} Gemini image generation is not configured yet.`;
+      }
       console.log(`Generating image with gemini model: ${geminiImageModel}`);
       const { prompt, withImageContext } = params;
       let imageContext = undefined;
@@ -69,6 +87,9 @@ export const addGeminiGenerationTool = (imageGenerationTools: LLMTool[]) => {
         .catch((err) => {
           console.error(`Error generating image:`, err);
         })) as GenerateContentResponse;
+      if (!response?.candidates?.[0]?.content?.parts?.length) {
+        return `${ToolReturnTag.Error}Image generation failed.`;
+      }
       const fileName = `gemini-image-${Date.now()}.png`;
       const imagePath = path.join(imageDir, fileName);
       let isSuccess = false;

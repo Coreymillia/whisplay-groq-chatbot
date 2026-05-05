@@ -57,6 +57,22 @@ export const VOICE_COMMAND_HELP_ENTRIES: VoiceCommandHelpEntry[] = [
     summary: "what do you see? / read text",
   },
   {
+    id: "image-effects",
+    summary: "make it retro / spooky / comic",
+  },
+  {
+    id: "image-effects-2",
+    summary: "sketch it / pixelate / halftone",
+  },
+  {
+    id: "image-effects-3",
+    summary: "cyberpunk / glitch it / VHS",
+  },
+  {
+    id: "image-effects-4",
+    summary: "auto contrast / colors pop",
+  },
+  {
     id: "shutdown",
     summary: "shutdown / shutdown pi",
   },

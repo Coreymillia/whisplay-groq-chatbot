@@ -33,6 +33,7 @@ This project starts from the official PiSugar Whisplay chatbot, but is being tai
 - **One-button device flow:** long press to talk, double press to replay the last answer, and voice shortcuts for settings and help
 - **Voice controls:** settings, voice on/off, photo capture, photo browsing, shutdown, and an on-device voice-command cheat sheet
 - **Vision flow:** upload a photo or capture one from the configured camera source, then ask **"what do you see?"**
+- **Local photo effects:** apply deterministic voice-triggered filters such as **retro**, **comic**, **sketch**, **pixelate**, **spooky**, **dreamy**, **warm**, **cyberpunk**, **glitch**, and more to the currently shown image
 - **Preset personalities:** Neutral, Friendly, Cranky, Roast Bot, Sleepy Pi, Affirmation, Philosopher, Mythic Oracle, Joke Bot, Tutor, Detective, and Zen
 - **HAT visuals:** switchable header effects plus full-screen screensavers such as Matrix, Retro Geometry, Plasma, and Neon Rain
 - **Improved HAT readability:** reply text now wraps more naturally on the device instead of breaking as aggressively mid-word
@@ -45,7 +46,7 @@ These are a few representative shots of the current build. They intentionally sh
 
 ### Browser simulator and basic HAT idle view
 
-![Browser simulator and HAT idle view](images/IMG_20260503_164602346_HDR.jpg)
+![Updated browser simulator view](images/IMG_20260505_133554046_HDR.jpg)
 
 ![Whisplay HAT idle screen](images/IMG_20260503_164937203_HDR.jpg)
 
@@ -68,6 +69,12 @@ These are a few representative shots of the current build. They intentionally sh
 ### Cranky Bot reply example
 
 ![Cranky Bot giving a sarcastic GitHub-flavored reply](images/IMG_20260503_171835378_HDR.jpg)
+
+### New local photo effects and updated case/help view
+
+![Sketch-style photo effect example](images/IMG_20260505_133314327_HDR.jpg)
+
+![Whisplay help screen with the updated 3D printed case and Arducam photo](images/IMG_20260505_134146692.jpg)
 
 ## Quick start for this fork
 
@@ -195,7 +202,7 @@ TTS_SERVER=espeak-ng
 
 The browser simulator includes a settings panel for the Groq key, Gemini key, preset personalities, freeform personality editing, voice mode, record time, text scroll speed, UI theme, HAT header mode, HAT screensaver mode, HAT idle timeout, and a shutdown button for clean power-off without SSH.
 
-The Groq and Gemini keys can be stored there without editing `.env`. Runtime settings are saved to the local settings file on the Pi, and Gemini vision will use the saved browser key before falling back to `GEMINI_API_KEY` from `.env`.
+The Groq and Gemini keys can be stored there without editing `.env`. Runtime settings are saved to the local settings file on the Pi, and both **Gemini vision** and **Gemini image generation** in this fork will use the saved browser key before falling back to `GEMINI_API_KEY` from `.env`.
 
 The browser UI also now includes a simple **Vision Test** image upload box. You can upload a photo from your PC, then say or type **"what do you see?"** to get a response in the tone of the currently selected chatbot personality.
 
@@ -206,6 +213,33 @@ For the local Pi camera path, this fork now supports either the Python **Picamer
 Captured photos are now kept in the project camera storage and exposed in the browser UI as a **Saved Photos** list. The browser UI can delete saved photos; the HAT browse mode is read-only.
 
 The saved **Text Scroll Speed** setting applies to both the browser simulator and the physical HAT, so you can speed up long replies without changing the existing button behavior.
+
+## Local photo effects for this fork
+
+This fork now includes a first-pass **deterministic local photo-effects pipeline** for the currently shown image. These effects do **not** overwrite the original photo. Each effect saves a new edited image, shows it on the device, and lets you keep editing older photos after browsing to them first.
+
+Current voice commands/effect families:
+
+- **retro**: `make it retro`
+- **comic**: `comic book this`, `cartoonize it`
+- **sketch**: `sketch it`, `pencil sketch`
+- **pixelate**: `pixelate it`, `pixelate it like Minecraft`, `8-bit`
+- **halftone**: `halftone`, `newspaper print`
+- **edge**: `edge detection`, `show the edges`, `outline it`
+- **spooky**: `make it spooky`, `make it creepy`
+- **dreamy**: `make it dreamy`
+- **warm**: `make it warm`, `warm and cozy`
+- **cyberpunk**: `make it cyberpunk`
+- **glitch**: `glitch it`, `corrupt the image`, `make it look hacked`
+- **VHS**: `VHS effect`, `make it VHS`, `old camcorder`
+- **auto contrast**: `auto contrast`, `fix the contrast`
+- **colors pop**: `make the colors pop`, `saturation boost`, `boost the colors`
+
+The v1 design is intentionally simple and cheap:
+
+- effects are mapped to a fixed approved set of local filters
+- the target is the **currently shown image**, not only the newest capture
+- edited results are saved as new files so the original stays available in the photo browser
 
 Current plan for Gemini:
 
