@@ -36,6 +36,8 @@ export interface RuntimeSettings {
   headerMode: HeaderMode;
   screensaverMode: ScreensaverMode;
   idleTimeoutSec: number;
+  weatherLatitude: number | null;
+  weatherLongitude: number | null;
 }
 
 export interface RuntimeSettingsUpdate {
@@ -53,6 +55,8 @@ export interface RuntimeSettingsUpdate {
   headerMode?: string;
   screensaverMode?: string;
   idleTimeoutSec?: number;
+  weatherLatitude?: number | null;
+  weatherLongitude?: number | null;
 }
 
 const SETTINGS_PATH = path.resolve(
@@ -71,6 +75,8 @@ const DEFAULT_MANUAL_RECORD_MAX_SEC = 15;
 const DEFAULT_HEADER_MODE: HeaderMode = "emoji";
 const DEFAULT_SCREENSAVER_MODE: ScreensaverMode = "retro-geometry";
 const DEFAULT_IDLE_TIMEOUT_SEC = 120;
+const DEFAULT_WEATHER_LATITUDE = null;
+const DEFAULT_WEATHER_LONGITUDE = null;
 export const RECORD_TIMEOUT_OPTIONS = [10, 15, 20, 30, 45, 60];
 export const VOLUME_LEVEL_OPTIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 export const SCROLL_SPEED_OPTIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
@@ -233,6 +239,21 @@ function normalizeIdleTimeoutSec(value: unknown): number {
   return Math.max(0, Math.min(3600, Math.round(numeric)));
 }
 
+function normalizeCoordinate(
+  value: unknown,
+  min: number,
+  max: number,
+): number | null {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+  const numeric = typeof value === "number" ? value : parseFloat(String(value));
+  if (!Number.isFinite(numeric)) {
+    return null;
+  }
+  return Math.max(min, Math.min(max, numeric));
+}
+
 function sanitizeSettings(input: Partial<RuntimeSettings> | null | undefined): RuntimeSettings {
   return {
     groqApiKey:
@@ -253,6 +274,8 @@ function sanitizeSettings(input: Partial<RuntimeSettings> | null | undefined): R
     headerMode: normalizeHeaderMode(input?.headerMode),
     screensaverMode: normalizeScreensaverMode(input?.screensaverMode),
     idleTimeoutSec: normalizeIdleTimeoutSec(input?.idleTimeoutSec),
+    weatherLatitude: normalizeCoordinate(input?.weatherLatitude, -90, 90) ?? DEFAULT_WEATHER_LATITUDE,
+    weatherLongitude: normalizeCoordinate(input?.weatherLongitude, -180, 180) ?? DEFAULT_WEATHER_LONGITUDE,
   };
 }
 
@@ -343,6 +366,14 @@ export function saveRuntimeSettings(
 
   if (typeof update.idleTimeoutSec === "number") {
     next.idleTimeoutSec = normalizeIdleTimeoutSec(update.idleTimeoutSec);
+  }
+
+  if ("weatherLatitude" in update) {
+    next.weatherLatitude = normalizeCoordinate(update.weatherLatitude, -90, 90);
+  }
+
+  if ("weatherLongitude" in update) {
+    next.weatherLongitude = normalizeCoordinate(update.weatherLongitude, -180, 180);
   }
 
   writeSettingsFile(next);
@@ -463,6 +494,8 @@ export function getPublicRuntimeSettings(): {
   headerMode: HeaderMode;
   screensaverMode: ScreensaverMode;
   idleTimeoutSec: number;
+  weatherLatitude: number | null;
+  weatherLongitude: number | null;
 } {
   const settings = loadSettingsFile();
   return {
@@ -482,5 +515,7 @@ export function getPublicRuntimeSettings(): {
     headerMode: settings.headerMode,
     screensaverMode: settings.screensaverMode,
     idleTimeoutSec: settings.idleTimeoutSec,
+    weatherLatitude: settings.weatherLatitude,
+    weatherLongitude: settings.weatherLongitude,
   };
 }

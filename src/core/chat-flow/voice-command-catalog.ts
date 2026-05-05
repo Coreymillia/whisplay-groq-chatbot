@@ -57,6 +57,10 @@ export const VOICE_COMMAND_HELP_ENTRIES: VoiceCommandHelpEntry[] = [
     summary: "what do you see? / read text",
   },
   {
+    id: "weather",
+    summary: "what's the weather? / weather alerts",
+  },
+  {
     id: "image-effects",
     summary: "make it retro / spooky / comic",
   },

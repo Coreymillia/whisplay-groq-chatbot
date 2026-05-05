@@ -74,6 +74,10 @@ import {
   getImageEffectLabel,
   type ImageEffectId,
 } from "../../device/image-effects";
+import {
+  fetchWeatherSnapshot,
+  isWeatherConfigured,
+} from "../../device/weather";
 
 const imageIntentPatterns = [
   /\bwhat do you see\b/i,
@@ -83,6 +87,12 @@ const imageIntentPatterns = [
   /\bdo you see\b/i,
   /\bread (the )?text\b/i,
   /\bocr\b/i,
+];
+
+const weatherIntentPatterns = [
+  /^\s*(?:what(?:'s| is)\s+the\s+weather|weather|weather forecast|forecast)\s*[.!?]*$/i,
+  /^\s*(?:weather alerts|alerts|any alerts|are there any alerts)\s*[.!?]*$/i,
+  /^\s*(?:is it going to snow|is snow coming|snow forecast)\s*[.!?]*$/i,
 ];
 
 const imageGenerationIntentPatterns = [
@@ -272,6 +282,14 @@ function shouldRouteToVision(prompt: string): boolean {
   return imageIntentPatterns.some((pattern) => pattern.test(trimmed));
 }
 
+function shouldRouteToWeather(prompt: string): boolean {
+  const trimmed = prompt.trim();
+  if (!trimmed) {
+    return false;
+  }
+  return weatherIntentPatterns.some((pattern) => pattern.test(trimmed));
+}
+
 function shouldRouteToImageGeneration(prompt: string): boolean {
   const trimmed = prompt.trim();
   if (!trimmed) {
@@ -447,6 +465,47 @@ async function streamVisionRelayReply(
           `User question: ${userPrompt}\n\n` +
           `Vision analysis:\n${visionAnalysis}\n\n` +
           "Answer the user's question naturally. If the analysis seems uncertain, briefly say so.",
+      },
+    ],
+  });
+  let answer = "";
+  for await (const chunk of stream) {
+    const text = chunk.choices[0]?.delta?.content || "";
+    if (!text) {
+      continue;
+    }
+    answer += text;
+    onChunk(text);
+  }
+  return answer.trim();
+}
+
+async function streamWeatherRelayReply(
+  userPrompt: string,
+  weatherSummary: string,
+  onChunk: (chunk: string) => void,
+): Promise<string> {
+  const openai = getOpenAIClient();
+  if (!openai) {
+    return "";
+  }
+  const stream = await openai.chat.completions.create({
+    model: getOpenAILLMModel(),
+    stream: true,
+    messages: [
+      {
+        role: "system",
+        content:
+          `${getSystemPrompt()}\n` +
+          "You are answering a weather question using supplied NOAA/NWS forecast data. " +
+          "Stay concise, practical, and in character. Use only the supplied weather data. " +
+          "If alerts exist, mention them clearly. Do not invent extra forecast details.",
+      },
+      {
+        role: "user",
+        content:
+          `Weather data:\n${weatherSummary}\n\n` +
+          `User question: ${userPrompt}`,
       },
     ],
   });
@@ -1143,6 +1202,53 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
           });
           finishDirectMessage(message);
         });
+      return;
+    }
+    if (shouldRouteToWeather(ctx.asrText)) {
+      if (!isWeatherConfigured()) {
+        finishDirectMessage("Set weather latitude and longitude in Settings first.");
+        return;
+      }
+      display({
+        text: "[weather]Checking NWS forecast...",
+      });
+      void runReplyFlow(async () => {
+        await fetchWeatherSnapshot()
+          .then(async (snapshot) => {
+            if (currentAnswerId !== ctx.answerId) {
+              return;
+            }
+            const relayReply = await streamWeatherRelayReply(
+              ctx.asrText,
+              snapshot.combinedText,
+              (chunk) => {
+                if (currentAnswerId === ctx.answerId) {
+                  trackingPartial(chunk);
+                }
+              },
+            );
+            const finalReply =
+              relayReply || snapshot.combinedText || "I couldn't fetch the weather right now.";
+            if (!relayReply && currentAnswerId === ctx.answerId) {
+              trackingPartial(finalReply);
+            }
+            endPartial();
+            finishDirectAnswer();
+          })
+          .catch((error) => {
+            console.error("Weather routing failed:", error);
+            if (currentAnswerId !== ctx.answerId) {
+              return;
+            }
+            const message =
+              error instanceof Error && error.message
+                ? error.message
+                : "I couldn't fetch the weather right now.";
+            trackingPartial(message);
+            endPartial();
+            finishDirectAnswer();
+          });
+      });
       return;
     }
     const imageEffectCommand = parseImageEffectCommand(ctx.asrText);

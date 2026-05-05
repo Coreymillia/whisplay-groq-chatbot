@@ -45,6 +45,8 @@ const uiThemeSelect = document.getElementById("uiThemeSelect");
 const cameraSourceSelect = document.getElementById("cameraSourceSelect");
 const esp32CamUrlInput = document.getElementById("esp32CamUrlInput");
 const esp32CamUrlWrap = document.getElementById("esp32CamUrlWrap");
+const weatherLatitudeInput = document.getElementById("weatherLatitudeInput");
+const weatherLongitudeInput = document.getElementById("weatherLongitudeInput");
 const headerModeSelect = document.getElementById("headerModeSelect");
 const screensaverModeSelect = document.getElementById("screensaverModeSelect");
 const idleTimeoutSelect = document.getElementById("idleTimeoutSelect");
@@ -788,6 +790,18 @@ function applySettings(settings) {
   if (esp32CamUrlInput) {
     esp32CamUrlInput.value = settings.esp32CamUrl || DEFAULT_ESP32_CAM_URL;
   }
+  if (weatherLatitudeInput) {
+    weatherLatitudeInput.value =
+      settings.weatherLatitude === null || settings.weatherLatitude === undefined
+        ? ""
+        : String(settings.weatherLatitude);
+  }
+  if (weatherLongitudeInput) {
+    weatherLongitudeInput.value =
+      settings.weatherLongitude === null || settings.weatherLongitude === undefined
+        ? ""
+        : String(settings.weatherLongitude);
+  }
   if (headerModeSelect) {
     headerModeSelect.value = settings.headerMode || DEFAULT_HEADER_MODE;
   }
@@ -897,6 +911,13 @@ function readFileAsDataUrl(file) {
   });
 }
 
+function parseOptionalFloat(value) {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) return null;
+  const numeric = parseFloat(trimmed);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
 async function uploadVisionImage() {
   const file = visionImageInput?.files?.[0];
   if (!file) {
@@ -997,6 +1018,8 @@ async function saveSettings({ clearGroqApiKey = false } = {}) {
     uiTheme: uiThemeSelect?.value || DEFAULT_UI_THEME,
     cameraSource: cameraSourceSelect?.value || DEFAULT_CAMERA_SOURCE,
     esp32CamUrl: (esp32CamUrlInput?.value || DEFAULT_ESP32_CAM_URL).trim(),
+    weatherLatitude: parseOptionalFloat(weatherLatitudeInput?.value),
+    weatherLongitude: parseOptionalFloat(weatherLongitudeInput?.value),
     headerMode: headerModeSelect?.value || DEFAULT_HEADER_MODE,
     screensaverMode:
       screensaverModeSelect?.value || DEFAULT_SCREENSAVER_MODE,

@@ -612,6 +612,8 @@ export class WebDisplayServer implements WebAudioBridgeServer {
         headerMode: getBodyString(body, "headerMode"),
         screensaverMode: getBodyString(body, "screensaverMode"),
         idleTimeoutSec: getBodyNumber(body, "idleTimeoutSec"),
+        weatherLatitude: getBodyNumber(body, "weatherLatitude"),
+        weatherLongitude: getBodyNumber(body, "weatherLongitude"),
       });
       this.onSettingsSaved(settings);
 
@@ -632,6 +634,8 @@ export class WebDisplayServer implements WebAudioBridgeServer {
           headerMode: settings.headerMode,
           screensaverMode: settings.screensaverMode,
           idleTimeoutSec: settings.idleTimeoutSec,
+          weatherLatitude: settings.weatherLatitude,
+          weatherLongitude: settings.weatherLongitude,
         },
         presets: PERSONALITY_PRESETS,
         volumeLevelOptions: VOLUME_LEVEL_OPTIONS,

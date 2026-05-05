@@ -258,6 +258,36 @@
               </div>
 
               <div class="settings-field">
+                <label class="field-label" for="weatherLatitudeInput">Weather Latitude</label>
+                <input
+                  class="settings-input"
+                  id="weatherLatitudeInput"
+                  type="number"
+                  step="any"
+                  placeholder="39.7392"
+                  autocomplete="off"
+                />
+                <div class="field-hint">
+                  Used for NWS forecast and alert lookups.
+                </div>
+              </div>
+
+              <div class="settings-field">
+                <label class="field-label" for="weatherLongitudeInput">Weather Longitude</label>
+                <input
+                  class="settings-input"
+                  id="weatherLongitudeInput"
+                  type="number"
+                  step="any"
+                  placeholder="-104.9903"
+                  autocomplete="off"
+                />
+                <div class="field-hint">
+                  Use a negative value for west longitude in the U.S.
+                </div>
+              </div>
+
+              <div class="settings-field">
                 <label class="field-label" for="headerModeSelect">HAT Header</label>
                 <select class="settings-select" id="headerModeSelect">
                   <option value="emoji">Emoji</option>
