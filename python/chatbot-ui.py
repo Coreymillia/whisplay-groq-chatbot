@@ -39,8 +39,8 @@ current_text = "Waiting for message..."
 current_battery_level = 100
 current_battery_color = ColorUtils.get_rgb255_from_any("#55FF00")
 current_scroll_top = 0
-DEFAULT_SCROLL_SPEED = 0.25
-MAX_SCROLL_SPEED = 0.5
+DEFAULT_SCROLL_SPEED = 0.9
+MAX_SCROLL_SPEED = 2.6
 DEFAULT_SCROLL_SPEED_FACTOR = 1.0
 current_scroll_speed = DEFAULT_SCROLL_SPEED
 current_scroll_speed_factor = DEFAULT_SCROLL_SPEED_FACTOR
@@ -83,7 +83,7 @@ def to_device_scroll_speed(requested_speed, scroll_speed_factor):
         base_speed = float(requested_speed)
     except (TypeError, ValueError):
         raise ValueError(f"Invalid scroll_speed payload: {requested_speed}")
-    normalized_speed = (base_speed / 3.0) * DEFAULT_SCROLL_SPEED
+    normalized_speed = max(0.0, (base_speed / 3.0) * DEFAULT_SCROLL_SPEED)
     effective_speed = normalized_speed * normalize_scroll_speed_factor(scroll_speed_factor)
     return min(MAX_SCROLL_SPEED, max(0.0, effective_speed))
 
