@@ -1,0 +1,9 @@
+{
+  "name": "groqbotnet",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Bare-bones Groq bot-to-bot chat node",
+  "scripts": {
+    "start": "node server.js"
+  }
+}

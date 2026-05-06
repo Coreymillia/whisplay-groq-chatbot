@@ -63,6 +63,19 @@ const saveSettingsBtn = document.getElementById("saveSettingsBtn");
 const clearKeyBtn = document.getElementById("clearKeyBtn");
 const shutdownBtn = document.getElementById("shutdownBtn");
 const settingsStatus = document.getElementById("settingsStatus");
+const botNetEnabledCheckbox = document.getElementById("botNetEnabledCheckbox");
+const botNetPeerUrlInput = document.getElementById("botNetPeerUrlInput");
+const botNetPublicUrlInput = document.getElementById("botNetPublicUrlInput");
+const botNetMaxRepliesInput = document.getElementById("botNetMaxRepliesInput");
+const botNetReplyDelayInput = document.getElementById("botNetReplyDelayInput");
+const botNetTopicInput = document.getElementById("botNetTopicInput");
+const botNetSaveBtn = document.getElementById("botNetSaveBtn");
+const botNetTestBtn = document.getElementById("botNetTestBtn");
+const botNetStartBtn = document.getElementById("botNetStartBtn");
+const botNetPeerStartBtn = document.getElementById("botNetPeerStartBtn");
+const botNetStopBtn = document.getElementById("botNetStopBtn");
+const botNetStatus = document.getElementById("botNetStatus");
+const botNetTranscript = document.getElementById("botNetTranscript");
 const dim = document.getElementById("dim");
 const imageLayer = document.getElementById("imageLayer");
 const imageDisplay = document.getElementById("imageDisplay");
@@ -87,6 +100,9 @@ let savedPhotos = [];
 let showAllSavedPhotos = false;
 let savedChatHistories = [];
 let musicTracks = [];
+let botNetState = null;
+let botNetSettingsDirty = false;
+let botNetSettingsLoaded = false;
 const DEFAULT_UI_THEME = "default";
 const DEFAULT_CAMERA_SOURCE = "pi-camera";
 const DEFAULT_ESP32_CAM_URL = "http://esp32-cam.local";
@@ -100,6 +116,239 @@ let idleTimeoutOptions = [];
 const DEFAULT_HEADER_MODE = "emoji";
 const DEFAULT_SCREENSAVER_MODE = "retro-geometry";
 const DEFAULT_IDLE_TIMEOUT_SEC = 120;
+
+function setBotNetStatus(message, isError = false) {
+  if (!botNetStatus) return;
+  botNetStatus.textContent = message;
+  botNetStatus.style.color = isError ? "#ff7b7b" : "";
+}
+
+function renderBotNetTranscript(conversation) {
+  if (!botNetTranscript) return;
+  botNetTranscript.innerHTML = "";
+  if (!conversation || !Array.isArray(conversation.messages) || !conversation.messages.length) {
+    botNetTranscript.innerHTML =
+      '<div class="status-text vision-status">No BotNet conversation yet.</div>';
+    return;
+  }
+  conversation.messages.slice(-12).forEach((message) => {
+    const item = document.createElement("div");
+    const speakerType = message.speakerType || "system";
+    item.className = `botnet-transcript-item ${speakerType}`;
+
+    const head = document.createElement("div");
+    head.className = "botnet-transcript-head";
+    const speaker = document.createElement("span");
+    speaker.textContent = message.speakerName || speakerType;
+    const stamp = document.createElement("span");
+    const date = message.createdAt ? new Date(message.createdAt) : null;
+    stamp.textContent =
+      date && !Number.isNaN(date.getTime()) ? date.toLocaleTimeString() : "";
+    head.appendChild(speaker);
+    head.appendChild(stamp);
+
+    const text = document.createElement("div");
+    text.className = "botnet-transcript-text";
+    text.textContent = message.text || "";
+
+    item.appendChild(head);
+    item.appendChild(text);
+    botNetTranscript.appendChild(item);
+  });
+}
+
+function applyBotNetSettings(settings, force = false) {
+  if (botNetSettingsDirty && !force) {
+    return;
+  }
+  if (botNetEnabledCheckbox) {
+    botNetEnabledCheckbox.checked = Boolean(settings.enabled);
+  }
+  if (botNetPeerUrlInput) {
+    botNetPeerUrlInput.value = settings.peerUrl || "";
+  }
+  if (botNetPublicUrlInput) {
+    botNetPublicUrlInput.value = settings.publicUrl || "";
+  }
+  if (botNetMaxRepliesInput) {
+    botNetMaxRepliesInput.value = String(
+      Number.isFinite(settings.maxBotReplies) ? settings.maxBotReplies : 8,
+    );
+  }
+  if (botNetReplyDelayInput) {
+    botNetReplyDelayInput.value = String(
+      Number.isFinite(settings.replyDelaySec) ? settings.replyDelaySec : 6,
+    );
+  }
+  botNetSettingsDirty = false;
+  botNetSettingsLoaded = true;
+}
+
+function applyBotNetState(state, forceSettings = false) {
+  botNetState = state || null;
+  const settings = state?.settings || {};
+  if (!botNetSettingsLoaded || forceSettings) {
+    applyBotNetSettings(settings, true);
+  } else {
+    applyBotNetSettings(settings, false);
+  }
+  const activeConversation = Array.isArray(state?.conversations)
+    ? state.conversations.find((conversation) => conversation.status === "active")
+    : null;
+  const fallbackConversation =
+    activeConversation || (Array.isArray(state?.conversations) ? state.conversations[0] : null);
+  const connectionStatus = state?.connectionStatus || "Disconnected";
+  setBotNetStatus(
+    activeConversation
+      ? `Active • ${connectionStatus} • ${activeConversation.topic || "Conversation"}`
+      : `${connectionStatus}${settings.enabled ? "" : " • BotNet mode is off"}`,
+  );
+  renderBotNetTranscript(fallbackConversation);
+}
+
+async function loadBotNetState() {
+  try {
+    const response = await fetch("/api/botnet/state", { cache: "no-store" });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    const payload = await response.json();
+    applyBotNetState(payload, false);
+  } catch (error) {
+    console.error("Failed to load BotNet state:", error);
+    setBotNetStatus("Failed to load BotNet state.", true);
+  }
+}
+
+async function saveBotNetSettings(showSavedStatus = true) {
+  const body = {
+    enabled: Boolean(botNetEnabledCheckbox?.checked),
+    peerUrl: (botNetPeerUrlInput?.value || "").trim(),
+    publicUrl: (botNetPublicUrlInput?.value || "").trim(),
+    maxBotReplies: parseInt(botNetMaxRepliesInput?.value || "8", 10),
+    replyDelaySec: parseInt(botNetReplyDelayInput?.value || "6", 10),
+  };
+  if (showSavedStatus) {
+    setBotNetStatus("Saving BotNet settings...");
+  }
+  const response = await fetch("/api/botnet/settings", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const payload = await response.json();
+  if (!response.ok || payload.ok === false) {
+    throw new Error(payload.error || `HTTP ${response.status}`);
+  }
+  applyBotNetState(
+    {
+      ok: true,
+      ...(botNetState || {}),
+      settings: payload.settings || body,
+      connectionStatus: botNetState?.connectionStatus || "Disconnected",
+      conversations: botNetState?.conversations || [],
+    },
+    true,
+  );
+  await loadBotNetState();
+  if (showSavedStatus) {
+    setBotNetStatus("BotNet settings saved.");
+  }
+}
+
+async function testBotNetConnection() {
+  const peerUrl = (botNetPeerUrlInput?.value || "").trim();
+  if (!peerUrl) {
+    setBotNetStatus("Set Connect to Bot first.", true);
+    return;
+  }
+  try {
+    setBotNetStatus("Testing peer connection...");
+    await saveBotNetSettings(false);
+    const response = await fetch("/api/botnet/test", { method: "POST" });
+    const payload = await response.json();
+    if (!response.ok || payload.ok === false) {
+      throw new Error(payload.message || payload.error || `HTTP ${response.status}`);
+    }
+    await loadBotNetState();
+    setBotNetStatus(payload.message || "Peer bot is reachable.");
+  } catch (error) {
+    console.error("Failed to test BotNet connection:", error);
+    setBotNetStatus(
+      error instanceof Error ? error.message : "Failed to test BotNet connection.",
+      true,
+    );
+  }
+}
+
+function validateBotNetConversationSetup() {
+  const peerUrl = (botNetPeerUrlInput?.value || "").trim();
+  if (!peerUrl) {
+    setBotNetStatus("Set Connect to Bot first.", true);
+    return false;
+  }
+  const publicUrl = (botNetPublicUrlInput?.value || "").trim();
+  if (!publicUrl) {
+    setBotNetStatus("Set This Bot URL first.", true);
+    return false;
+  }
+  return true;
+}
+
+async function startBotNetConversation(starter = "self") {
+  const topic = (botNetTopicInput?.value || "").trim();
+  if (!topic) {
+    setBotNetStatus("Enter a topic first.", true);
+    return;
+  }
+  if (!validateBotNetConversationSetup()) {
+    return;
+  }
+  try {
+    setBotNetStatus(
+      starter === "peer" ? "Asking peer bot to start..." : "Starting BotNet conversation...",
+    );
+    await saveBotNetSettings(false);
+    const response = await fetch("/api/botnet/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ topic, starter }),
+    });
+    const payload = await response.json();
+    if (!response.ok || payload.ok === false) {
+      throw new Error(payload.error || `HTTP ${response.status}`);
+    }
+    await loadBotNetState();
+    setBotNetStatus(
+      starter === "peer" ? "Peer start request sent." : "BotNet conversation started.",
+    );
+  } catch (error) {
+    console.error("Failed to start BotNet conversation:", error);
+    setBotNetStatus(
+      error instanceof Error ? error.message : "Failed to start BotNet conversation.",
+      true,
+    );
+  }
+}
+
+async function stopBotNetConversation() {
+  try {
+    setBotNetStatus("Stopping BotNet conversation...");
+    const response = await fetch("/api/botnet/stop", { method: "POST" });
+    const payload = await response.json();
+    if (!response.ok || payload.ok === false) {
+      throw new Error(payload.error || `HTTP ${response.status}`);
+    }
+    await loadBotNetState();
+    setBotNetStatus(payload.stopped ? "BotNet conversation stopped." : "No active BotNet conversation.");
+  } catch (error) {
+    console.error("Failed to stop BotNet conversation:", error);
+    setBotNetStatus(
+      error instanceof Error ? error.message : "Failed to stop BotNet conversation.",
+      true,
+    );
+  }
+}
 
 function setIconVisible(iconEl, visible) {
   iconEl.style.display = visible ? "block" : "none";
@@ -1249,6 +1498,7 @@ async function requestShutdown() {
 
 connectWebSocket();
 loadSettings();
+loadBotNetState();
 loadMusicLibrary();
 loadVisionPreview();
 loadVisionAnalysis();
@@ -1257,6 +1507,7 @@ loadChatHistories();
 setVisionAnalysisVisible(false);
 requestAnimationFrame(animateScroll);
 setInterval(loadVisionAnalysis, 3000);
+setInterval(loadBotNetState, 5000);
 
 personalityPresetSelect?.addEventListener("change", () => {
   const selectedId = personalityPresetSelect.value;
@@ -1326,6 +1577,57 @@ window.addEventListener("pointerup", (event) => {
 if (saveSettingsBtn) {
   saveSettingsBtn.addEventListener("click", () => {
     saveSettings();
+  });
+}
+
+if (botNetSaveBtn) {
+  botNetSaveBtn.addEventListener("click", () => {
+    saveBotNetSettings().catch((error) => {
+      console.error("Failed to save BotNet settings:", error);
+      setBotNetStatus(
+        error instanceof Error ? error.message : "Failed to save BotNet settings.",
+        true,
+      );
+    });
+  });
+}
+
+[
+  botNetEnabledCheckbox,
+  botNetPeerUrlInput,
+  botNetPublicUrlInput,
+  botNetMaxRepliesInput,
+  botNetReplyDelayInput,
+].forEach((element) => {
+  element?.addEventListener("input", () => {
+    botNetSettingsDirty = true;
+  });
+  element?.addEventListener("change", () => {
+    botNetSettingsDirty = true;
+  });
+});
+
+if (botNetTestBtn) {
+  botNetTestBtn.addEventListener("click", () => {
+    testBotNetConnection();
+  });
+}
+
+if (botNetStartBtn) {
+  botNetStartBtn.addEventListener("click", () => {
+    startBotNetConversation("self");
+  });
+}
+
+if (botNetPeerStartBtn) {
+  botNetPeerStartBtn.addEventListener("click", () => {
+    startBotNetConversation("peer");
+  });
+}
+
+if (botNetStopBtn) {
+  botNetStopBtn.addEventListener("click", () => {
+    stopBotNetConversation();
   });
 }
 
@@ -1790,9 +2092,40 @@ function updateTextInputState(enabled, status) {
   textSendBtn.disabled = !isEnabled;
 }
 
-function sendTextInput() {
+async function sendTextInput() {
   const text = (textInput.value || "").trim();
   if (!text) return;
+  if (botNetEnabledCheckbox?.checked) {
+    if (!validateBotNetConversationSetup()) {
+      return;
+    }
+    try {
+      setBotNetStatus("Starting BotNet conversation from text input...");
+      await saveBotNetSettings(false);
+      const response = await fetch("/api/botnet/user-message", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+      const payload = await response.json();
+      if (!response.ok || payload.ok === false) {
+        throw new Error(payload.error || `HTTP ${response.status}`);
+      }
+      textInput.value = "";
+      if (botNetTopicInput) {
+        botNetTopicInput.value = text;
+      }
+      await loadBotNetState();
+      setBotNetStatus("BotNet conversation started from the text box.");
+    } catch (error) {
+      console.error("Failed to route text input to BotNet:", error);
+      setBotNetStatus(
+        error instanceof Error ? error.message : "Failed to route text input to BotNet.",
+        true,
+      );
+    }
+    return;
+  }
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
   ws.send(JSON.stringify({ type: "text_input", text }));
   textInput.value = "";

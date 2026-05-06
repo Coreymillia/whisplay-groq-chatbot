@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>GroqBotNet</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="wrap">
+      <section class="panel">
+        <h1>GroqBotNet</h1>
+        <p class="muted">
+          Bare-bones Groq bot node for personality-driven bot-to-bot conversations.
+        </p>
+
+        <form id="settingsForm" class="card stack">
+          <h2>Bot settings</h2>
+          <label>
+            Bot name
+            <input id="botName" name="botName" type="text" />
+          </label>
+          <label>
+            Groq model
+            <input id="model" name="model" type="text" />
+          </label>
+          <label>
+            Groq API key
+            <input id="groqApiKey" name="groqApiKey" type="password" placeholder="Leave blank to keep current key" />
+          </label>
+          <label>
+            This Bot URL
+            <input id="publicBaseUrl" name="publicBaseUrl" type="text" placeholder="http://10.160.0.203:18990" />
+          </label>
+          <label>
+            Connect to Bot
+            <input id="peerUrl" name="peerUrl" type="text" placeholder="http://10.160.0.136:17880" />
+          </label>
+          <label>
+            Personality prompt
+            <textarea id="personalityPrompt" name="personalityPrompt" rows="5"></textarea>
+          </label>
+          <div class="grid two">
+            <label>
+              Memory turns
+              <input id="memoryTurns" name="memoryTurns" type="number" min="1" max="50" />
+            </label>
+            <label>
+              Reply delay (sec)
+              <input id="replyDelaySec" name="replyDelaySec" type="number" min="0" max="3600" />
+            </label>
+            <label>
+              Max bot replies
+              <input id="maxBotReplies" name="maxBotReplies" type="number" min="1" max="200" />
+            </label>
+            <label>
+              Max Groq requests / hour
+              <input id="maxRequestsPerHour" name="maxRequestsPerHour" type="number" min="1" max="500" />
+            </label>
+          </div>
+          <div class="actions">
+            <button type="submit">Save settings</button>
+            <span id="settingsStatus" class="muted"></span>
+          </div>
+        </form>
+
+        <form id="startForm" class="card stack">
+          <h2>Start bot conversation</h2>
+          <label>
+            Topic / opening idea
+            <textarea id="topic" name="topic" rows="3" placeholder="Have two bots debate whether old hardware has charm."></textarea>
+          </label>
+          <label>
+            Which bot starts?
+            <select id="starter" name="starter">
+              <option value="self">This bot starts</option>
+              <option value="peer">Peer bot starts</option>
+            </select>
+          </label>
+          <div class="actions">
+            <button type="submit">Start conversation</button>
+            <span id="startStatus" class="muted"></span>
+          </div>
+        </form>
+
+        <form id="soloForm" class="card stack">
+          <h2>Single-user text chat</h2>
+          <label>
+            Message
+            <textarea
+              id="soloMessage"
+              name="message"
+              rows="4"
+              placeholder="Talk to this bot directly without using BotNet mode."
+            ></textarea>
+          </label>
+          <div class="actions">
+            <button type="submit">Send to bot</button>
+            <button id="newSoloBtn" type="button" class="secondary">New solo chat</button>
+            <span id="soloStatus" class="muted"></span>
+          </div>
+        </form>
+      </section>
+
+      <section class="panel">
+        <div class="card stack">
+          <h2>Activity</h2>
+          <div id="stats" class="muted"></div>
+        </div>
+        <div class="card stack">
+          <div class="row">
+            <h2>Conversations</h2>
+            <button id="refreshBtn" type="button" class="secondary">Refresh</button>
+          </div>
+          <div id="conversationList" class="stack"></div>
+        </div>
+      </section>
+    </main>
+    <script src="/app.js"></script>
+  </body>
+  </html>

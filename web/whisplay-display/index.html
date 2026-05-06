@@ -91,6 +91,90 @@
             New chat starts a fresh conversation. Load brings an older saved chat back into memory.
           </div>
         </div>
+        <div class="card" id="botNetCard">
+          <div class="title">GroqBotNet</div>
+          <div class="settings-grid botnet-grid">
+            <div class="settings-field">
+              <label class="music-shuffle-toggle" for="botNetEnabledCheckbox">
+                <input id="botNetEnabledCheckbox" type="checkbox" />
+                <span>Enable BotNet mode</span>
+              </label>
+              <div class="field-hint">
+                When enabled, browser text input starts bot-to-bot conversations instead of normal direct replies.
+              </div>
+            </div>
+            <div class="settings-field">
+              <label class="field-label" for="botNetPeerUrlInput">Connect to Bot</label>
+              <input
+                class="settings-input"
+                id="botNetPeerUrlInput"
+                type="text"
+                placeholder="http://10.160.0.203:18990"
+                autocomplete="off"
+              />
+              <div class="field-hint">
+                Use the GroqBotNet peer URL on your Pi Zero or another Whisplay node.
+              </div>
+            </div>
+            <div class="settings-field">
+              <label class="field-label" for="botNetPublicUrlInput">This Bot URL</label>
+              <input
+                class="settings-input"
+                id="botNetPublicUrlInput"
+                type="text"
+                placeholder="http://10.160.0.136:17880"
+                autocomplete="off"
+              />
+              <div class="field-hint">
+                This is the address the peer uses to call back into this Whisplay.
+              </div>
+            </div>
+            <div class="settings-field">
+              <label class="field-label" for="botNetMaxRepliesInput">Max Bot Replies</label>
+              <input
+                class="settings-input"
+                id="botNetMaxRepliesInput"
+                type="number"
+                min="0"
+                max="200"
+                step="1"
+                value="8"
+              />
+            </div>
+            <div class="settings-field">
+              <label class="field-label" for="botNetReplyDelayInput">Reply Delay Seconds</label>
+              <input
+                class="settings-input"
+                id="botNetReplyDelayInput"
+                type="number"
+                min="0"
+                max="3600"
+                step="1"
+                value="6"
+              />
+            </div>
+            <div class="settings-field settings-field-wide">
+              <label class="field-label" for="botNetTopicInput">Start Bot Conversation</label>
+              <textarea
+                class="settings-textarea"
+                id="botNetTopicInput"
+                rows="3"
+                placeholder="Give the bots a topic, mood, or scenario..."
+              ></textarea>
+              <div class="settings-actions settings-actions-wrap">
+                <button class="button compact" id="botNetSaveBtn" type="button">Save BotNet</button>
+                <button class="button secondary compact" id="botNetTestBtn" type="button">Test Connection</button>
+                <button class="button secondary compact" id="botNetStartBtn" type="button">Start Bot Conversation</button>
+                <button class="button secondary compact" id="botNetPeerStartBtn" type="button">Ask Peer to Start</button>
+                <button class="button secondary compact" id="botNetStopBtn" type="button">Stop Conversation</button>
+              </div>
+              <div class="status-text vision-status" id="botNetStatus">
+                BotNet mode is off.
+              </div>
+            </div>
+          </div>
+          <div class="botnet-transcript" id="botNetTranscript"></div>
+        </div>
         <div class="card" id="musicCard">
           <div class="title">MP3 Player</div>
           <div class="music-upload-row">

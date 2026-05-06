@@ -4,7 +4,7 @@
 
 [![Discord](https://img.shields.io/discord/1483017948305297501?logo=discord&logoColor=white&label=Discord&color=5865F2)](https://discord.gg/znGrZmTk)
 
-This project starts from the official PiSugar Whisplay chatbot, but is being tailored for a **Raspberry Pi Zero 2 W** with a **Groq-backed LLM path**, a cleaner bring-up flow for the PiSugar **Whisplay HAT**, and an early **CYD companion display** for touch-based remote control.
+This project starts from the official PiSugar Whisplay chatbot, but is being tailored for a **Raspberry Pi Zero 2 W** with a **Groq-backed LLM path**, a cleaner bring-up flow for the PiSugar **Whisplay HAT**, working **Raspberry Pi Camera Module v2.1** support, and companion display paths such as the **CYD** for touch-based remote control.
 
 ## Current project direction
 
@@ -21,11 +21,14 @@ This project starts from the official PiSugar Whisplay chatbot, but is being tai
 - **Bot on HAT:** working
 - **Microphone:** working
 - **Speaker / WM8960 audio path:** working
+- **Raspberry Pi Camera Module v2.1:** working on the local Pi camera path
+- **Raspberry Pi Camera Module 3:** planned, not yet hardware-validated in this fork
 - **Spoken replies / TTS:** confirmed working with `espeak-ng`
 - **Spoken photo capture:** working
 - **Captured still image on HAT display:** working
 - **Companion CYD touchscreen client:** working as an early rough-start build, with more tuning planned
 - **Companion Cardputer client:** working as an early rough-start build, with text chat confirmed and more settings/UI work planned
+- **Standalone GroqBotNet Pi Zero node:** working as a separate same-network experiment with browser chat plus Mini PiTFT output
 - **Web simulator/debug UI:** still available at `http://<host-or-pi-ip>:17880`
 
 ## Current feature highlights
@@ -41,6 +44,7 @@ This project starts from the official PiSugar Whisplay chatbot, but is being tai
 - **Improved HAT readability:** reply text now wraps more naturally on the device instead of breaking as aggressively mid-word
 - **Companion CYD controls:** touch actions for **New Chat**, **Repeat**, **Capture**, **Voice**, plus an on-screen **Setup** button for reopening the Wi-Fi portal
 - **Companion Cardputer controls:** keyboard text send, message viewing, local setup portal, saved text sizes, and a split receive/send screen layout
+- **Experimental GroqBotNet mode:** optional browser-only controls in Whisplay for connecting to a second bot, testing the link, and starting limited bot-to-bot conversations without replacing the normal Whisplay chatbot flow
 
 ## Device screenshots
 
@@ -73,40 +77,51 @@ These are a few representative shots of the current build. GitHub README pages a
   <img src="images/IMG_20260503_171835378_HDR.jpg" alt="Cranky Bot giving a sarcastic GitHub-flavored reply" width="48%" />
 </p>
 
-## Quick start for this fork
+## Fresh Pi quick start for this fork
 
-1. Clone this project and enter it:
+These steps are meant for a **fresh Raspberry Pi OS install** on the Pi that will run the chatbot.
+
+1. Start from your normal Pi user account and install the basic tools:
+   ```bash
+   sudo apt-get update
+   sudo apt-get install -y git curl
+   ```
+2. Clone this project and enter it:
    ```bash
    git clone <your-repo-url> /home/coreymillia/Documents/complete-projects/WhisplayGroqHat
    cd /home/coreymillia/Documents/complete-projects/WhisplayGroqHat
    ```
-2. Install dependencies:
+3. Run the dependency installer:
    ```bash
    bash install_dependencies.sh
    source ~/.bashrc
    ```
-3. Create your env file and add your Groq key:
+   This script installs the Python and Node dependencies used by this fork, audio tools like `sox` and `mpg123`, enables SPI for the HAT, and sets up Node 20.
+4. Create your env file and add your Groq key:
    ```bash
    cp .env.template .env
    ```
    Then edit `.env` and set `OPENAI_API_KEY` to your Groq key. If you want Gemini vision ready from the start, also set `GEMINI_API_KEY`.
-4. Build and run:
+5. Build and run:
    ```bash
    bash build.sh
    bash run_chatbot.sh
    ```
-5. Optional: set the bot to start on boot:
-   ```bash
-   bash startup.sh
-   ```
-6. Open the browser simulator:
+6. Open the browser simulator and settings UI:
    ```text
    http://<host-or-pi-ip>:17880
    ```
+7. Optional: set the bot to start on boot:
+   ```bash
+   bash startup.sh
+   ```
+   Run `startup.sh` as your normal user, not with `sudo`.
 
 The default template in this fork was originally set up for **web simulator first** bring-up. The project has now also been validated on a real Whisplay HAT, while keeping the web UI available for debugging and settings.
 
 For actual device use, prefer the `chatbot.service` boot path over ad-hoc `nohup` launches so the bot comes back cleanly after shutdown or reboot.
+
+A reboot after the first dependency install is a good idea, especially if you just enabled SPI, attached the Whisplay HAT, or connected a camera for the first time.
 
 ## Companion CYD status
 
@@ -132,6 +147,23 @@ This repo also now includes an early companion firmware project under `Companion
 - the firmware includes a local Wi-Fi + Pi setup portal, receive/send screen split, message scrolling, and saved text-size controls
 
 This is also intentionally a **rough start**, not a polished final Cardputer UX. It is already useful for text chat, and more settings/polish are planned. The audio path is implemented in the firmware, but hardware validation is still pending.
+
+## Why `GroqBotNet/` is also in this repo
+
+This repo now includes a separate `GroqBotNet/` app because it is part of the same broader Whisplay bring-up experiment rather than a completely unrelated side project.
+
+- **Whisplay remains the main project**
+- **GroqBotNet is the lightweight peer bot experiment**
+- **the goal is to let Whisplay talk to another Groq bot on the same network first**
+- **the current standalone target is a Pi Zero with a Mini PiTFT browser + TFT companion path**
+
+Keeping both pieces in one repo for now makes it easier to iterate on:
+
+- Whisplay browser controls for **Connect to Bot**, **This Bot URL**, and limited bot-to-bot starts
+- a lightweight second-node bot that can run on older or simpler hardware
+- future experiments where companion bots exchange text without replacing the normal Whisplay local chatbot
+
+If this peer-bot path grows into something much larger later, it can still be split into its own repo at that point. For now it stays here because it is directly tied to the Whisplay integration work.
 
 ## Getting a Groq API key
 
@@ -207,7 +239,7 @@ The browser UI also now includes a simple **Vision Test** image upload box. You 
 
 The browser settings panel now also includes an optional **Camera Source** selector for vision hardware. Right now it supports the local **Pi Camera** path and an **ESP32-CAM** network source with a configurable URL. The Vision Test card can either upload an image from your PC or capture one from the configured camera source.
 
-For the local Pi camera path, this fork now supports either the Python **Picamera2** stack or the native **rpicam-still** toolchain, which makes the common Raspberry Pi Camera modules more reliable across different Pi OS installs.
+For the local Pi camera path, this fork now supports either the Python **Picamera2** stack or the native **rpicam-still** toolchain, which makes the common Raspberry Pi Camera modules more reliable across different Pi OS installs. The hardware we have already wired up and used in this fork is the **Raspberry Pi Camera Module v2.1**. **Camera Module 3** is the next planned Pi camera target, but it has not been hardware-validated here yet.
 
 Captured photos are now kept in the project camera storage and exposed in the browser UI as a **Saved Photos** list. The browser UI can delete saved photos; the HAT browse mode is read-only.
 
@@ -224,6 +256,14 @@ This fork now includes a simple built-in **MP3 player** for the Whisplay browser
 - voice commands now include **"play music"**, **"stop music"**, **"next song"**, and **"previous song"**
 
 The uploaded library is stored locally on the Pi, shown back in the browser UI with a current-track indicator, and played through the Whisplay audio path instead of only in the browser. Direct voice-triggered music commands now jump straight into music mode instead of getting stuck waiting on the normal answering flow first.
+
+The uploaded MP3 files live on the Pi's **SD card** under:
+
+```text
+data/music
+```
+
+You can also copy `.mp3` files there manually with the SD card or over SSH. After manual copies, restart the chatbot service so the library gets picked up cleanly.
 
 ## NWS weather bot for this fork
 

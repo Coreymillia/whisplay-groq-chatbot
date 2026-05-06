@@ -56,6 +56,7 @@ import {
   stopMusicPlayback,
 } from "./music-player";
 import { musicDir } from "../utils/dir";
+import { getBotNetManager } from "./botnet";
 
 type ButtonHandler = () => void;
 
@@ -158,6 +159,7 @@ export class WebDisplayServer implements WebAudioBridgeServer {
   private wsClients = new Set<WebSocket>();
   private onSettingsSaved: (settings: RuntimeSettings) => void;
   private onImageUploaded: (imagePath: string) => void;
+  private botNet = getBotNetManager();
 
   constructor(options: WebDisplayOptions) {
     this.host = options.host;
@@ -599,6 +601,99 @@ export class WebDisplayServer implements WebAudioBridgeServer {
       }
       this.onTextInput(text);
       ctx.body = { ok: true };
+    });
+
+    this.router.get("/api/botnet/state", (ctx) => {
+      ctx.set("Cache-Control", "no-store");
+      ctx.body = {
+        ok: true,
+        ...this.botNet.getState(),
+      };
+    });
+
+    this.router.post("/api/botnet/settings", (ctx) => {
+      const body = normalizeRequestBody((ctx.request as any).body);
+      ctx.body = {
+        ok: true,
+        settings: this.botNet.saveSettings({
+          enabled: getBodyBoolean(body, "enabled"),
+          peerUrl: getBodyString(body, "peerUrl"),
+          publicUrl: getBodyString(body, "publicUrl"),
+          maxBotReplies: getBodyNumber(body, "maxBotReplies"),
+          replyDelaySec: getBodyNumber(body, "replyDelaySec"),
+        }),
+      };
+    });
+
+    this.router.post("/api/botnet/test", async (ctx) => {
+      ctx.body = await this.botNet.testPeer();
+    });
+
+    this.router.post("/api/botnet/start", async (ctx) => {
+      try {
+        const body = normalizeRequestBody((ctx.request as any).body);
+        const senderBotName = (getBodyString(body, "senderBotName") || "").trim();
+        if (senderBotName || getBodyString(body, "senderUrl")) {
+          await this.botNet.handlePeerStart(body);
+          ctx.body = { ok: true };
+          return;
+        }
+        const topic = (getBodyString(body, "topic") || "").trim();
+        const starter = getBodyString(body, "starter") === "peer" ? "peer" : "self";
+        const conversation = await this.botNet.startConversation(topic, starter);
+        ctx.body = { ok: true, conversation };
+      } catch (error) {
+        ctx.status = 400;
+        ctx.body = {
+          ok: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Failed to start BotNet conversation.",
+        };
+      }
+    });
+
+    this.router.post("/api/botnet/stop", (ctx) => {
+      ctx.body = {
+        ok: true,
+        stopped: this.botNet.stopConversation(),
+      };
+    });
+
+    this.router.post("/api/botnet/user-message", async (ctx) => {
+      try {
+        const body = normalizeRequestBody((ctx.request as any).body);
+        const text = (getBodyString(body, "text") || "").trim();
+        const conversation = await this.botNet.startConversation(text, "self");
+        ctx.body = { ok: true, conversation };
+      } catch (error) {
+        ctx.status = 400;
+        ctx.body = {
+          ok: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Failed to route the text message into BotNet.",
+        };
+      }
+    });
+
+    this.router.post("/api/botnet/message", async (ctx) => {
+      try {
+        const body = normalizeRequestBody((ctx.request as any).body);
+        await this.botNet.handlePeerMessage(body);
+        ctx.body = { ok: true };
+      } catch (error) {
+        ctx.status = 400;
+        ctx.body = {
+          ok: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Failed to process peer BotNet message.",
+        };
+      }
     });
 
     this.router.post("/api/input/audio", async (ctx) => {
