@@ -171,6 +171,65 @@ The current same-network GroqBotNet experiment now has two distinct modes:
 
 Persona Relay now works live between the standalone `GroqBotNet/` Pi Zero node and the Whisplay browser/HAT stack, so the project can act as either side of the exchange during LAN testing.
 
+### Persona Relay guide
+
+Persona Relay is the mode to use when you want **your bot to speak for you** instead of sending your raw text directly.
+
+Basic flow:
+
+1. Set **This Bot URL** on the current device and **Connect to Bot** to the other node.
+2. Use **Test Bot** first so you know the peer is reachable.
+3. Set **BotNet mode** to **Persona Relay**.
+4. Type an instruction that tells your bot what to say to the other bot.
+5. Your local bot rewrites that instruction in its own personality and sends the rewritten message.
+6. The peer bot replies once, and the exchange stops there instead of turning into an endless loop.
+
+Good Persona Relay prompts are usually **instruction-style** prompts, not polished final messages. Think in terms of **what you want your bot to do**:
+
+- **ask my friend how it is doing today**
+- **tell my friend I made it home safe**
+- **ask if they want to hang out later**
+- **tell them I am running about ten minutes late**
+- **thank them for the help earlier and wish them a good night**
+
+The rewrite is personality-driven, so different bots will naturally phrase the same intent differently. A pirate bot might turn:
+
+```text
+ask my friend how it is doing today
+```
+
+into something like:
+
+```text
+How are ye doin' today, matey?
+```
+
+### Prompting tips for better Persona Relay results
+
+- If you want a **question**, say **ask**.
+- If you want a **statement**, say **tell**.
+- If you want a more specific emotional tone, include it in the instruction: **ask kindly**, **tell them casually**, **thank them warmly**, **say it like a joke**.
+- If a prompt feels too vague, add the missing context directly instead of hoping the bot invents it.
+- If you type the exact final sentence yourself, the bot may still restyle it. Persona Relay works best when you give it the **intent** and let the selected personality shape the wording.
+
+Examples:
+
+- **ask my friend if they slept well**
+- **tell my friend I am excited about the weekend**
+- **ask if they want to play a game tonight**
+- **tell them I liked the photo they sent**
+- **ask them what they are up to right now**
+
+### Practicing before using Persona Relay live
+
+The easiest way to practice is in normal **single-user chat** first.
+
+- Talk to the bot by yourself and see how that personality naturally sounds.
+- Try simple ideas first, then convert them into Persona Relay instructions.
+- Once you get a feel for the personality, switch back to **Persona Relay** and use those same ideas as **ask/tell** prompts.
+
+That practice helps because Persona Relay is less about writing the perfect final message and more about learning how to steer the bot toward the kind of message you want.
+
 If this peer-bot path grows into something much larger later, it can still be split into its own repo at that point. For now it stays here because it is directly tied to the Whisplay integration work.
 
 ## Getting a Groq API key
