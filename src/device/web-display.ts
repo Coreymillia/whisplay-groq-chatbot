@@ -619,6 +619,10 @@ export class WebDisplayServer implements WebAudioBridgeServer {
           enabled: getBodyBoolean(body, "enabled"),
           peerUrl: getBodyString(body, "peerUrl"),
           publicUrl: getBodyString(body, "publicUrl"),
+          botnetMode:
+            getBodyString(body, "botnetMode") === "persona-relay"
+              ? "persona-relay"
+              : "auto-bot",
           maxBotReplies: getBodyNumber(body, "maxBotReplies"),
           replyDelaySec: getBodyNumber(body, "replyDelaySec"),
         }),
@@ -640,7 +644,14 @@ export class WebDisplayServer implements WebAudioBridgeServer {
         }
         const topic = (getBodyString(body, "topic") || "").trim();
         const starter = getBodyString(body, "starter") === "peer" ? "peer" : "self";
-        const conversation = await this.botNet.startConversation(topic, starter);
+        const botnetMode =
+          getBodyString(body, "botnetMode") === "persona-relay"
+            ? "persona-relay"
+            : "auto-bot";
+        const conversation =
+          botnetMode === "persona-relay" && starter === "self"
+            ? await this.botNet.relayPrompt(topic)
+            : await this.botNet.startConversation(topic, starter, botnetMode);
         ctx.body = { ok: true, conversation };
       } catch (error) {
         ctx.status = 400;
@@ -665,7 +676,14 @@ export class WebDisplayServer implements WebAudioBridgeServer {
       try {
         const body = normalizeRequestBody((ctx.request as any).body);
         const text = (getBodyString(body, "text") || "").trim();
-        const conversation = await this.botNet.startConversation(text, "self");
+        const botnetMode =
+          getBodyString(body, "botnetMode") === "persona-relay"
+            ? "persona-relay"
+            : "auto-bot";
+        const conversation =
+          botnetMode === "persona-relay"
+            ? await this.botNet.relayPrompt(text)
+            : await this.botNet.startConversation(text, "self", botnetMode);
         ctx.body = { ok: true, conversation };
       } catch (error) {
         ctx.status = 400;

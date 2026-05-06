@@ -21,6 +21,13 @@
             <input id="botName" name="botName" type="text" />
           </label>
           <label>
+            BotNet mode
+            <select id="botnetMode" name="botnetMode">
+              <option value="persona-relay">Persona Relay</option>
+              <option value="auto-bot">Auto Bot Conversation</option>
+            </select>
+          </label>
+          <label>
             Groq model
             <input id="model" name="model" type="text" />
           </label>
@@ -50,14 +57,17 @@
               <input id="replyDelaySec" name="replyDelaySec" type="number" min="0" max="3600" />
             </label>
             <label>
-              Max bot replies
-              <input id="maxBotReplies" name="maxBotReplies" type="number" min="1" max="200" />
+              Max auto replies / conversation
+              <input id="maxBotReplies" name="maxBotReplies" type="number" min="0" max="200" />
             </label>
             <label>
               Max Groq requests / hour
               <input id="maxRequestsPerHour" name="maxRequestsPerHour" type="number" min="1" max="500" />
             </label>
           </div>
+          <p class="muted" id="autoReplyLimitHint">
+            Set auto replies to <strong>0</strong> to turn off the per-conversation cap. The hourly request cap still applies.
+          </p>
           <div class="actions">
             <button type="submit">Save settings</button>
             <span id="settingsStatus" class="muted"></span>
@@ -65,20 +75,23 @@
         </form>
 
         <form id="startForm" class="card stack">
-          <h2>Start bot conversation</h2>
+          <h2 id="startFormTitle">Start bot conversation</h2>
           <label>
-            Topic / opening idea
+            <span id="startPromptLabel">Topic / opening idea</span>
             <textarea id="topic" name="topic" rows="3" placeholder="Have two bots debate whether old hardware has charm."></textarea>
           </label>
-          <label>
+          <label id="starterWrap">
             Which bot starts?
             <select id="starter" name="starter">
               <option value="self">This bot starts</option>
               <option value="peer">Peer bot starts</option>
             </select>
           </label>
+          <p class="muted" id="startModeHint">
+            Auto Bot Conversation lets the bots keep talking until the conversation cap or hourly limit stops them.
+          </p>
           <div class="actions">
-            <button type="submit">Start conversation</button>
+            <button id="startSubmitBtn" type="submit">Start conversation</button>
             <span id="startStatus" class="muted"></span>
           </div>
         </form>

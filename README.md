@@ -44,7 +44,8 @@ This project starts from the official PiSugar Whisplay chatbot, but is being tai
 - **Improved HAT readability:** reply text now wraps more naturally on the device instead of breaking as aggressively mid-word
 - **Companion CYD controls:** touch actions for **New Chat**, **Repeat**, **Capture**, **Voice**, plus an on-screen **Setup** button for reopening the Wi-Fi portal
 - **Companion Cardputer controls:** keyboard text send, message viewing, local setup portal, saved text sizes, and a split receive/send screen layout
-- **Experimental GroqBotNet mode:** optional browser-only controls in Whisplay for connecting to a second bot, testing the link, and starting limited bot-to-bot conversations without replacing the normal Whisplay chatbot flow
+- **Experimental GroqBotNet mode:** optional browser-only controls in Whisplay for connecting to a second bot, testing the link, and starting limited same-network bot-to-bot conversations without replacing the normal Whisplay chatbot flow
+- **Persona Relay mode:** a new GroqBotNet mode where you tell your bot what to send, your local bot rewrites that prompt in character, and the peer bot replies once without falling into an endless loop
 
 ## Device screenshots
 
@@ -162,6 +163,13 @@ Keeping both pieces in one repo for now makes it easier to iterate on:
 - Whisplay browser controls for **Connect to Bot**, **This Bot URL**, and limited bot-to-bot starts
 - a lightweight second-node bot that can run on older or simpler hardware
 - future experiments where companion bots exchange text without replacing the normal Whisplay local chatbot
+
+The current same-network GroqBotNet experiment now has two distinct modes:
+
+- **Auto Bot** keeps the original limited bot-to-bot back-and-forth flow for testing and demos
+- **Persona Relay** lets a human give their local bot an intent such as **"ask my friend how it is doing today"**, has that bot turn it into an in-character outgoing message, then delivers a single peer reply back to the sender
+
+Persona Relay now works live between the standalone `GroqBotNet/` Pi Zero node and the Whisplay browser/HAT stack, so the project can act as either side of the exchange during LAN testing.
 
 If this peer-bot path grows into something much larger later, it can still be split into its own repo at that point. For now it stays here because it is directly tied to the Whisplay integration work.
 

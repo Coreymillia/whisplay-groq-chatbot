@@ -16,6 +16,7 @@ fs.mkdirSync(DATA_DIR, { recursive: true });
 
 const DEFAULT_SETTINGS = {
   botName: "GroqBotNet Bot",
+  botnetMode: "persona-relay",
   model: "llama-3.1-8b-instant",
   publicBaseUrl: "",
   peerUrl: "",
@@ -54,6 +55,10 @@ function normalizePositiveInt(value, fallback, minimum = 1, maximum = 500) {
   return Math.min(maximum, Math.max(minimum, parsed));
 }
 
+function normalizeBotnetMode(value) {
+  return value === "auto-bot" ? "auto-bot" : "persona-relay";
+}
+
 function normalizeUrl(value) {
   const trimmed = String(value || "").trim();
   if (!trimmed) {
@@ -67,11 +72,12 @@ function loadSettings() {
   return {
     ...DEFAULT_SETTINGS,
     ...loaded,
+    botnetMode: normalizeBotnetMode(loaded.botnetMode || DEFAULT_SETTINGS.botnetMode),
     publicBaseUrl: normalizeUrl(loaded.publicBaseUrl || DEFAULT_SETTINGS.publicBaseUrl),
     peerUrl: normalizeUrl(loaded.peerUrl || DEFAULT_SETTINGS.peerUrl),
     memoryTurns: normalizePositiveInt(loaded.memoryTurns, DEFAULT_SETTINGS.memoryTurns, 1, 50),
     replyDelaySec: normalizePositiveInt(loaded.replyDelaySec, DEFAULT_SETTINGS.replyDelaySec, 0, 3600),
-    maxBotReplies: normalizePositiveInt(loaded.maxBotReplies, DEFAULT_SETTINGS.maxBotReplies, 1, 200),
+    maxBotReplies: normalizePositiveInt(loaded.maxBotReplies, DEFAULT_SETTINGS.maxBotReplies, 0, 200),
     maxRequestsPerHour: normalizePositiveInt(
       loaded.maxRequestsPerHour,
       DEFAULT_SETTINGS.maxRequestsPerHour,
@@ -85,6 +91,7 @@ function sanitizeSettingsUpdate(body, currentSettings) {
   return {
     ...currentSettings,
     botName: String(body.botName || currentSettings.botName).trim() || currentSettings.botName,
+    botnetMode: normalizeBotnetMode(body.botnetMode || currentSettings.botnetMode),
     model: String(body.model || currentSettings.model).trim() || currentSettings.model,
     publicBaseUrl: normalizeUrl(body.publicBaseUrl ?? currentSettings.publicBaseUrl),
     peerUrl: normalizeUrl(body.peerUrl ?? currentSettings.peerUrl),
@@ -93,7 +100,7 @@ function sanitizeSettingsUpdate(body, currentSettings) {
       currentSettings.personalityPrompt,
     memoryTurns: normalizePositiveInt(body.memoryTurns, currentSettings.memoryTurns, 1, 50),
     replyDelaySec: normalizePositiveInt(body.replyDelaySec, currentSettings.replyDelaySec, 0, 3600),
-    maxBotReplies: normalizePositiveInt(body.maxBotReplies, currentSettings.maxBotReplies, 1, 200),
+    maxBotReplies: normalizePositiveInt(body.maxBotReplies, currentSettings.maxBotReplies, 0, 200),
     maxRequestsPerHour: normalizePositiveInt(
       body.maxRequestsPerHour,
       currentSettings.maxRequestsPerHour,
@@ -149,7 +156,7 @@ function makeMessage({ speakerType, speakerName, text, kind = "message" }) {
   };
 }
 
-function makeConversation({ topic, peerUrl, starter, mode = "botnet" }) {
+function makeConversation({ topic, peerUrl, starter, mode = "botnet", botnetMode = settings.botnetMode }) {
   const createdAt = nowIso();
   return {
     id: crypto.randomUUID(),
@@ -159,6 +166,7 @@ function makeConversation({ topic, peerUrl, starter, mode = "botnet" }) {
     status: "active",
     starter,
     mode,
+    botnetMode: mode === "botnet" ? normalizeBotnetMode(botnetMode) : undefined,
     peerUrl: normalizeUrl(peerUrl || settings.peerUrl),
     maxBotReplies: settings.maxBotReplies,
     replyCount: 0,
@@ -176,6 +184,18 @@ function getLatestActiveSoloConversation() {
       (conversation) => conversation.mode === "solo" && conversation.status === "active",
     ) || null
   );
+}
+
+function getLatestActiveBotnetConversation() {
+  return (
+    conversations.find(
+      (conversation) => conversation.mode === "botnet" && conversation.status === "active",
+    ) || null
+  );
+}
+
+function isAutoBotConversation(conversation) {
+  return normalizeBotnetMode(conversation?.botnetMode) === "auto-bot";
 }
 
 function touchConversation(conversation) {
@@ -217,7 +237,7 @@ function consumeRequestQuota() {
 
 function buildConversationMessages(conversation, extraUserPrompt) {
   const relevant = conversation.messages
-    .filter((message) => message.kind === "message")
+    .filter((message) => message.kind === "message" || message.kind === "relay")
     .slice(-settings.memoryTurns);
 
   const conversationModeText =
@@ -252,6 +272,47 @@ function buildConversationMessages(conversation, extraUserPrompt) {
   if (extraUserPrompt) {
     messages.push({ role: "user", content: extraUserPrompt });
   }
+
+  return messages;
+}
+
+function buildPersonaRelayMessages(conversation, userPrompt) {
+  const relevant = conversation.messages
+    .filter((message) => message.kind === "message" || message.kind === "relay")
+    .slice(-settings.memoryTurns);
+
+  const messages = [
+    {
+      role: "system",
+      content: [
+        settings.personalityPrompt,
+        "You are part of GroqBotNet.",
+        `Your bot name is ${settings.botName}.`,
+        "You are rewriting the local user's prompt into the exact message you would personally send to the peer bot.",
+        "Preserve the user's intent, but express it in your own personality and voice.",
+        "Keep it concise and natural.",
+        "Write the final message itself, exactly as it should be sent to the peer.",
+        "Do not give advice, instructions, stage directions, or commentary.",
+        "Do not say things like 'ask them', 'tell them', 'send a message', 'you want to know', or 'here is the message'.",
+        "Do not wrap the whole reply in quotes unless the message itself truly needs quotes.",
+        'Example local prompt: "ask my friend how it is doing today" -> "How are ye doin\\\' today, matey?"',
+        "Return only the outgoing message text with no commentary about rewriting, filtering, or translating.",
+      ].join(" "),
+    },
+  ];
+
+  for (const message of relevant) {
+    if (message.speakerType === "self") {
+      messages.push({ role: "assistant", content: message.text });
+    } else if (message.speakerType === "peer") {
+      messages.push({ role: "user", content: message.text });
+    }
+  }
+
+  messages.push({
+    role: "user",
+    content: `Rewrite this into the exact message to send to the peer bot: ${String(userPrompt || "").trim()}`,
+  });
 
   return messages;
 }
@@ -328,6 +389,11 @@ async function generateReply(conversation, extraPrompt) {
   return reply;
 }
 
+async function generatePersonaRelay(conversation, userPrompt) {
+  consumeRequestQuota();
+  return callGroq(buildPersonaRelayMessages(conversation, userPrompt));
+}
+
 async function emitBotReply(
   conversation,
   extraPrompt,
@@ -336,7 +402,11 @@ async function emitBotReply(
   if (conversation.status !== "active") {
     return;
   }
-  if (options.enforceReplyLimit && conversation.replyCount >= conversation.maxBotReplies) {
+  if (
+    options.enforceReplyLimit &&
+    conversation.maxBotReplies > 0 &&
+    conversation.replyCount >= conversation.maxBotReplies
+  ) {
     markConversationComplete(conversation, "Conversation stopped because the max bot replies limit was reached.");
     return;
   }
@@ -359,6 +429,7 @@ async function emitBotReply(
       topic: conversation.topic,
       senderBotName: settings.botName,
       senderUrl: normalizeUrl(settings.publicBaseUrl),
+      botnetMode: normalizeBotnetMode(conversation.botnetMode),
       maxBotReplies: conversation.maxBotReplies,
       replyCount: conversation.replyCount,
       message: reply,
@@ -371,7 +442,11 @@ async function emitBotReply(
     }
   }
 
-  if (options.enforceReplyLimit && conversation.replyCount >= conversation.maxBotReplies) {
+  if (
+    options.enforceReplyLimit &&
+    conversation.maxBotReplies > 0 &&
+    conversation.replyCount >= conversation.maxBotReplies
+  ) {
     markConversationComplete(conversation, "Conversation reached the configured max bot replies.");
   }
 }
@@ -397,6 +472,7 @@ async function startLocalConversation(topic) {
     peerUrl: settings.peerUrl,
     starter: "self",
     mode: "botnet",
+    botnetMode: "auto-bot",
   });
   conversations.unshift(conversation);
   saveConversations();
@@ -419,6 +495,7 @@ async function requestPeerStart(topic) {
     peerUrl: settings.peerUrl,
     starter: "peer",
     mode: "botnet",
+    botnetMode: "auto-bot",
   });
   conversations.unshift(conversation);
   saveConversations();
@@ -430,6 +507,7 @@ async function requestPeerStart(topic) {
       topic,
       senderBotName: settings.botName,
       senderUrl: normalizeUrl(settings.publicBaseUrl),
+      botnetMode: "auto-bot",
       maxBotReplies: conversation.maxBotReplies,
       replyCount: conversation.replyCount,
     });
@@ -438,6 +516,80 @@ async function requestPeerStart(topic) {
     addEvent(conversation, `Could not reach peer to start conversation: ${error.message}`);
   }
 
+  return conversation;
+}
+
+async function relayUserPromptToPeer(conversation, userPrompt) {
+  addMessage(
+    conversation,
+    makeMessage({
+      speakerType: "user",
+      speakerName: "You",
+      text: userPrompt,
+      kind: "user-prompt",
+    }),
+  );
+
+  const relayedMessage = await generatePersonaRelay(conversation, userPrompt);
+  addMessage(
+    conversation,
+    makeMessage({
+      speakerType: "self",
+      speakerName: `${settings.botName} sent`,
+      text: relayedMessage,
+      kind: "relay",
+    }),
+  );
+
+  await sendToPeer(conversation, {
+    type: "message",
+    conversationId: conversation.id,
+    topic: conversation.topic,
+    senderBotName: settings.botName,
+    senderUrl: normalizeUrl(settings.publicBaseUrl),
+    botnetMode: "persona-relay",
+    maxBotReplies: conversation.maxBotReplies,
+    replyCount: conversation.replyCount,
+    message: relayedMessage,
+  });
+}
+
+async function handlePersonaRelayPrompt(body) {
+  const prompt = String(body.topic || body.message || "").trim();
+  if (!prompt) {
+    throw new Error("Prompt is required.");
+  }
+
+  const requestedId = String(body.conversationId || "").trim();
+  let conversation =
+    (requestedId && findConversation(requestedId)) ||
+    (!body.newConversation && getLatestActiveBotnetConversation()) ||
+    null;
+
+  if (
+    !conversation ||
+    conversation.mode !== "botnet" ||
+    conversation.status !== "active" ||
+    !conversation.peerUrl ||
+    isAutoBotConversation(conversation)
+  ) {
+    const topic = prompt.length > 72 ? `${prompt.slice(0, 72)}...` : prompt;
+    conversation = makeConversation({
+      topic: topic || "Persona relay",
+      peerUrl: settings.peerUrl,
+      starter: "self",
+      mode: "botnet",
+      botnetMode: "persona-relay",
+    });
+    conversations.unshift(conversation);
+    saveConversations();
+  }
+
+  if (!normalizeUrl(conversation.peerUrl || settings.peerUrl)) {
+    throw new Error("Peer URL is not configured.");
+  }
+
+  await relayUserPromptToPeer(conversation, prompt);
   return conversation;
 }
 
@@ -453,8 +605,9 @@ async function handlePeerStart(body) {
       status: "active",
       starter: "peer",
       mode: "botnet",
+      botnetMode: normalizeBotnetMode(body.botnetMode || "auto-bot"),
       peerUrl: normalizeUrl(body.senderUrl || settings.peerUrl),
-      maxBotReplies: normalizePositiveInt(body.maxBotReplies, settings.maxBotReplies, 1, 200),
+      maxBotReplies: normalizePositiveInt(body.maxBotReplies, settings.maxBotReplies, 0, 200),
       replyCount: normalizePositiveInt(body.replyCount, 0, 0, 200),
       messages: [],
     };
@@ -462,7 +615,11 @@ async function handlePeerStart(body) {
     saveConversations();
   }
 
+  conversation.botnetMode = normalizeBotnetMode(body.botnetMode || conversation.botnetMode);
   addEvent(conversation, `Peer ${body.senderBotName || "bot"} requested a new conversation.`);
+  if (!isAutoBotConversation(conversation)) {
+    return;
+  }
   scheduleReply(
     conversation,
     `Start a fresh chatbot-to-chatbot conversation about this topic: "${conversation.topic}". Send only the first message.`,
@@ -485,19 +642,21 @@ async function handlePeerMessage(body) {
       status: "active",
       starter: "peer",
       mode: "botnet",
+      botnetMode: normalizeBotnetMode(body.botnetMode || settings.botnetMode),
       peerUrl: normalizeUrl(body.senderUrl || settings.peerUrl),
-      maxBotReplies: normalizePositiveInt(body.maxBotReplies, settings.maxBotReplies, 1, 200),
+      maxBotReplies: normalizePositiveInt(body.maxBotReplies, settings.maxBotReplies, 0, 200),
       replyCount: 0,
       messages: [],
     };
     conversations.unshift(conversation);
   }
 
+  conversation.botnetMode = normalizeBotnetMode(body.botnetMode || conversation.botnetMode);
   conversation.peerUrl = normalizeUrl(body.senderUrl || conversation.peerUrl || settings.peerUrl);
   conversation.maxBotReplies = normalizePositiveInt(
     body.maxBotReplies,
     conversation.maxBotReplies || settings.maxBotReplies,
-    1,
+    0,
     200,
   );
   conversation.replyCount = Math.max(
@@ -514,11 +673,19 @@ async function handlePeerMessage(body) {
     }),
   );
 
-  if (conversation.replyCount >= conversation.maxBotReplies) {
+  if (conversation.maxBotReplies > 0 && conversation.replyCount >= conversation.maxBotReplies) {
     markConversationComplete(conversation, "Received the final peer message and closed the conversation.");
     return;
   }
 
+  if (!isAutoBotConversation(conversation)) {
+    if (conversation.starter === "peer") {
+      scheduleReply(conversation);
+      return;
+    }
+    touchConversation(conversation);
+    return;
+  }
   scheduleReply(conversation);
 }
 
@@ -681,9 +848,14 @@ const server = http.createServer(async (req, res) => {
         sendJson(res, 400, { ok: false, error: "Topic is required." });
         return;
       }
+      const requestedMode = normalizeBotnetMode(body.botnetMode || settings.botnetMode);
       const starter = body.starter === "peer" ? "peer" : "self";
       const conversation =
-        starter === "peer" ? await requestPeerStart(topic) : await startLocalConversation(topic);
+        requestedMode === "persona-relay"
+          ? await handlePersonaRelayPrompt(body)
+          : starter === "peer"
+            ? await requestPeerStart(topic)
+            : await startLocalConversation(topic);
       sendJson(res, 200, { ok: true, conversation, ...getStatePayload() });
       return;
     }

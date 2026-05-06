@@ -104,6 +104,16 @@
               </div>
             </div>
             <div class="settings-field">
+              <label class="field-label" for="botNetModeSelect">BotNet mode</label>
+              <select class="settings-select" id="botNetModeSelect">
+                <option value="persona-relay">Persona Relay</option>
+                <option value="auto-bot">Auto Bot Conversation</option>
+              </select>
+              <div class="field-hint" id="botNetModeHint">
+                Persona Relay rewrites your prompt in Whisplay's own voice before it goes to the peer bot.
+              </div>
+            </div>
+            <div class="settings-field">
               <label class="field-label" for="botNetPeerUrlInput">Connect to Bot</label>
               <input
                 class="settings-input"
@@ -154,7 +164,7 @@
               />
             </div>
             <div class="settings-field settings-field-wide">
-              <label class="field-label" for="botNetTopicInput">Start Bot Conversation</label>
+              <label class="field-label" for="botNetTopicInput" id="botNetTopicLabel">Start Bot Conversation</label>
               <textarea
                 class="settings-textarea"
                 id="botNetTopicInput"

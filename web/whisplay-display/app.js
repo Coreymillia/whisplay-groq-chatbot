@@ -64,11 +64,14 @@ const clearKeyBtn = document.getElementById("clearKeyBtn");
 const shutdownBtn = document.getElementById("shutdownBtn");
 const settingsStatus = document.getElementById("settingsStatus");
 const botNetEnabledCheckbox = document.getElementById("botNetEnabledCheckbox");
+const botNetModeSelect = document.getElementById("botNetModeSelect");
+const botNetModeHint = document.getElementById("botNetModeHint");
 const botNetPeerUrlInput = document.getElementById("botNetPeerUrlInput");
 const botNetPublicUrlInput = document.getElementById("botNetPublicUrlInput");
 const botNetMaxRepliesInput = document.getElementById("botNetMaxRepliesInput");
 const botNetReplyDelayInput = document.getElementById("botNetReplyDelayInput");
 const botNetTopicInput = document.getElementById("botNetTopicInput");
+const botNetTopicLabel = document.getElementById("botNetTopicLabel");
 const botNetSaveBtn = document.getElementById("botNetSaveBtn");
 const botNetTestBtn = document.getElementById("botNetTestBtn");
 const botNetStartBtn = document.getElementById("botNetStartBtn");
@@ -123,6 +126,29 @@ function setBotNetStatus(message, isError = false) {
   botNetStatus.style.color = isError ? "#ff7b7b" : "";
 }
 
+function updateBotNetModeUi(mode) {
+  const currentMode = mode === "persona-relay" ? "persona-relay" : "auto-bot";
+  if (botNetModeSelect) {
+    botNetModeSelect.value = currentMode;
+  }
+  if (botNetModeHint) {
+    botNetModeHint.textContent =
+      currentMode === "persona-relay"
+        ? "Persona Relay rewrites your prompt in Whisplay's own voice before it goes to the peer bot."
+        : "Auto Bot Conversation lets the bots keep talking until the auto reply cap or hourly limit stops them.";
+  }
+  if (botNetTopicLabel) {
+    botNetTopicLabel.textContent =
+      currentMode === "persona-relay" ? "Tell Whisplay what to send" : "Start Bot Conversation";
+  }
+  if (botNetTopicInput) {
+    botNetTopicInput.placeholder =
+      currentMode === "persona-relay"
+        ? "Ask Whisplay to relay something to the peer in its own words..."
+        : "Give the bots a topic, mood, or scenario...";
+  }
+}
+
 function renderBotNetTranscript(conversation) {
   if (!botNetTranscript) return;
   botNetTranscript.innerHTML = "";
@@ -161,6 +187,7 @@ function applyBotNetSettings(settings, force = false) {
   if (botNetSettingsDirty && !force) {
     return;
   }
+  updateBotNetModeUi(settings.botnetMode || "auto-bot");
   if (botNetEnabledCheckbox) {
     botNetEnabledCheckbox.checked = Boolean(settings.enabled);
   }
@@ -223,6 +250,7 @@ async function loadBotNetState() {
 async function saveBotNetSettings(showSavedStatus = true) {
   const body = {
     enabled: Boolean(botNetEnabledCheckbox?.checked),
+    botnetMode: botNetModeSelect?.value || "auto-bot",
     peerUrl: (botNetPeerUrlInput?.value || "").trim(),
     publicUrl: (botNetPublicUrlInput?.value || "").trim(),
     maxBotReplies: parseInt(botNetMaxRepliesInput?.value || "8", 10),
@@ -312,7 +340,11 @@ async function startBotNetConversation(starter = "self") {
     const response = await fetch("/api/botnet/start", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ topic, starter }),
+      body: JSON.stringify({
+        topic,
+        starter,
+        botnetMode: botNetModeSelect?.value || "auto-bot",
+      }),
     });
     const payload = await response.json();
     if (!response.ok || payload.ok === false) {
@@ -1594,6 +1626,7 @@ if (botNetSaveBtn) {
 
 [
   botNetEnabledCheckbox,
+  botNetModeSelect,
   botNetPeerUrlInput,
   botNetPublicUrlInput,
   botNetMaxRepliesInput,
@@ -2100,12 +2133,17 @@ async function sendTextInput() {
       return;
     }
     try {
-      setBotNetStatus("Starting BotNet conversation from text input...");
+      const botnetMode = botNetModeSelect?.value || "auto-bot";
+      setBotNetStatus(
+        botnetMode === "persona-relay"
+          ? "Relaying your prompt through Whisplay..."
+          : "Starting BotNet conversation from text input...",
+      );
       await saveBotNetSettings(false);
       const response = await fetch("/api/botnet/user-message", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({ text, botnetMode }),
       });
       const payload = await response.json();
       if (!response.ok || payload.ok === false) {
@@ -2116,7 +2154,11 @@ async function sendTextInput() {
         botNetTopicInput.value = text;
       }
       await loadBotNetState();
-      setBotNetStatus("BotNet conversation started from the text box.");
+      setBotNetStatus(
+        botnetMode === "persona-relay"
+          ? "Whisplay relayed your prompt to the peer bot."
+          : "BotNet conversation started from the text box.",
+      );
     } catch (error) {
       console.error("Failed to route text input to BotNet:", error);
       setBotNetStatus(
