@@ -117,6 +117,20 @@ function writeJson(filePath: string, value: unknown): void {
   fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
 }
 
+function getField(
+  body: Record<string, unknown>,
+  camelKey: string,
+  normalizedKey = camelKey.toLowerCase(),
+): unknown {
+  if (camelKey in body) {
+    return body[camelKey];
+  }
+  if (normalizedKey in body) {
+    return body[normalizedKey];
+  }
+  return undefined;
+}
+
 function makeMessage(
   speakerType: BotNetSpeakerType,
   speakerName: string,
@@ -476,23 +490,32 @@ class BotNetManager {
     if (!this.settings.enabled) {
       throw new Error("BotNet mode is off on this Whisplay node.");
     }
-    const topic = String(body.topic || "").trim();
+    const topic = String(getField(body, "topic") || "").trim();
     if (!topic) {
       throw new Error("Missing topic.");
     }
     const conversation = this.createConversation(topic, "peer");
-    conversation.id = String(body.conversationId || conversation.id).trim() || conversation.id;
-    conversation.peerUrl = normalizeUrl(body.senderUrl || this.settings.peerUrl);
+    conversation.id =
+      String(getField(body, "conversationId", "conversationid") || conversation.id).trim() ||
+      conversation.id;
+    conversation.peerUrl = normalizeUrl(
+      getField(body, "senderUrl", "senderurl") || this.settings.peerUrl,
+    );
     conversation.maxBotReplies = clampInt(
-      body.maxBotReplies,
+      getField(body, "maxBotReplies", "maxbotreplies"),
       this.settings.maxBotReplies,
       0,
       200,
     );
-    conversation.replyCount = clampInt(body.replyCount, 0, 0, 200);
+    conversation.replyCount = clampInt(
+      getField(body, "replyCount", "replycount"),
+      0,
+      0,
+      200,
+    );
     this.addEvent(
       conversation,
-      `Peer ${String(body.senderBotName || "bot")} requested a new conversation.`,
+      `Peer ${String(getField(body, "senderBotName", "senderbotname") || "bot")} requested a new conversation.`,
     );
     this.connectionStatus = "Active conversation";
     this.scheduleReply(
@@ -505,34 +528,49 @@ class BotNetManager {
     if (!this.settings.enabled) {
       throw new Error("BotNet mode is off on this Whisplay node.");
     }
-    const conversationId = String(body.conversationId || "").trim();
+    const conversationId = String(
+      getField(body, "conversationId", "conversationid") || "",
+    ).trim();
     if (!conversationId) {
       throw new Error("Missing conversationId.");
     }
     let conversation =
       this.conversations.find((item) => item.id === conversationId) || null;
     if (!conversation) {
-      conversation = this.createConversation(String(body.topic || "").trim(), "peer");
+      conversation = this.createConversation(
+        String(getField(body, "topic") || "").trim(),
+        "peer",
+      );
       conversation.id = conversationId;
     }
-    conversation.peerUrl = normalizeUrl(body.senderUrl || conversation.peerUrl || this.settings.peerUrl);
+    conversation.peerUrl = normalizeUrl(
+      getField(body, "senderUrl", "senderurl") ||
+        conversation.peerUrl ||
+        this.settings.peerUrl,
+    );
     conversation.maxBotReplies = clampInt(
-      body.maxBotReplies,
+      getField(body, "maxBotReplies", "maxbotreplies"),
       conversation.maxBotReplies,
       0,
       200,
     );
     conversation.replyCount = Math.max(
       conversation.replyCount,
-      clampInt(body.replyCount, conversation.replyCount, 0, 200),
+      clampInt(
+        getField(body, "replyCount", "replycount"),
+        conversation.replyCount,
+        0,
+        200,
+      ),
     );
     conversation.status = "active";
     this.addMessage(
       conversation,
       makeMessage(
         "peer",
-        String(body.senderBotName || "Peer Bot").trim() || "Peer Bot",
-        String(body.message || ""),
+        String(getField(body, "senderBotName", "senderbotname") || "Peer Bot").trim() ||
+          "Peer Bot",
+        String(getField(body, "message") || ""),
       ),
     );
     this.connectionStatus = "Active conversation";
