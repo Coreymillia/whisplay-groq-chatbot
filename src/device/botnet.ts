@@ -1,5 +1,6 @@
 import fs from "fs";
 import path from "path";
+import { WebSocket, type RawData } from "ws";
 import { dataDir } from "../utils/dir";
 import { getRuntimeSettings } from "../config/runtime-settings";
 
@@ -7,11 +8,15 @@ type BotNetMode = "solo" | "botnet";
 type BotNetStarter = "self" | "peer";
 type BotNetSpeakerType = "self" | "peer" | "user" | "system";
 type BotNetRelayMode = "persona-relay" | "auto-bot";
+type BotNetTransportMode = "lan-direct" | "online-hub";
 
 export interface BotNetSettings {
   enabled: boolean;
+  transportMode: BotNetTransportMode;
   peerUrl: string;
   publicUrl: string;
+  hubUrl: string;
+  nodeHandle: string;
   botnetMode: BotNetRelayMode;
   maxBotReplies: number;
   replyDelaySec: number;
@@ -32,7 +37,10 @@ export interface BotNetConversation {
   mode: BotNetMode;
   starter: BotNetStarter | "user";
   botnetMode: BotNetRelayMode;
+  transportMode: BotNetTransportMode;
   peerUrl: string;
+  linkId: string;
+  peerNodeId: string;
   status: "active" | "stopped" | "complete";
   maxBotReplies: number;
   replyCount: number;
@@ -41,22 +49,65 @@ export interface BotNetConversation {
   messages: BotNetMessage[];
 }
 
+interface BotNetHubSession {
+  nodeId: string;
+  authToken: string;
+  websocketUrl: string;
+  linkId: string;
+  peerNodeId: string;
+  peerHandle: string;
+  peerOnline: boolean;
+  lastError: string;
+}
+
+export interface BotNetOnlineState {
+  transportMode: BotNetTransportMode;
+  hubUrl: string;
+  nodeHandle: string;
+  nodeId: string;
+  registered: boolean;
+  connected: boolean;
+  websocketUrl: string;
+  linkId: string;
+  peerNodeId: string;
+  peerHandle: string;
+  peerOnline: boolean;
+  lastError: string;
+  authConfigured: boolean;
+}
+
 export interface BotNetState {
   settings: BotNetSettings;
   connectionStatus: string;
+  online: BotNetOnlineState;
   conversations: BotNetConversation[];
 }
 
 const SETTINGS_PATH = path.join(dataDir, "botnet-settings.json");
 const CONVERSATIONS_PATH = path.join(dataDir, "botnet-conversations.json");
+const HUB_SESSION_PATH = path.join(dataDir, "botnet-hub-session.json");
 
 const DEFAULT_SETTINGS: BotNetSettings = {
   enabled: false,
+  transportMode: "lan-direct",
   peerUrl: "",
   publicUrl: "",
+  hubUrl: "",
+  nodeHandle: "Whisplay Bot",
   botnetMode: "auto-bot",
   maxBotReplies: 8,
   replyDelaySec: 6,
+};
+
+const DEFAULT_HUB_SESSION: BotNetHubSession = {
+  nodeId: "",
+  authToken: "",
+  websocketUrl: "",
+  linkId: "",
+  peerNodeId: "",
+  peerHandle: "",
+  peerOnline: false,
+  lastError: "",
 };
 
 const lazyDisplay = () =>
@@ -99,14 +150,44 @@ function normalizeBotnetMode(value: unknown): BotNetRelayMode {
   return value === "persona-relay" ? "persona-relay" : "auto-bot";
 }
 
+function normalizeTransportMode(value: unknown): BotNetTransportMode {
+  return value === "online-hub" ? "online-hub" : "lan-direct";
+}
+
+function normalizeNodeHandle(value: unknown): string {
+  if (typeof value !== "string") {
+    return DEFAULT_SETTINGS.nodeHandle;
+  }
+  const trimmed = value.trim();
+  return trimmed || DEFAULT_SETTINGS.nodeHandle;
+}
+
 function sanitizeSettings(input: Partial<BotNetSettings> | null | undefined): BotNetSettings {
   return {
     enabled: Boolean(input?.enabled),
+    transportMode: normalizeTransportMode(input?.transportMode),
     peerUrl: normalizeUrl(input?.peerUrl),
     publicUrl: normalizeUrl(input?.publicUrl),
+    hubUrl: normalizeUrl(input?.hubUrl),
+    nodeHandle: normalizeNodeHandle(input?.nodeHandle),
     botnetMode: normalizeBotnetMode(input?.botnetMode),
     maxBotReplies: clampInt(input?.maxBotReplies, DEFAULT_SETTINGS.maxBotReplies, 0, 200),
     replyDelaySec: clampInt(input?.replyDelaySec, DEFAULT_SETTINGS.replyDelaySec, 0, 3600),
+  };
+}
+
+function sanitizeHubSession(
+  input: Partial<BotNetHubSession> | null | undefined,
+): BotNetHubSession {
+  return {
+    nodeId: typeof input?.nodeId === "string" ? input.nodeId.trim() : "",
+    authToken: typeof input?.authToken === "string" ? input.authToken.trim() : "",
+    websocketUrl: normalizeUrl(input?.websocketUrl),
+    linkId: typeof input?.linkId === "string" ? input.linkId.trim() : "",
+    peerNodeId: typeof input?.peerNodeId === "string" ? input.peerNodeId.trim() : "",
+    peerHandle: typeof input?.peerHandle === "string" ? input.peerHandle.trim() : "",
+    peerOnline: Boolean(input?.peerOnline),
+    lastError: typeof input?.lastError === "string" ? input.lastError.trim() : "",
   };
 }
 
@@ -195,12 +276,149 @@ class BotNetManager {
     [],
   );
 
+  private hubSession: BotNetHubSession = sanitizeHubSession(
+    readJson<Partial<BotNetHubSession>>(HUB_SESSION_PATH, DEFAULT_HUB_SESSION),
+  );
+
   private connectionStatus = "Disconnected";
   private activeTimer: NodeJS.Timeout | null = null;
+  private hubSocket: WebSocket | null = null;
+  private hubHeartbeatTimer: NodeJS.Timeout | null = null;
+  private hubReconnectTimer: NodeJS.Timeout | null = null;
+  private hubDisconnectRequested = false;
+
+  constructor() {
+    this.refreshConnectionStatus();
+    this.maybeStartHubSession();
+  }
 
   private save(): void {
     writeJson(SETTINGS_PATH, this.settings);
     writeJson(CONVERSATIONS_PATH, this.conversations.slice(0, 20));
+    writeJson(HUB_SESSION_PATH, this.hubSession);
+  }
+
+  private maybeStartHubSession(): void {
+    if (
+      !this.settings.enabled ||
+      !this.isOnlineTransport() ||
+      !this.hubSession.nodeId ||
+      !this.hubSession.authToken ||
+      !this.settings.hubUrl
+    ) {
+      return;
+    }
+    setTimeout(() => {
+      void this.connectHub().catch((error) => {
+        this.hubSession.lastError =
+          error instanceof Error ? error.message : "Failed to connect to the hub.";
+        this.refreshConnectionStatus();
+        this.save();
+      });
+    }, 1000);
+  }
+
+  private clearHubHeartbeat(): void {
+    if (this.hubHeartbeatTimer) {
+      clearInterval(this.hubHeartbeatTimer);
+      this.hubHeartbeatTimer = null;
+    }
+  }
+
+  private clearHubReconnect(): void {
+    if (this.hubReconnectTimer) {
+      clearTimeout(this.hubReconnectTimer);
+      this.hubReconnectTimer = null;
+    }
+  }
+
+  private startHubHeartbeat(): void {
+    this.clearHubHeartbeat();
+    this.hubHeartbeatTimer = setInterval(() => {
+      if (!this.hubSocket || this.hubSocket.readyState !== WebSocket.OPEN) {
+        this.clearHubHeartbeat();
+        return;
+      }
+      this.hubSocket.send(
+        JSON.stringify({
+          type: "botnet.ping",
+          nodeId: this.hubSession.nodeId,
+        }),
+      );
+    }, 30000);
+  }
+
+  private closeHubSocket(): void {
+    if (this.hubSocket) {
+      this.hubSocket.removeAllListeners();
+      this.hubSocket.close();
+      this.hubSocket = null;
+    }
+    this.clearHubHeartbeat();
+  }
+
+  private reconnectHubLater(): void {
+    this.clearHubReconnect();
+    if (
+      this.hubDisconnectRequested ||
+      !this.settings.enabled ||
+      !this.isOnlineTransport() ||
+      !this.hubSession.nodeId ||
+      !this.hubSession.authToken ||
+      !this.settings.hubUrl
+    ) {
+      return;
+    }
+    this.hubReconnectTimer = setTimeout(() => {
+      this.hubReconnectTimer = null;
+      void this.connectHub().catch((error) => {
+        this.hubSession.lastError =
+          error instanceof Error ? error.message : "Failed to reconnect to the hub.";
+        this.refreshConnectionStatus();
+        this.save();
+      });
+    }, 5000);
+  }
+
+  private isOnlineTransport(
+    target?: Pick<BotNetSettings, "transportMode"> | Pick<BotNetConversation, "transportMode">,
+  ): boolean {
+    return normalizeTransportMode(target?.transportMode || this.settings.transportMode) === "online-hub";
+  }
+
+  private isHubConnected(): boolean {
+    return Boolean(this.hubSocket && this.hubSocket.readyState === WebSocket.OPEN);
+  }
+
+  private refreshConnectionStatus(): void {
+    if (this.isOnlineTransport()) {
+      if (this.isHubConnected()) {
+        if (this.hubSession.linkId) {
+          this.connectionStatus = this.hubSession.peerOnline
+            ? "Hub connected • Peer online"
+            : "Hub connected • Peer offline";
+        } else {
+          this.connectionStatus = "Hub connected";
+        }
+        return;
+      }
+      if (this.hubSession.nodeId && this.hubSession.authToken) {
+        this.connectionStatus = "Hub registered";
+        return;
+      }
+      if (this.settings.hubUrl) {
+        this.connectionStatus = "Hub configured";
+        return;
+      }
+      this.connectionStatus = "Disconnected";
+      return;
+    }
+
+    if (this.settings.peerUrl) {
+      this.connectionStatus = "Reachable";
+      return;
+    }
+    this.connectionStatus = "Disconnected";
   }
 
   private getActiveConversation(): BotNetConversation | null {
@@ -366,15 +584,506 @@ class BotNetManager {
     return this.callGroq(this.buildPersonaRelayMessages(conversation, userPrompt));
   }
 
-  private async sendToPeer(
+  private defaultHubWebSocketUrl(): string {
+    const baseUrl = this.settings.hubUrl;
+    if (!baseUrl) {
+      return "";
+    }
+    const asWebSocket = baseUrl.replace(/^http/i, "ws");
+    return `${asWebSocket}/api/v1/botnet/connect`;
+  }
+
+  private getPublicOnlineState(): BotNetOnlineState {
+    return {
+      transportMode: this.settings.transportMode,
+      hubUrl: this.settings.hubUrl,
+      nodeHandle: this.settings.nodeHandle,
+      nodeId: this.hubSession.nodeId,
+      registered: Boolean(this.hubSession.nodeId && this.hubSession.authToken),
+      connected: this.isHubConnected(),
+      websocketUrl: this.hubSession.websocketUrl,
+      linkId: this.hubSession.linkId,
+      peerNodeId: this.hubSession.peerNodeId,
+      peerHandle: this.hubSession.peerHandle,
+      peerOnline: this.hubSession.peerOnline,
+      lastError: this.hubSession.lastError,
+      authConfigured: Boolean(this.hubSession.authToken),
+    };
+  }
+
+  getState(): BotNetState {
+    this.refreshConnectionStatus();
+    return {
+      settings: { ...this.settings },
+      connectionStatus: this.connectionStatus,
+      online: this.getPublicOnlineState(),
+      conversations: this.conversations.slice(0, 10),
+    };
+  }
+
+  saveSettings(update: Partial<BotNetSettings>): BotNetSettings {
+    const previous = this.settings;
+    this.settings = sanitizeSettings({ ...this.settings, ...update });
+    const onlineConfigChanged =
+      previous.transportMode !== this.settings.transportMode ||
+      previous.hubUrl !== this.settings.hubUrl ||
+      previous.nodeHandle !== this.settings.nodeHandle ||
+      previous.enabled !== this.settings.enabled;
+
+    if (!this.settings.enabled && this.isHubConnected()) {
+      this.hubDisconnectRequested = true;
+      this.closeHubSocket();
+    }
+
+    if (!this.isOnlineTransport() && this.isHubConnected()) {
+      this.hubDisconnectRequested = true;
+      this.closeHubSocket();
+    }
+
+    if (onlineConfigChanged) {
+      this.hubSession.lastError = "";
+      this.clearHubReconnect();
+      if (this.isHubConnected()) {
+        this.hubDisconnectRequested = true;
+        this.closeHubSocket();
+      }
+    }
+
+    this.refreshConnectionStatus();
+    this.save();
+
+    if (
+      this.settings.enabled &&
+      this.isOnlineTransport() &&
+      this.hubSession.nodeId &&
+      this.hubSession.authToken
+    ) {
+      this.hubDisconnectRequested = false;
+      this.maybeStartHubSession();
+    }
+
+    return { ...this.settings };
+  }
+
+  private async checkHubHealth(): Promise<string> {
+    const hubUrl = normalizeUrl(this.settings.hubUrl);
+    if (!hubUrl) {
+      this.refreshConnectionStatus();
+      return "Hub URL is not configured.";
+    }
+
+    const probePaths = ["/api/v1/botnet/health", "/health"];
+    let lastError = "Hub check failed.";
+    for (const probePath of probePaths) {
+      try {
+        const response = await fetch(`${hubUrl}${probePath}`);
+        if (response.ok) {
+          this.refreshConnectionStatus();
+          return "Hub is reachable.";
+        }
+        lastError = `Hub returned HTTP ${response.status}.`;
+      } catch (error) {
+        lastError = error instanceof Error ? error.message : "Hub check failed.";
+      }
+    }
+    this.hubSession.lastError = lastError;
+    this.refreshConnectionStatus();
+    this.save();
+    throw new Error(lastError);
+  }
+
+  async testPeer(): Promise<{ ok: boolean; message: string }> {
+    if (this.isOnlineTransport()) {
+      if (this.isHubConnected()) {
+        this.refreshConnectionStatus();
+        return { ok: true, message: "Hub relay connection is active." };
+      }
+      try {
+        const message = await this.checkHubHealth();
+        return { ok: true, message };
+      } catch (error) {
+        return {
+          ok: false,
+          message: error instanceof Error ? error.message : "Hub check failed.",
+        };
+      }
+    }
+
+    const peerUrl = normalizeUrl(this.settings.peerUrl);
+    if (!peerUrl) {
+      this.connectionStatus = "Disconnected";
+      return { ok: false, message: "Peer URL is not configured." };
+    }
+    try {
+      const response = await fetch(`${peerUrl}/api/state`);
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload.ok === false) {
+        throw new Error(payload.error || `HTTP ${response.status}`);
+      }
+      this.connectionStatus = "Reachable";
+      return { ok: true, message: "Peer bot is reachable." };
+    } catch (error) {
+      this.connectionStatus = "Disconnected";
+      return {
+        ok: false,
+        message: error instanceof Error ? error.message : "Peer check failed.",
+      };
+    }
+  }
+
+  async registerWithHub(): Promise<BotNetOnlineState> {
+    const hubUrl = normalizeUrl(this.settings.hubUrl);
+    if (!hubUrl) {
+      throw new Error("Hub URL is not configured.");
+    }
+    if (!this.settings.nodeHandle.trim()) {
+      throw new Error("Node handle is required.");
+    }
+
+    const response = await fetch(`${hubUrl}/api/v1/botnet/nodes/register`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        nodeId: this.hubSession.nodeId || undefined,
+        handle: this.settings.nodeHandle,
+        deviceType: "whisplay",
+        botName: "Whisplay Bot",
+        capabilities: {
+          modes: ["auto-bot", "persona-relay"],
+          relayTransport: true,
+          transportModes: ["lan-direct", "online-hub"],
+        },
+      }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || payload.ok === false) {
+      throw new Error(payload.error || `Hub registration failed with HTTP ${response.status}`);
+    }
+
+    const nodeId =
+      String(payload.nodeId || payload?.node?.id || this.hubSession.nodeId || "").trim();
+    const authToken =
+      String(
+        payload.authToken ||
+          payload.token ||
+          payload.sessionToken ||
+          payload?.session?.token ||
+          "",
+      ).trim();
+    if (!nodeId || !authToken) {
+      throw new Error("Hub registration response did not include node credentials.");
+    }
+
+    this.hubSession = sanitizeHubSession({
+      ...this.hubSession,
+      nodeId,
+      authToken,
+      websocketUrl:
+        String(payload.websocketUrl || payload.wsUrl || this.hubSession.websocketUrl || "").trim() ||
+        this.defaultHubWebSocketUrl(),
+      linkId: String(payload.linkId || this.hubSession.linkId || "").trim(),
+      peerNodeId: String(payload.peerNodeId || this.hubSession.peerNodeId || "").trim(),
+      peerHandle: String(payload.peerHandle || this.hubSession.peerHandle || "").trim(),
+      peerOnline:
+        typeof payload.peerOnline === "boolean"
+          ? payload.peerOnline
+          : this.hubSession.peerOnline,
+      lastError: "",
+    });
+    this.hubDisconnectRequested = false;
+    this.refreshConnectionStatus();
+    this.save();
+    return this.getPublicOnlineState();
+  }
+
+  async connectHub(): Promise<BotNetOnlineState> {
+    if (!this.isOnlineTransport()) {
+      throw new Error("Set the transport mode to Online Hub first.");
+    }
+    if (!this.settings.enabled) {
+      throw new Error("BotNet mode is turned off.");
+    }
+    if (!this.hubSession.nodeId || !this.hubSession.authToken) {
+      await this.registerWithHub();
+    }
+    if (this.isHubConnected()) {
+      return this.getPublicOnlineState();
+    }
+    if (this.hubSocket && this.hubSocket.readyState === WebSocket.CONNECTING) {
+      return this.getPublicOnlineState();
+    }
+
+    const socketBase = this.hubSession.websocketUrl || this.defaultHubWebSocketUrl();
+    if (!socketBase) {
+      throw new Error("Hub websocket URL is not configured.");
+    }
+
+    const socketUrl = new URL(socketBase);
+    socketUrl.searchParams.set("nodeId", this.hubSession.nodeId);
+    socketUrl.searchParams.set("token", this.hubSession.authToken);
+
+    this.hubDisconnectRequested = false;
+    this.closeHubSocket();
+    this.clearHubReconnect();
+
+    await new Promise<void>((resolve, reject) => {
+      const socket = new WebSocket(socketUrl.toString());
+      let settled = false;
+
+      const fail = (message: string): void => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        this.hubSession.lastError = message;
+        this.refreshConnectionStatus();
+        this.save();
+        reject(new Error(message));
+      };
+
+      socket.once("open", () => {
+        this.hubSocket = socket;
+        this.hubSession.lastError = "";
+        this.startHubHeartbeat();
+        this.refreshConnectionStatus();
+        this.save();
+
+        socket.send(
+          JSON.stringify({
+            type: "botnet.hello",
+            nodeId: this.hubSession.nodeId,
+            token: this.hubSession.authToken,
+            handle: this.settings.nodeHandle,
+            linkId: this.hubSession.linkId || undefined,
+          }),
+        );
+
+        socket.on("message", (rawMessage) => {
+          void this.handleHubMessage(rawMessage).catch((error) => {
+            this.hubSession.lastError =
+              error instanceof Error ? error.message : "Failed to process hub message.";
+            this.refreshConnectionStatus();
+            this.save();
+          });
+        });
+
+        socket.on("close", () => {
+          this.closeHubSocket();
+          this.refreshConnectionStatus();
+          this.save();
+          this.reconnectHubLater();
+        });
+
+        socket.on("error", (error) => {
+          this.hubSession.lastError =
+            error instanceof Error ? error.message : "Hub websocket error.";
+          this.refreshConnectionStatus();
+          this.save();
+        });
+
+        if (!settled) {
+          settled = true;
+          resolve();
+        }
+      });
+
+      socket.once("error", (error) => {
+        fail(error instanceof Error ? error.message : "Hub websocket error.");
+      });
+    });
+
+    return this.getPublicOnlineState();
+  }
+
+  disconnectHub(): BotNetOnlineState {
+    this.hubDisconnectRequested = true;
+    this.clearHubReconnect();
+    this.closeHubSocket();
+    this.refreshConnectionStatus();
+    this.save();
+    return this.getPublicOnlineState();
+  }
+
+  async createHubInvite(): Promise<{ inviteCode: string; expiresAt: string }> {
+    const hubUrl = normalizeUrl(this.settings.hubUrl);
+    if (!hubUrl) {
+      throw new Error("Hub URL is not configured.");
+    }
+    if (!this.hubSession.nodeId || !this.hubSession.authToken) {
+      throw new Error("Register this Whisplay node with the hub first.");
+    }
+    const response = await fetch(`${hubUrl}/api/v1/botnet/invites/create`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        nodeId: this.hubSession.nodeId,
+        token: this.hubSession.authToken,
+      }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || payload.ok === false) {
+      throw new Error(payload.error || `Hub invite creation failed with HTTP ${response.status}`);
+    }
+    this.hubSession.lastError = "";
+    this.refreshConnectionStatus();
+    this.save();
+    return {
+      inviteCode: String(payload.inviteCode || "").trim(),
+      expiresAt: String(payload.expiresAt || "").trim(),
+    };
+  }
+
+  async redeemHubInvite(inviteCode: string): Promise<BotNetOnlineState> {
+    const hubUrl = normalizeUrl(this.settings.hubUrl);
+    if (!hubUrl) {
+      throw new Error("Hub URL is not configured.");
+    }
+    const cleanedCode = inviteCode.trim().toUpperCase();
+    if (!cleanedCode) {
+      throw new Error("Invite code is required.");
+    }
+    if (!this.hubSession.nodeId || !this.hubSession.authToken) {
+      await this.registerWithHub();
+    }
+    const response = await fetch(`${hubUrl}/api/v1/botnet/invites/redeem`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        nodeId: this.hubSession.nodeId,
+        token: this.hubSession.authToken,
+        inviteCode: cleanedCode,
+      }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || payload.ok === false) {
+      throw new Error(payload.error || `Hub invite redeem failed with HTTP ${response.status}`);
+    }
+    this.hubSession = sanitizeHubSession({
+      ...this.hubSession,
+      linkId: String(payload.linkId || this.hubSession.linkId || "").trim(),
+      peerNodeId: String(payload.peerNodeId || this.hubSession.peerNodeId || "").trim(),
+      peerHandle: String(payload.peerHandle || this.hubSession.peerHandle || "").trim(),
+      peerOnline:
+        typeof payload.peerOnline === "boolean"
+          ? payload.peerOnline
+          : this.hubSession.peerOnline,
+      lastError: "",
+    });
+    this.refreshConnectionStatus();
+    this.save();
+    return this.getPublicOnlineState();
+  }
+
+  private extractHubPayload(message: Record<string, unknown>): Record<string, unknown> {
+    const payload = message.payload;
+    if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+      return payload as Record<string, unknown>;
+    }
+    return message;
+  }
+
+  private async handleHubMessage(rawMessage: RawData): Promise<void> {
+    const text = rawMessage.toString();
+    const message = JSON.parse(text) as Record<string, unknown>;
+    const type = String(message.type || "").trim();
+
+    switch (type) {
+      case "botnet.welcome":
+      case "botnet.session": {
+        this.hubSession = sanitizeHubSession({
+          ...this.hubSession,
+          nodeId: String(message.nodeId || this.hubSession.nodeId).trim(),
+          websocketUrl:
+            String(message.websocketUrl || this.hubSession.websocketUrl).trim() ||
+            this.hubSession.websocketUrl,
+          lastError: "",
+        });
+        this.refreshConnectionStatus();
+        this.save();
+        return;
+      }
+      case "botnet.link-state": {
+        this.hubSession = sanitizeHubSession({
+          ...this.hubSession,
+          linkId: String(message.linkId || this.hubSession.linkId).trim(),
+          peerNodeId: String(message.peerNodeId || this.hubSession.peerNodeId).trim(),
+          peerHandle: String(message.peerHandle || this.hubSession.peerHandle).trim(),
+          peerOnline:
+            typeof message.peerOnline === "boolean"
+              ? message.peerOnline
+              : this.hubSession.peerOnline,
+          lastError: "",
+        });
+        this.refreshConnectionStatus();
+        this.save();
+        return;
+      }
+      case "botnet.peer-start": {
+        await this.handlePeerStart(this.extractHubPayload(message));
+        return;
+      }
+      case "botnet.peer-message": {
+        await this.handlePeerMessage(this.extractHubPayload(message));
+        return;
+      }
+      case "botnet.error": {
+        this.hubSession.lastError =
+          String(message.error || message.message || "Hub returned an error.").trim();
+        this.refreshConnectionStatus();
+        this.save();
+        return;
+      }
+      case "botnet.pong":
+      case "botnet.ack":
+      default:
+        return;
+    }
+  }
+
+  private async sendHubEnvelope(
+    eventType: "botnet.start" | "botnet.message",
     conversation: BotNetConversation,
-    pathName: "/api/botnet/start" | "/api/botnet/message",
     payload: Record<string, unknown>,
   ): Promise<void> {
-    const peerUrl = normalizeUrl(conversation.peerUrl || this.settings.peerUrl);
-    if (!peerUrl) {
-      throw new Error("Peer URL is not configured.");
+    if (!this.isHubConnected()) {
+      throw new Error("Hub relay session is not connected.");
     }
+
+    const linkId = conversation.linkId || this.hubSession.linkId;
+    const peerNodeId = conversation.peerNodeId || this.hubSession.peerNodeId;
+    if (!linkId || !peerNodeId) {
+      throw new Error("No online peer link is active yet.");
+    }
+
+    this.hubSocket!.send(
+      JSON.stringify({
+        type: eventType,
+        nodeId: this.hubSession.nodeId,
+        token: this.hubSession.authToken,
+        linkId,
+        toNodeId: peerNodeId,
+        payload: {
+          ...payload,
+          transportMode: "online-hub",
+          linkId,
+          senderNodeId: this.hubSession.nodeId,
+          peerNodeId,
+        },
+      }),
+    );
+  }
+
+  private async sendToLanPeer(
+    pathName: "/api/botnet/start" | "/api/botnet/message",
+    payload: Record<string, unknown>,
+    peerUrl: string,
+  ): Promise<void> {
     const response = await fetch(`${peerUrl}${pathName}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -384,6 +1093,27 @@ class BotNetManager {
     if (!response.ok || body.ok === false) {
       throw new Error(body.error || `Peer request failed with HTTP ${response.status}`);
     }
+  }
+
+  private async sendToPeer(
+    conversation: BotNetConversation,
+    pathName: "/api/botnet/start" | "/api/botnet/message",
+    payload: Record<string, unknown>,
+  ): Promise<void> {
+    if (this.isOnlineTransport(conversation)) {
+      await this.sendHubEnvelope(
+        pathName === "/api/botnet/start" ? "botnet.start" : "botnet.message",
+        conversation,
+        payload,
+      );
+      return;
+    }
+
+    const peerUrl = normalizeUrl(conversation.peerUrl || this.settings.peerUrl);
+    if (!peerUrl) {
+      throw new Error("Peer URL is not configured.");
+    }
+    await this.sendToLanPeer(pathName, payload, peerUrl);
   }
 
   private async emitReply(
@@ -453,7 +1183,10 @@ class BotNetManager {
       mode: "botnet",
       starter,
       botnetMode,
+      transportMode: this.settings.transportMode,
       peerUrl: this.settings.peerUrl,
+      linkId: this.hubSession.linkId,
+      peerNodeId: this.hubSession.peerNodeId,
       status: "active",
       maxBotReplies: this.settings.maxBotReplies,
       replyCount: 0,
@@ -495,43 +1228,6 @@ class BotNetManager {
       replyCount: conversation.replyCount,
       message: relayedMessage,
     });
-  }
-
-  getState(): BotNetState {
-    return {
-      settings: { ...this.settings },
-      connectionStatus: this.connectionStatus,
-      conversations: this.conversations.slice(0, 10),
-    };
-  }
-
-  saveSettings(update: Partial<BotNetSettings>): BotNetSettings {
-    this.settings = sanitizeSettings({ ...this.settings, ...update });
-    this.save();
-    return { ...this.settings };
-  }
-
-  async testPeer(): Promise<{ ok: boolean; message: string }> {
-    const peerUrl = normalizeUrl(this.settings.peerUrl);
-    if (!peerUrl) {
-      this.connectionStatus = "Disconnected";
-      return { ok: false, message: "Peer URL is not configured." };
-    }
-    try {
-      const response = await fetch(`${peerUrl}/api/state`);
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || payload.ok === false) {
-        throw new Error(payload.error || `HTTP ${response.status}`);
-      }
-      this.connectionStatus = "Reachable";
-      return { ok: true, message: "Peer bot is reachable." };
-    } catch (error) {
-      this.connectionStatus = "Disconnected";
-      return {
-        ok: false,
-        message: error instanceof Error ? error.message : "Peer check failed.",
-      };
-    }
   }
 
   async startConversation(
@@ -601,7 +1297,14 @@ class BotNetManager {
       this.connectionStatus = "Active conversation";
     }
 
-    if (!normalizeUrl(conversation.peerUrl || this.settings.peerUrl)) {
+    if (this.isOnlineTransport(conversation)) {
+      if (!conversation.linkId && !this.hubSession.linkId) {
+        throw new Error("No online peer link is active yet.");
+      }
+      if (!this.isHubConnected()) {
+        throw new Error("Hub relay session is not connected.");
+      }
+    } else if (!normalizeUrl(conversation.peerUrl || this.settings.peerUrl)) {
       throw new Error("Peer URL is not configured.");
     }
 
@@ -617,8 +1320,19 @@ class BotNetManager {
     conversation.status = "stopped";
     this.clearTimer();
     this.addEvent(conversation, "Conversation stopped by user.");
-    this.connectionStatus = "Reachable";
+    this.refreshConnectionStatus();
     return true;
+  }
+
+  private inferTransportModeFromPayload(body: Record<string, unknown>): BotNetTransportMode {
+    const explicit = getField(body, "transportMode", "transportmode");
+    if (explicit === "online-hub") {
+      return "online-hub";
+    }
+    if (getField(body, "linkId", "linkid") || getField(body, "senderNodeId", "sendernodeid")) {
+      return "online-hub";
+    }
+    return "lan-direct";
   }
 
   async handlePeerStart(body: Record<string, unknown>): Promise<void> {
@@ -636,9 +1350,14 @@ class BotNetManager {
     conversation.id =
       String(getField(body, "conversationId", "conversationid") || conversation.id).trim() ||
       conversation.id;
+    conversation.transportMode = this.inferTransportModeFromPayload(body);
     conversation.peerUrl = normalizeUrl(
       getField(body, "senderUrl", "senderurl") || this.settings.peerUrl,
     );
+    conversation.linkId = String(getField(body, "linkId", "linkid") || conversation.linkId).trim();
+    conversation.peerNodeId = String(
+      getField(body, "senderNodeId", "sendernodeid") || conversation.peerNodeId,
+    ).trim();
     conversation.maxBotReplies = clampInt(
       getField(body, "maxBotReplies", "maxbotreplies"),
       this.settings.maxBotReplies,
@@ -652,12 +1371,25 @@ class BotNetManager {
       200,
     );
     conversation.botnetMode = botnetMode;
+
+    if (conversation.transportMode === "online-hub") {
+      this.hubSession = sanitizeHubSession({
+        ...this.hubSession,
+        linkId: conversation.linkId || this.hubSession.linkId,
+        peerNodeId: conversation.peerNodeId || this.hubSession.peerNodeId,
+        peerHandle:
+          String(getField(body, "senderBotName", "senderbotname") || this.hubSession.peerHandle).trim(),
+        peerOnline: true,
+      });
+    }
+
     this.addEvent(
       conversation,
       `Peer ${String(getField(body, "senderBotName", "senderbotname") || "bot")} requested a new conversation.`,
     );
     this.connectionStatus = "Active conversation";
     if (!this.isAutoBotConversation(conversation)) {
+      this.save();
       return;
     }
     this.scheduleReply(
@@ -689,12 +1421,17 @@ class BotNetManager {
       );
       conversation.id = conversationId;
     }
+    conversation.transportMode = this.inferTransportModeFromPayload(body);
     conversation.botnetMode = botnetMode;
     conversation.peerUrl = normalizeUrl(
       getField(body, "senderUrl", "senderurl") ||
         conversation.peerUrl ||
         this.settings.peerUrl,
     );
+    conversation.linkId = String(getField(body, "linkId", "linkid") || conversation.linkId).trim();
+    conversation.peerNodeId = String(
+      getField(body, "senderNodeId", "sendernodeid") || conversation.peerNodeId,
+    ).trim();
     conversation.maxBotReplies = clampInt(
       getField(body, "maxBotReplies", "maxbotreplies"),
       conversation.maxBotReplies,
@@ -711,6 +1448,18 @@ class BotNetManager {
       ),
     );
     conversation.status = "active";
+
+    if (conversation.transportMode === "online-hub") {
+      this.hubSession = sanitizeHubSession({
+        ...this.hubSession,
+        linkId: conversation.linkId || this.hubSession.linkId,
+        peerNodeId: conversation.peerNodeId || this.hubSession.peerNodeId,
+        peerHandle:
+          String(getField(body, "senderBotName", "senderbotname") || this.hubSession.peerHandle).trim(),
+        peerOnline: true,
+      });
+    }
+
     this.addMessage(
       conversation,
       makeMessage(

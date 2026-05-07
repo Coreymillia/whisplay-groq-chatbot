@@ -114,6 +114,55 @@
               </div>
             </div>
             <div class="settings-field">
+              <label class="field-label" for="botNetTransportSelect">BotNet transport</label>
+              <select class="settings-select" id="botNetTransportSelect">
+                <option value="lan-direct">LAN Direct</option>
+                <option value="online-hub">Online Hub</option>
+              </select>
+              <div class="field-hint" id="botNetTransportHint">
+                LAN Direct talks straight to a saved peer URL on your local network.
+              </div>
+            </div>
+            <div class="settings-field">
+              <label class="field-label" for="botNetNodeHandleInput">Node Handle</label>
+              <input
+                class="settings-input"
+                id="botNetNodeHandleInput"
+                type="text"
+                placeholder="Whisplay Bot"
+                autocomplete="off"
+              />
+              <div class="field-hint">
+                Public-facing node name for hub registration and later friend features.
+              </div>
+            </div>
+            <div class="settings-field settings-field-wide" id="botNetHubUrlWrap">
+              <label class="field-label" for="botNetHubUrlInput">Hub URL</label>
+              <input
+                class="settings-input"
+                id="botNetHubUrlInput"
+                type="text"
+                placeholder="https://your-botnet-hub.example"
+                autocomplete="off"
+              />
+              <div class="field-hint">
+                Used for hub registration plus the secure WebSocket relay session in online mode.
+              </div>
+            </div>
+            <div class="settings-field" id="botNetInviteCodeWrap">
+              <label class="field-label" for="botNetInviteCodeInput">Invite Code</label>
+              <input
+                class="settings-input"
+                id="botNetInviteCodeInput"
+                type="text"
+                placeholder="Paste invite code to pair"
+                autocomplete="off"
+              />
+              <div class="field-hint">
+                Create one on the first node, then paste it here on the second node to pair them.
+              </div>
+            </div>
+            <div class="settings-field" id="botNetPeerUrlWrap">
               <label class="field-label" for="botNetPeerUrlInput">Connect to Bot</label>
               <input
                 class="settings-input"
@@ -126,7 +175,7 @@
                 Use the GroqBotNet peer URL on your Pi Zero or another Whisplay node.
               </div>
             </div>
-            <div class="settings-field">
+            <div class="settings-field" id="botNetPublicUrlWrap">
               <label class="field-label" for="botNetPublicUrlInput">This Bot URL</label>
               <input
                 class="settings-input"
@@ -174,6 +223,11 @@
               <div class="settings-actions settings-actions-wrap">
                 <button class="button compact" id="botNetSaveBtn" type="button">Save BotNet</button>
                 <button class="button secondary compact" id="botNetTestBtn" type="button">Test Connection</button>
+                <button class="button secondary compact" id="botNetRegisterBtn" type="button">Register Node</button>
+                <button class="button secondary compact" id="botNetConnectBtn" type="button">Connect Hub</button>
+                <button class="button secondary compact" id="botNetInviteBtn" type="button">Create Invite</button>
+                <button class="button secondary compact" id="botNetRedeemBtn" type="button">Redeem Invite</button>
+                <button class="button secondary compact" id="botNetDisconnectBtn" type="button">Disconnect Hub</button>
                 <button class="button secondary compact" id="botNetStartBtn" type="button">Start Bot Conversation</button>
                 <button class="button secondary compact" id="botNetPeerStartBtn" type="button">Ask Peer to Start</button>
                 <button class="button secondary compact" id="botNetStopBtn" type="button">Stop Conversation</button>

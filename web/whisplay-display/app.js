@@ -66,14 +66,28 @@ const settingsStatus = document.getElementById("settingsStatus");
 const botNetEnabledCheckbox = document.getElementById("botNetEnabledCheckbox");
 const botNetModeSelect = document.getElementById("botNetModeSelect");
 const botNetModeHint = document.getElementById("botNetModeHint");
+const botNetTransportSelect = document.getElementById("botNetTransportSelect");
+const botNetTransportHint = document.getElementById("botNetTransportHint");
+const botNetNodeHandleInput = document.getElementById("botNetNodeHandleInput");
+const botNetHubUrlInput = document.getElementById("botNetHubUrlInput");
+const botNetHubUrlWrap = document.getElementById("botNetHubUrlWrap");
+const botNetInviteCodeInput = document.getElementById("botNetInviteCodeInput");
+const botNetInviteCodeWrap = document.getElementById("botNetInviteCodeWrap");
 const botNetPeerUrlInput = document.getElementById("botNetPeerUrlInput");
 const botNetPublicUrlInput = document.getElementById("botNetPublicUrlInput");
+const botNetPeerUrlWrap = document.getElementById("botNetPeerUrlWrap");
+const botNetPublicUrlWrap = document.getElementById("botNetPublicUrlWrap");
 const botNetMaxRepliesInput = document.getElementById("botNetMaxRepliesInput");
 const botNetReplyDelayInput = document.getElementById("botNetReplyDelayInput");
 const botNetTopicInput = document.getElementById("botNetTopicInput");
 const botNetTopicLabel = document.getElementById("botNetTopicLabel");
 const botNetSaveBtn = document.getElementById("botNetSaveBtn");
 const botNetTestBtn = document.getElementById("botNetTestBtn");
+const botNetRegisterBtn = document.getElementById("botNetRegisterBtn");
+const botNetConnectBtn = document.getElementById("botNetConnectBtn");
+const botNetInviteBtn = document.getElementById("botNetInviteBtn");
+const botNetRedeemBtn = document.getElementById("botNetRedeemBtn");
+const botNetDisconnectBtn = document.getElementById("botNetDisconnectBtn");
 const botNetStartBtn = document.getElementById("botNetStartBtn");
 const botNetPeerStartBtn = document.getElementById("botNetPeerStartBtn");
 const botNetStopBtn = document.getElementById("botNetStopBtn");
@@ -124,6 +138,41 @@ function setBotNetStatus(message, isError = false) {
   if (!botNetStatus) return;
   botNetStatus.textContent = message;
   botNetStatus.style.color = isError ? "#ff7b7b" : "";
+}
+
+function updateBotNetTransportUi(transportMode) {
+  const currentTransport = transportMode === "online-hub" ? "online-hub" : "lan-direct";
+  if (botNetTransportSelect) {
+    botNetTransportSelect.value = currentTransport;
+  }
+  if (botNetTransportHint) {
+    botNetTransportHint.textContent =
+      currentTransport === "online-hub"
+        ? "Online Hub keeps an outbound secure session to the hosted hub and uses relay delivery when needed."
+        : "LAN Direct talks straight to a saved peer URL on your local network.";
+  }
+  if (botNetHubUrlWrap) {
+    botNetHubUrlWrap.style.display = currentTransport === "online-hub" ? "block" : "none";
+  }
+  if (botNetInviteCodeWrap) {
+    botNetInviteCodeWrap.style.display = currentTransport === "online-hub" ? "block" : "none";
+  }
+  if (botNetPeerUrlWrap) {
+    botNetPeerUrlWrap.style.display = currentTransport === "lan-direct" ? "block" : "none";
+  }
+  if (botNetPublicUrlWrap) {
+    botNetPublicUrlWrap.style.display = currentTransport === "lan-direct" ? "block" : "none";
+  }
+  if (botNetTestBtn) {
+    botNetTestBtn.textContent =
+      currentTransport === "online-hub" ? "Test Hub" : "Test Connection";
+  }
+  if (botNetInviteBtn) {
+    botNetInviteBtn.disabled = currentTransport !== "online-hub";
+  }
+  if (botNetRedeemBtn) {
+    botNetRedeemBtn.disabled = currentTransport !== "online-hub";
+  }
 }
 
 function updateBotNetModeUi(mode) {
@@ -188,8 +237,15 @@ function applyBotNetSettings(settings, force = false) {
     return;
   }
   updateBotNetModeUi(settings.botnetMode || "auto-bot");
+  updateBotNetTransportUi(settings.transportMode || "lan-direct");
   if (botNetEnabledCheckbox) {
     botNetEnabledCheckbox.checked = Boolean(settings.enabled);
+  }
+  if (botNetNodeHandleInput) {
+    botNetNodeHandleInput.value = settings.nodeHandle || "Whisplay Bot";
+  }
+  if (botNetHubUrlInput) {
+    botNetHubUrlInput.value = settings.hubUrl || "";
   }
   if (botNetPeerUrlInput) {
     botNetPeerUrlInput.value = settings.peerUrl || "";
@@ -214,6 +270,7 @@ function applyBotNetSettings(settings, force = false) {
 function applyBotNetState(state, forceSettings = false) {
   botNetState = state || null;
   const settings = state?.settings || {};
+  const online = state?.online || null;
   if (!botNetSettingsLoaded || forceSettings) {
     applyBotNetSettings(settings, true);
   } else {
@@ -225,10 +282,14 @@ function applyBotNetState(state, forceSettings = false) {
   const fallbackConversation =
     activeConversation || (Array.isArray(state?.conversations) ? state.conversations[0] : null);
   const connectionStatus = state?.connectionStatus || "Disconnected";
+  const onlineSuffix =
+    online && settings.transportMode === "online-hub"
+      ? ` • ${online.nodeId ? `Node ${online.nodeId}` : "Unregistered"}${online.linkId ? ` • Link ${online.linkId}` : ""}`
+      : "";
   setBotNetStatus(
     activeConversation
       ? `Active • ${connectionStatus} • ${activeConversation.topic || "Conversation"}`
-      : `${connectionStatus}${settings.enabled ? "" : " • BotNet mode is off"}`,
+      : `${connectionStatus}${settings.enabled ? "" : " • BotNet mode is off"}${onlineSuffix}`,
   );
   renderBotNetTranscript(fallbackConversation);
 }
@@ -251,6 +312,9 @@ async function saveBotNetSettings(showSavedStatus = true) {
   const body = {
     enabled: Boolean(botNetEnabledCheckbox?.checked),
     botnetMode: botNetModeSelect?.value || "auto-bot",
+    transportMode: botNetTransportSelect?.value || "lan-direct",
+    nodeHandle: (botNetNodeHandleInput?.value || "Whisplay Bot").trim(),
+    hubUrl: (botNetHubUrlInput?.value || "").trim(),
     peerUrl: (botNetPeerUrlInput?.value || "").trim(),
     publicUrl: (botNetPublicUrlInput?.value || "").trim(),
     maxBotReplies: parseInt(botNetMaxRepliesInput?.value || "8", 10),
@@ -285,13 +349,21 @@ async function saveBotNetSettings(showSavedStatus = true) {
 }
 
 async function testBotNetConnection() {
+  const transportMode = botNetTransportSelect?.value || "lan-direct";
   const peerUrl = (botNetPeerUrlInput?.value || "").trim();
-  if (!peerUrl) {
+  const hubUrl = (botNetHubUrlInput?.value || "").trim();
+  if (transportMode === "online-hub" && !hubUrl) {
+    setBotNetStatus("Set Hub URL first.", true);
+    return;
+  }
+  if (transportMode !== "online-hub" && !peerUrl) {
     setBotNetStatus("Set Connect to Bot first.", true);
     return;
   }
   try {
-    setBotNetStatus("Testing peer connection...");
+    setBotNetStatus(
+      transportMode === "online-hub" ? "Testing hub connection..." : "Testing peer connection...",
+    );
     await saveBotNetSettings(false);
     const response = await fetch("/api/botnet/test", { method: "POST" });
     const payload = await response.json();
@@ -310,6 +382,22 @@ async function testBotNetConnection() {
 }
 
 function validateBotNetConversationSetup() {
+  const transportMode = botNetTransportSelect?.value || "lan-direct";
+  if (transportMode === "online-hub") {
+    if (!botNetState?.online?.registered) {
+      setBotNetStatus("Register this node with the hub first.", true);
+      return false;
+    }
+    if (!botNetState?.online?.connected) {
+      setBotNetStatus("Connect the hub relay session first.", true);
+      return false;
+    }
+    if (!botNetState?.online?.linkId || !botNetState?.online?.peerNodeId) {
+      setBotNetStatus("No online peer link is active yet.", true);
+      return false;
+    }
+    return true;
+  }
   const peerUrl = (botNetPeerUrlInput?.value || "").trim();
   if (!peerUrl) {
     setBotNetStatus("Set Connect to Bot first.", true);
@@ -321,6 +409,121 @@ function validateBotNetConversationSetup() {
     return false;
   }
   return true;
+}
+
+async function registerBotNetNode() {
+  try {
+    setBotNetStatus("Registering this Whisplay node with the hub...");
+    await saveBotNetSettings(false);
+    const response = await fetch("/api/botnet/register", { method: "POST" });
+    const payload = await response.json();
+    if (!response.ok || payload.ok === false) {
+      throw new Error(payload.error || `HTTP ${response.status}`);
+    }
+    await loadBotNetState();
+    setBotNetStatus("Whisplay node registered with the hub.");
+  } catch (error) {
+    console.error("Failed to register Whisplay node:", error);
+    setBotNetStatus(
+      error instanceof Error ? error.message : "Failed to register Whisplay node.",
+      true,
+    );
+  }
+}
+
+async function connectBotNetHub() {
+  try {
+    setBotNetStatus("Connecting the Whisplay hub relay session...");
+    await saveBotNetSettings(false);
+    const response = await fetch("/api/botnet/connect", { method: "POST" });
+    const payload = await response.json();
+    if (!response.ok || payload.ok === false) {
+      throw new Error(payload.error || `HTTP ${response.status}`);
+    }
+    await loadBotNetState();
+    setBotNetStatus("Whisplay is connected to the BotNet hub.");
+  } catch (error) {
+    console.error("Failed to connect Whisplay hub session:", error);
+    setBotNetStatus(
+      error instanceof Error ? error.message : "Failed to connect the hub session.",
+      true,
+    );
+  }
+}
+
+async function disconnectBotNetHub() {
+  try {
+    setBotNetStatus("Disconnecting the Whisplay hub relay session...");
+    const response = await fetch("/api/botnet/disconnect", { method: "POST" });
+    const payload = await response.json();
+    if (!response.ok || payload.ok === false) {
+      throw new Error(payload.error || `HTTP ${response.status}`);
+    }
+    await loadBotNetState();
+    setBotNetStatus("Whisplay hub relay session disconnected.");
+  } catch (error) {
+    console.error("Failed to disconnect Whisplay hub session:", error);
+    setBotNetStatus(
+      error instanceof Error ? error.message : "Failed to disconnect the hub session.",
+      true,
+    );
+  }
+}
+
+async function createBotNetInvite() {
+  try {
+    setBotNetStatus("Creating a BotNet invite...");
+    await saveBotNetSettings(false);
+    const response = await fetch("/api/botnet/invite", { method: "POST" });
+    const payload = await response.json();
+    if (!response.ok || payload.ok === false) {
+      throw new Error(payload.error || `HTTP ${response.status}`);
+    }
+    if (botNetInviteCodeInput) {
+      botNetInviteCodeInput.value = payload.invite?.inviteCode || "";
+    }
+    await loadBotNetState();
+    setBotNetStatus(
+      payload.invite?.inviteCode
+        ? `Invite created: ${payload.invite.inviteCode}`
+        : "BotNet invite created.",
+    );
+  } catch (error) {
+    console.error("Failed to create BotNet invite:", error);
+    setBotNetStatus(
+      error instanceof Error ? error.message : "Failed to create a BotNet invite.",
+      true,
+    );
+  }
+}
+
+async function redeemBotNetInvite() {
+  const inviteCode = (botNetInviteCodeInput?.value || "").trim().toUpperCase();
+  if (!inviteCode) {
+    setBotNetStatus("Paste an invite code first.", true);
+    return;
+  }
+  try {
+    setBotNetStatus("Redeeming BotNet invite...");
+    await saveBotNetSettings(false);
+    const response = await fetch("/api/botnet/redeem", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ inviteCode }),
+    });
+    const payload = await response.json();
+    if (!response.ok || payload.ok === false) {
+      throw new Error(payload.error || `HTTP ${response.status}`);
+    }
+    await loadBotNetState();
+    setBotNetStatus("BotNet invite redeemed. Peer link is ready.");
+  } catch (error) {
+    console.error("Failed to redeem BotNet invite:", error);
+    setBotNetStatus(
+      error instanceof Error ? error.message : "Failed to redeem the BotNet invite.",
+      true,
+    );
+  }
 }
 
 async function startBotNetConversation(starter = "self") {
@@ -1627,6 +1830,9 @@ if (botNetSaveBtn) {
 [
   botNetEnabledCheckbox,
   botNetModeSelect,
+  botNetTransportSelect,
+  botNetNodeHandleInput,
+  botNetHubUrlInput,
   botNetPeerUrlInput,
   botNetPublicUrlInput,
   botNetMaxRepliesInput,
@@ -1640,9 +1846,45 @@ if (botNetSaveBtn) {
   });
 });
 
+if (botNetTransportSelect) {
+  botNetTransportSelect.addEventListener("change", () => {
+    updateBotNetTransportUi(botNetTransportSelect.value || "lan-direct");
+  });
+}
+
 if (botNetTestBtn) {
   botNetTestBtn.addEventListener("click", () => {
     testBotNetConnection();
+  });
+}
+
+if (botNetRegisterBtn) {
+  botNetRegisterBtn.addEventListener("click", () => {
+    registerBotNetNode();
+  });
+}
+
+if (botNetConnectBtn) {
+  botNetConnectBtn.addEventListener("click", () => {
+    connectBotNetHub();
+  });
+}
+
+if (botNetInviteBtn) {
+  botNetInviteBtn.addEventListener("click", () => {
+    createBotNetInvite();
+  });
+}
+
+if (botNetRedeemBtn) {
+  botNetRedeemBtn.addEventListener("click", () => {
+    redeemBotNetInvite();
+  });
+}
+
+if (botNetDisconnectBtn) {
+  botNetDisconnectBtn.addEventListener("click", () => {
+    disconnectBotNetHub();
   });
 }
 

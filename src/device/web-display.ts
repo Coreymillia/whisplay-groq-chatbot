@@ -617,8 +617,14 @@ export class WebDisplayServer implements WebAudioBridgeServer {
         ok: true,
         settings: this.botNet.saveSettings({
           enabled: getBodyBoolean(body, "enabled"),
+          transportMode:
+            getBodyString(body, "transportMode") === "online-hub"
+              ? "online-hub"
+              : "lan-direct",
           peerUrl: getBodyString(body, "peerUrl"),
           publicUrl: getBodyString(body, "publicUrl"),
+          hubUrl: getBodyString(body, "hubUrl"),
+          nodeHandle: getBodyString(body, "nodeHandle"),
           botnetMode:
             getBodyString(body, "botnetMode") === "persona-relay"
               ? "persona-relay"
@@ -631,6 +637,78 @@ export class WebDisplayServer implements WebAudioBridgeServer {
 
     this.router.post("/api/botnet/test", async (ctx) => {
       ctx.body = await this.botNet.testPeer();
+    });
+
+    this.router.post("/api/botnet/register", async (ctx) => {
+      try {
+        ctx.body = {
+          ok: true,
+          online: await this.botNet.registerWithHub(),
+        };
+      } catch (error) {
+        ctx.status = 400;
+        ctx.body = {
+          ok: false,
+          error:
+            error instanceof Error ? error.message : "Failed to register with the BotNet hub.",
+        };
+      }
+    });
+
+    this.router.post("/api/botnet/connect", async (ctx) => {
+      try {
+        ctx.body = {
+          ok: true,
+          online: await this.botNet.connectHub(),
+        };
+      } catch (error) {
+        ctx.status = 400;
+        ctx.body = {
+          ok: false,
+          error:
+            error instanceof Error ? error.message : "Failed to connect to the BotNet hub.",
+        };
+      }
+    });
+
+    this.router.post("/api/botnet/invite", async (ctx) => {
+      try {
+        ctx.body = {
+          ok: true,
+          invite: await this.botNet.createHubInvite(),
+        };
+      } catch (error) {
+        ctx.status = 400;
+        ctx.body = {
+          ok: false,
+          error:
+            error instanceof Error ? error.message : "Failed to create a BotNet invite.",
+        };
+      }
+    });
+
+    this.router.post("/api/botnet/redeem", async (ctx) => {
+      try {
+        const body = normalizeRequestBody((ctx.request as any).body);
+        ctx.body = {
+          ok: true,
+          online: await this.botNet.redeemHubInvite(getBodyString(body, "inviteCode") || ""),
+        };
+      } catch (error) {
+        ctx.status = 400;
+        ctx.body = {
+          ok: false,
+          error:
+            error instanceof Error ? error.message : "Failed to redeem a BotNet invite.",
+        };
+      }
+    });
+
+    this.router.post("/api/botnet/disconnect", (ctx) => {
+      ctx.body = {
+        ok: true,
+        online: this.botNet.disconnectHub(),
+      };
     });
 
     this.router.post("/api/botnet/start", async (ctx) => {

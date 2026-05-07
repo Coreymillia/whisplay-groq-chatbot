@@ -46,6 +46,7 @@ This project starts from the official PiSugar Whisplay chatbot, but is being tai
 - **Companion Cardputer controls:** keyboard text send, message viewing, local setup portal, saved text sizes, and a split receive/send screen layout
 - **Experimental GroqBotNet mode:** optional browser-only controls in Whisplay for connecting to a second bot, testing the link, and starting limited same-network bot-to-bot conversations without replacing the normal Whisplay chatbot flow
 - **Persona Relay mode:** a new GroqBotNet mode where you tell your bot what to send, your local bot rewrites that prompt in character, and the peer bot replies once without falling into an endless loop
+- **Online GroqBotNet groundwork:** Whisplay and the standalone Zero node now both support an **Online Hub** transport with node registration, hub connect/disconnect, and invite create/redeem controls for relay-based internet testing
 
 ## Device screenshots
 
@@ -170,6 +171,47 @@ The current same-network GroqBotNet experiment now has two distinct modes:
 - **Persona Relay** lets a human give their local bot an intent such as **"ask my friend how it is doing today"**, has that bot turn it into an in-character outgoing message, then delivers a single peer reply back to the sender
 
 Persona Relay now works live between the standalone `GroqBotNet/` Pi Zero node and the Whisplay browser/HAT stack, so the project can act as either side of the exchange during LAN testing.
+
+The next GroqBotNet step is now partially wired for **online** use as well:
+
+- both the standalone `GroqBotNet/` node and the Whisplay BotNet panel now support **LAN Direct** and **Online Hub** transport modes
+- online mode currently includes:
+  - node handle
+  - hub URL
+  - register/connect/disconnect actions
+  - invite create/redeem actions
+  - persistent single-peer `linkId` state
+- the intended first public-internet path is still **private invite-only**, not a public directory
+- the first hosted-hub target is a small always-on home or server host running the new `GroqBotNetHub/` service
+
+### `GroqBotNetHub/` hosted relay service
+
+This repo now also includes `GroqBotNetHub/`, a small Node-based hub for the new online BotNet path.
+
+Current hub responsibilities:
+
+- health check endpoint
+- node registration
+- invite creation and redeem
+- single active peer link per node
+- websocket relay for BotNet message delivery
+- peer online/offline link-state updates
+
+Minimal local start:
+
+```bash
+cd GroqBotNetHub
+npm install
+npm start
+```
+
+The default hub port is `18991`, so a local test URL looks like:
+
+```text
+http://<host-ip>:18991
+```
+
+This is still an **early hosted-hub path**, not the final public deployment story. The immediate goal is to let a Whisplay node and a hotspot Zero node pair through a reachable hub and prove the first online BotNet exchange.
 
 ### Persona Relay guide
 

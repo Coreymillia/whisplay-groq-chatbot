@@ -2,6 +2,7 @@ const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
+const { BotNetHubTransport, DEFAULT_SESSION, sanitizeSession, normalizeUrl } = require("./online-transport");
 
 const PORT = Number.parseInt(process.env.PORT || "18990", 10);
 const HOST = process.env.HOST || "0.0.0.0";
@@ -11,15 +12,20 @@ const DATA_DIR = path.resolve(process.env.GROQBOTNET_DATA_DIR || path.join(ROOT_
 const SETTINGS_PATH = path.join(DATA_DIR, "settings.json");
 const CONVERSATIONS_PATH = path.join(DATA_DIR, "conversations.json");
 const STATE_PATH = path.join(DATA_DIR, "state.json");
+const HUB_SESSION_PATH = path.join(DATA_DIR, "botnet-hub-session.json");
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
 
 const DEFAULT_SETTINGS = {
+  enabled: true,
   botName: "GroqBotNet Bot",
   botnetMode: "persona-relay",
   model: "llama-3.1-8b-instant",
+  transportMode: "lan-direct",
   publicBaseUrl: "",
   peerUrl: "",
+  hubUrl: "",
+  nodeHandle: "GroqBotNet Bot",
   personalityPrompt:
     "You are a concise, imaginative chatbot talking to another chatbot. Stay in character, be conversational, and keep replies reasonably short.",
   memoryTurns: 12,
@@ -59,12 +65,8 @@ function normalizeBotnetMode(value) {
   return value === "auto-bot" ? "auto-bot" : "persona-relay";
 }
 
-function normalizeUrl(value) {
-  const trimmed = String(value || "").trim();
-  if (!trimmed) {
-    return "";
-  }
-  return trimmed.replace(/\/+$/, "");
+function normalizeTransportMode(value) {
+  return value === "online-hub" ? "online-hub" : "lan-direct";
 }
 
 function loadSettings() {
@@ -72,9 +74,13 @@ function loadSettings() {
   return {
     ...DEFAULT_SETTINGS,
     ...loaded,
+    enabled: loaded.enabled !== false,
     botnetMode: normalizeBotnetMode(loaded.botnetMode || DEFAULT_SETTINGS.botnetMode),
+    transportMode: normalizeTransportMode(loaded.transportMode || DEFAULT_SETTINGS.transportMode),
     publicBaseUrl: normalizeUrl(loaded.publicBaseUrl || DEFAULT_SETTINGS.publicBaseUrl),
     peerUrl: normalizeUrl(loaded.peerUrl || DEFAULT_SETTINGS.peerUrl),
+    hubUrl: normalizeUrl(loaded.hubUrl || DEFAULT_SETTINGS.hubUrl),
+    nodeHandle: String(loaded.nodeHandle || loaded.botName || DEFAULT_SETTINGS.nodeHandle).trim() || DEFAULT_SETTINGS.nodeHandle,
     memoryTurns: normalizePositiveInt(loaded.memoryTurns, DEFAULT_SETTINGS.memoryTurns, 1, 50),
     replyDelaySec: normalizePositiveInt(loaded.replyDelaySec, DEFAULT_SETTINGS.replyDelaySec, 0, 3600),
     maxBotReplies: normalizePositiveInt(loaded.maxBotReplies, DEFAULT_SETTINGS.maxBotReplies, 0, 200),
@@ -90,11 +96,15 @@ function loadSettings() {
 function sanitizeSettingsUpdate(body, currentSettings) {
   return {
     ...currentSettings,
+    enabled: body.enabled !== false && body.enabled !== "false",
     botName: String(body.botName || currentSettings.botName).trim() || currentSettings.botName,
     botnetMode: normalizeBotnetMode(body.botnetMode || currentSettings.botnetMode),
     model: String(body.model || currentSettings.model).trim() || currentSettings.model,
+    transportMode: normalizeTransportMode(body.transportMode || currentSettings.transportMode),
     publicBaseUrl: normalizeUrl(body.publicBaseUrl ?? currentSettings.publicBaseUrl),
     peerUrl: normalizeUrl(body.peerUrl ?? currentSettings.peerUrl),
+    hubUrl: normalizeUrl(body.hubUrl ?? currentSettings.hubUrl),
+    nodeHandle: String(body.nodeHandle || currentSettings.nodeHandle).trim() || currentSettings.nodeHandle,
     personalityPrompt:
       String(body.personalityPrompt || currentSettings.personalityPrompt).trim() ||
       currentSettings.personalityPrompt,
@@ -120,6 +130,7 @@ let runtimeState = {
   ...DEFAULT_STATE,
   ...readJson(STATE_PATH, DEFAULT_STATE),
 };
+let hubSession = sanitizeSession(readJson(HUB_SESSION_PATH, DEFAULT_SESSION));
 
 function saveSettings() {
   writeJson(SETTINGS_PATH, settings);
@@ -133,6 +144,10 @@ function saveRuntimeState() {
   writeJson(STATE_PATH, runtimeState);
 }
 
+function saveHubSession() {
+  writeJson(HUB_SESSION_PATH, hubSession);
+}
+
 function getPublicSettings() {
   return {
     ...settings,
@@ -140,6 +155,17 @@ function getPublicSettings() {
     groqApiKey: "",
   };
 }
+
+const hubTransport = new BotNetHubTransport({
+  getSettings: () => settings,
+  getSession: () => hubSession,
+  setSession: (nextSession) => {
+    hubSession = sanitizeSession(nextSession);
+    saveHubSession();
+  },
+  onPeerStart: async (payload) => handlePeerStart(payload),
+  onPeerMessage: async (payload) => handlePeerMessage(payload),
+});
 
 function nowIso() {
   return new Date().toISOString();
@@ -156,7 +182,16 @@ function makeMessage({ speakerType, speakerName, text, kind = "message" }) {
   };
 }
 
-function makeConversation({ topic, peerUrl, starter, mode = "botnet", botnetMode = settings.botnetMode }) {
+function makeConversation({
+  topic,
+  peerUrl,
+  starter,
+  mode = "botnet",
+  botnetMode = settings.botnetMode,
+  transportMode = settings.transportMode,
+  linkId = "",
+  peerNodeId = "",
+}) {
   const createdAt = nowIso();
   return {
     id: crypto.randomUUID(),
@@ -167,7 +202,10 @@ function makeConversation({ topic, peerUrl, starter, mode = "botnet", botnetMode
     starter,
     mode,
     botnetMode: mode === "botnet" ? normalizeBotnetMode(botnetMode) : undefined,
+    transportMode: mode === "botnet" ? normalizeTransportMode(transportMode) : undefined,
     peerUrl: normalizeUrl(peerUrl || settings.peerUrl),
+    linkId: String(linkId || "").trim(),
+    peerNodeId: String(peerNodeId || "").trim(),
     maxBotReplies: settings.maxBotReplies,
     replyCount: 0,
     messages: [],
@@ -196,6 +234,10 @@ function getLatestActiveBotnetConversation() {
 
 function isAutoBotConversation(conversation) {
   return normalizeBotnetMode(conversation?.botnetMode) === "auto-bot";
+}
+
+function isOnlineConversation(conversation) {
+  return normalizeTransportMode(conversation?.transportMode || settings.transportMode) === "online-hub";
 }
 
 function touchConversation(conversation) {
@@ -349,6 +391,14 @@ async function callGroq(messages) {
 }
 
 async function sendToPeer(conversation, payload) {
+  if (isOnlineConversation(conversation)) {
+    await hubTransport.sendEvent(
+      payload.type === "start" ? "botnet.peer-start" : "botnet.peer-message",
+      conversation,
+      payload,
+    );
+    return;
+  }
   const peerUrl = normalizeUrl(conversation.peerUrl || settings.peerUrl);
   if (!peerUrl) {
     throw new Error("Peer URL is not configured.");
@@ -473,6 +523,9 @@ async function startLocalConversation(topic) {
     starter: "self",
     mode: "botnet",
     botnetMode: "auto-bot",
+    transportMode: settings.transportMode,
+    linkId: hubSession.linkId,
+    peerNodeId: hubSession.peerNodeId,
   });
   conversations.unshift(conversation);
   saveConversations();
@@ -496,6 +549,9 @@ async function requestPeerStart(topic) {
     starter: "peer",
     mode: "botnet",
     botnetMode: "auto-bot",
+    transportMode: settings.transportMode,
+    linkId: hubSession.linkId,
+    peerNodeId: hubSession.peerNodeId,
   });
   conversations.unshift(conversation);
   saveConversations();
@@ -570,7 +626,7 @@ async function handlePersonaRelayPrompt(body) {
     !conversation ||
     conversation.mode !== "botnet" ||
     conversation.status !== "active" ||
-    !conversation.peerUrl ||
+    (!isOnlineConversation(conversation) && !conversation.peerUrl) ||
     isAutoBotConversation(conversation)
   ) {
     const topic = prompt.length > 72 ? `${prompt.slice(0, 72)}...` : prompt;
@@ -580,12 +636,22 @@ async function handlePersonaRelayPrompt(body) {
       starter: "self",
       mode: "botnet",
       botnetMode: "persona-relay",
+      transportMode: settings.transportMode,
+      linkId: hubSession.linkId,
+      peerNodeId: hubSession.peerNodeId,
     });
     conversations.unshift(conversation);
     saveConversations();
   }
 
-  if (!normalizeUrl(conversation.peerUrl || settings.peerUrl)) {
+  if (isOnlineConversation(conversation)) {
+    if (!hubTransport.getPublicState().connected) {
+      throw new Error("Connect to the hub before sending an online message.");
+    }
+    if (!String(conversation.linkId || hubSession.linkId || "").trim()) {
+      throw new Error("No online peer link is active yet.");
+    }
+  } else if (!normalizeUrl(conversation.peerUrl || settings.peerUrl)) {
     throw new Error("Peer URL is not configured.");
   }
 
@@ -595,6 +661,9 @@ async function handlePersonaRelayPrompt(body) {
 
 async function handlePeerStart(body) {
   const conversationId = String(body.conversationId || "").trim() || crypto.randomUUID();
+  const transportMode = normalizeTransportMode(
+    body.transportMode || (body.senderNodeId ? "online-hub" : settings.transportMode),
+  );
   let conversation = findConversation(conversationId);
   if (!conversation) {
     conversation = {
@@ -606,7 +675,10 @@ async function handlePeerStart(body) {
       starter: "peer",
       mode: "botnet",
       botnetMode: normalizeBotnetMode(body.botnetMode || "auto-bot"),
+      transportMode,
       peerUrl: normalizeUrl(body.senderUrl || settings.peerUrl),
+      linkId: String(body.linkId || hubSession.linkId || "").trim(),
+      peerNodeId: String(body.senderNodeId || body.peerNodeId || hubSession.peerNodeId || "").trim(),
       maxBotReplies: normalizePositiveInt(body.maxBotReplies, settings.maxBotReplies, 0, 200),
       replyCount: normalizePositiveInt(body.replyCount, 0, 0, 200),
       messages: [],
@@ -616,6 +688,22 @@ async function handlePeerStart(body) {
   }
 
   conversation.botnetMode = normalizeBotnetMode(body.botnetMode || conversation.botnetMode);
+  conversation.transportMode = transportMode;
+  conversation.linkId = String(body.linkId || conversation.linkId || hubSession.linkId || "").trim();
+  conversation.peerNodeId = String(
+    body.senderNodeId || body.peerNodeId || conversation.peerNodeId || hubSession.peerNodeId || "",
+  ).trim();
+  if (transportMode === "online-hub") {
+    hubSession = sanitizeSession({
+      ...hubSession,
+      linkId: conversation.linkId,
+      peerNodeId: conversation.peerNodeId,
+      peerHandle: String(body.senderBotName || hubSession.peerHandle || "").trim(),
+      peerOnline: true,
+      lastError: "",
+    });
+    saveHubSession();
+  }
   addEvent(conversation, `Peer ${body.senderBotName || "bot"} requested a new conversation.`);
   if (!isAutoBotConversation(conversation)) {
     return;
@@ -631,6 +719,9 @@ async function handlePeerMessage(body) {
   if (!conversationId) {
     throw new Error("Missing conversationId.");
   }
+  const transportMode = normalizeTransportMode(
+    body.transportMode || (body.senderNodeId ? "online-hub" : settings.transportMode),
+  );
 
   let conversation = findConversation(conversationId);
   if (!conversation) {
@@ -643,7 +734,10 @@ async function handlePeerMessage(body) {
       starter: "peer",
       mode: "botnet",
       botnetMode: normalizeBotnetMode(body.botnetMode || settings.botnetMode),
+      transportMode,
       peerUrl: normalizeUrl(body.senderUrl || settings.peerUrl),
+      linkId: String(body.linkId || hubSession.linkId || "").trim(),
+      peerNodeId: String(body.senderNodeId || body.peerNodeId || hubSession.peerNodeId || "").trim(),
       maxBotReplies: normalizePositiveInt(body.maxBotReplies, settings.maxBotReplies, 0, 200),
       replyCount: 0,
       messages: [],
@@ -652,7 +746,12 @@ async function handlePeerMessage(body) {
   }
 
   conversation.botnetMode = normalizeBotnetMode(body.botnetMode || conversation.botnetMode);
+  conversation.transportMode = transportMode;
   conversation.peerUrl = normalizeUrl(body.senderUrl || conversation.peerUrl || settings.peerUrl);
+  conversation.linkId = String(body.linkId || conversation.linkId || hubSession.linkId || "").trim();
+  conversation.peerNodeId = String(
+    body.senderNodeId || body.peerNodeId || conversation.peerNodeId || hubSession.peerNodeId || "",
+  ).trim();
   conversation.maxBotReplies = normalizePositiveInt(
     body.maxBotReplies,
     conversation.maxBotReplies || settings.maxBotReplies,
@@ -663,6 +762,17 @@ async function handlePeerMessage(body) {
     normalizePositiveInt(body.replyCount, 0, 0, 200),
     conversation.replyCount || 0,
   );
+  if (transportMode === "online-hub") {
+    hubSession = sanitizeSession({
+      ...hubSession,
+      linkId: conversation.linkId,
+      peerNodeId: conversation.peerNodeId,
+      peerHandle: String(body.senderBotName || hubSession.peerHandle || "").trim(),
+      peerOnline: true,
+      lastError: "",
+    });
+    saveHubSession();
+  }
 
   addMessage(
     conversation,
@@ -809,6 +919,7 @@ function serveStatic(req, res) {
 function getStatePayload() {
   return {
     settings: getPublicSettings(),
+    online: hubTransport.getPublicState(),
     conversations,
     stats: {
       requestsUsedThisHour: runtimeState.requestTimestamps.filter(
@@ -836,6 +947,9 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "POST" && url.pathname === "/api/settings") {
       const body = await readBody(req);
       settings = sanitizeSettingsUpdate(body, settings);
+      if (settings.transportMode !== "online-hub") {
+        hubTransport.disconnect();
+      }
       saveSettings();
       sendJson(res, 200, { ok: true, settings: getPublicSettings() });
       return;
@@ -892,6 +1006,43 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (req.method === "POST" && url.pathname === "/api/botnet/test") {
+      const result = await hubTransport.test();
+      sendJson(res, 200, { ok: true, result, ...getStatePayload() });
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/botnet/register") {
+      await hubTransport.register();
+      sendJson(res, 200, { ok: true, ...getStatePayload() });
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/botnet/connect") {
+      await hubTransport.connect();
+      sendJson(res, 200, { ok: true, ...getStatePayload() });
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/botnet/invite") {
+      const invite = await hubTransport.createInvite();
+      sendJson(res, 200, { ok: true, invite, ...getStatePayload() });
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/botnet/redeem") {
+      const body = await readBody(req);
+      await hubTransport.redeemInvite(body.inviteCode);
+      sendJson(res, 200, { ok: true, ...getStatePayload() });
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/botnet/disconnect") {
+      hubTransport.disconnect();
+      sendJson(res, 200, { ok: true, ...getStatePayload() });
+      return;
+    }
+
     if (req.method === "GET" && !url.pathname.startsWith("/api/")) {
       serveStatic(req, res);
       return;
@@ -905,4 +1056,13 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, HOST, () => {
   console.log(`[GroqBotNet] Listening on http://${HOST}:${PORT}`);
+  if (settings.enabled && settings.transportMode === "online-hub" && hubSession.nodeId && hubSession.authToken) {
+    hubTransport.connect().catch((error) => {
+      hubSession = sanitizeSession({
+        ...hubSession,
+        lastError: error instanceof Error ? error.message : "Failed to reconnect to the hub.",
+      });
+      saveHubSession();
+    });
+  }
 });

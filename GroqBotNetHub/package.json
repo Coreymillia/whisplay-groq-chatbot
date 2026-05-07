@@ -1,0 +1,12 @@
+{
+  "name": "groqbotnet-hub",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Hosted relay hub for GroqBotNet online mode",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.1"
+  }
+}

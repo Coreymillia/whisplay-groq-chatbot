@@ -28,6 +28,13 @@
             </select>
           </label>
           <label>
+            Transport
+            <select id="transportMode" name="transportMode">
+              <option value="lan-direct">LAN Direct</option>
+              <option value="online-hub">Online Hub</option>
+            </select>
+          </label>
+          <label>
             Groq model
             <input id="model" name="model" type="text" />
           </label>
@@ -42,6 +49,18 @@
           <label>
             Connect to Bot
             <input id="peerUrl" name="peerUrl" type="text" placeholder="http://10.160.0.136:17880" />
+          </label>
+          <label>
+            Node handle
+            <input id="nodeHandle" name="nodeHandle" type="text" placeholder="AtomGroqTest" />
+          </label>
+          <label>
+            Hub URL
+            <input id="hubUrl" name="hubUrl" type="text" placeholder="https://your-botnet-hub.example.com" />
+          </label>
+          <label>
+            Invite code
+            <input id="inviteCode" name="inviteCode" type="text" placeholder="Paste invite code to pair" />
           </label>
           <label>
             Personality prompt
@@ -71,6 +90,14 @@
           <div class="actions">
             <button type="submit">Save settings</button>
             <span id="settingsStatus" class="muted"></span>
+          </div>
+          <div class="actions">
+            <button id="testHubBtn" type="button" class="secondary">Test Hub</button>
+            <button id="registerHubBtn" type="button" class="secondary">Register Node</button>
+            <button id="connectHubBtn" type="button" class="secondary">Connect Hub</button>
+            <button id="createInviteBtn" type="button" class="secondary">Create Invite</button>
+            <button id="redeemInviteBtn" type="button" class="secondary">Redeem Invite</button>
+            <button id="disconnectHubBtn" type="button" class="secondary">Disconnect Hub</button>
           </div>
         </form>
 

@@ -9,13 +9,26 @@ const startStatus = document.getElementById("startStatus");
 const soloStatus = document.getElementById("soloStatus");
 const stats = document.getElementById("stats");
 const botnetMode = document.getElementById("botnetMode");
+const transportMode = document.getElementById("transportMode");
+const peerUrl = document.getElementById("peerUrl");
+const nodeHandle = document.getElementById("nodeHandle");
+const hubUrl = document.getElementById("hubUrl");
+const inviteCode = document.getElementById("inviteCode");
 const startFormTitle = document.getElementById("startFormTitle");
 const startPromptLabel = document.getElementById("startPromptLabel");
 const starterWrap = document.getElementById("starterWrap");
 const startModeHint = document.getElementById("startModeHint");
 const startSubmitBtn = document.getElementById("startSubmitBtn");
 const topicInput = document.getElementById("topic");
+const testHubBtn = document.getElementById("testHubBtn");
+const registerHubBtn = document.getElementById("registerHubBtn");
+const connectHubBtn = document.getElementById("connectHubBtn");
+const createInviteBtn = document.getElementById("createInviteBtn");
+const redeemInviteBtn = document.getElementById("redeemInviteBtn");
+const disconnectHubBtn = document.getElementById("disconnectHubBtn");
+
 let activeSoloConversationId = null;
+let currentOnline = null;
 
 function setStatus(el, message, isError = false) {
   el.textContent = message;
@@ -31,8 +44,7 @@ function updateBotnetModeUi(mode) {
     if (startFormTitle) startFormTitle.textContent = "Persona Relay";
     if (startPromptLabel) startPromptLabel.textContent = "Your prompt";
     if (topicInput) {
-      topicInput.placeholder =
-        "Type what you want your bot to reinterpret and send to the peer bot.";
+      topicInput.placeholder = "Type what you want your bot to reinterpret and send to the peer bot.";
     }
     if (starterWrap) starterWrap.style.display = "none";
     if (startModeHint) {
@@ -45,8 +57,7 @@ function updateBotnetModeUi(mode) {
   if (startFormTitle) startFormTitle.textContent = "Start bot conversation";
   if (startPromptLabel) startPromptLabel.textContent = "Topic / opening idea";
   if (topicInput) {
-    topicInput.placeholder =
-      "Have two bots debate whether old hardware has charm.";
+    topicInput.placeholder = "Have two bots debate whether old hardware has charm.";
   }
   if (starterWrap) starterWrap.style.display = "";
   if (startModeHint) {
@@ -56,26 +67,57 @@ function updateBotnetModeUi(mode) {
   if (startSubmitBtn) startSubmitBtn.textContent = "Start conversation";
 }
 
-function fillSettings(settings, statsPayload) {
+function updateTransportUi(mode) {
+  const currentMode = mode === "online-hub" ? "online-hub" : "lan-direct";
+  if (transportMode) {
+    transportMode.value = currentMode;
+  }
+  const onlineMode = currentMode === "online-hub";
+  if (peerUrl) peerUrl.disabled = onlineMode;
+  if (nodeHandle) nodeHandle.disabled = !onlineMode;
+  if (hubUrl) hubUrl.disabled = !onlineMode;
+  if (inviteCode) inviteCode.disabled = !onlineMode;
+  if (testHubBtn) testHubBtn.disabled = !onlineMode;
+  if (registerHubBtn) registerHubBtn.disabled = !onlineMode;
+  if (connectHubBtn) connectHubBtn.disabled = !onlineMode;
+  if (createInviteBtn) createInviteBtn.disabled = !onlineMode;
+  if (redeemInviteBtn) redeemInviteBtn.disabled = !onlineMode;
+  if (disconnectHubBtn) disconnectHubBtn.disabled = !onlineMode;
+}
+
+function fillSettings(settings, online, statsPayload) {
   document.getElementById("botName").value = settings.botName || "";
   updateBotnetModeUi(settings.botnetMode || "persona-relay");
+  updateTransportUi(settings.transportMode || "lan-direct");
   document.getElementById("model").value = settings.model || "";
   document.getElementById("groqApiKey").value = "";
   document.getElementById("publicBaseUrl").value = settings.publicBaseUrl || "";
   document.getElementById("peerUrl").value = settings.peerUrl || "";
+  document.getElementById("nodeHandle").value = settings.nodeHandle || "";
+  document.getElementById("hubUrl").value = settings.hubUrl || "";
   document.getElementById("personalityPrompt").value = settings.personalityPrompt || "";
   document.getElementById("memoryTurns").value = settings.memoryTurns ?? 12;
   document.getElementById("replyDelaySec").value = settings.replyDelaySec ?? 6;
   document.getElementById("maxBotReplies").value = settings.maxBotReplies ?? 8;
   document.getElementById("maxRequestsPerHour").value = settings.maxRequestsPerHour ?? 30;
-  stats.textContent = `Mode: ${settings.botnetMode || "persona-relay"} | Groq key: ${settings.groqApiKeyConfigured ? "stored" : "missing"} | Requests used this hour: ${statsPayload.requestsUsedThisHour}`;
+  currentOnline = online || null;
+
+  const transportSummary =
+    settings.transportMode === "online-hub"
+      ? `Online hub: ${online?.connected ? "connected" : online?.registered ? "registered" : "offline"}`
+      : "LAN direct";
+  const linkSummary =
+    settings.transportMode === "online-hub"
+      ? ` | link: ${online?.linkId ? `${online.peerHandle || online.peerNodeId || "paired"} (${online.peerOnline ? "peer online" : "peer offline"})` : "not paired"}`
+      : "";
+  const errorSummary = online?.lastError ? ` | hub: ${online.lastError}` : "";
+  stats.textContent =
+    `Mode: ${settings.botnetMode || "persona-relay"} | Transport: ${transportSummary}${linkSummary} | Groq key: ${settings.groqApiKeyConfigured ? "stored" : "missing"} | Requests used this hour: ${statsPayload.requestsUsedThisHour}${errorSummary}`;
 }
 
 function renderConversations(conversations) {
   activeSoloConversationId =
-    conversations.find(
-      (conversation) => conversation.mode === "solo" && conversation.status === "active",
-    )?.id || null;
+    conversations.find((conversation) => conversation.mode === "solo" && conversation.status === "active")?.id || null;
 
   if (!conversations.length) {
     conversationList.innerHTML = '<div class="muted">No conversations yet.</div>';
@@ -99,13 +141,20 @@ function renderConversations(conversations) {
         })
         .join("");
 
+      const transportInfo =
+        conversation.mode === "botnet"
+          ? ` | transport: ${conversation.transportMode || "lan-direct"}${
+              conversation.transportMode === "online-hub" && conversation.linkId ? ` / ${conversation.linkId}` : ""
+            }`
+          : "";
+
       return `
         <article class="conversation">
           <div class="row">
             <div>
               <h3>${conversation.topic || "Untitled conversation"}</h3>
               <div class="muted">
-                mode: ${conversation.mode || "botnet"}${conversation.mode === "botnet" ? ` / ${conversation.botnetMode || "persona-relay"}` : ""} | status: ${conversation.status} | replies: ${conversation.replyCount}${conversation.mode === "botnet" && (conversation.maxBotReplies || 0) > 0 ? `/${conversation.maxBotReplies}` : ""}
+                mode: ${conversation.mode || "botnet"}${conversation.mode === "botnet" ? ` / ${conversation.botnetMode || "persona-relay"}` : ""}${transportInfo} | status: ${conversation.status} | replies: ${conversation.replyCount}${conversation.mode === "botnet" && (conversation.maxBotReplies || 0) > 0 ? `/${conversation.maxBotReplies}` : ""}
               </div>
             </div>
             ${conversation.status === "active" ? `<button data-stop="${conversation.id}" class="secondary">Stop</button>` : ""}
@@ -134,25 +183,84 @@ async function loadState() {
   if (!response.ok || payload.ok === false) {
     throw new Error(payload.error || `HTTP ${response.status}`);
   }
-  fillSettings(payload.settings, payload.stats);
+  fillSettings(payload.settings, payload.online, payload.stats);
   renderConversations(payload.conversations || []);
+}
+
+function validateBotnetSetup() {
+  const currentTransport = transportMode?.value || "lan-direct";
+  if (currentTransport === "online-hub") {
+    if (!hubUrl?.value.trim()) {
+      throw new Error("Hub URL is required for Online Hub mode.");
+    }
+    if (!nodeHandle?.value.trim()) {
+      throw new Error("Node handle is required for Online Hub mode.");
+    }
+    if (!currentOnline?.connected) {
+      throw new Error("Connect to the hub before starting an online BotNet conversation.");
+    }
+    if (!currentOnline?.linkId) {
+      throw new Error("No online peer link is active yet.");
+    }
+    return;
+  }
+  if (!peerUrl?.value.trim()) {
+    throw new Error("Peer URL is required for LAN Direct mode.");
+  }
+}
+
+async function saveSettingsFromForm() {
+  const formData = new FormData(settingsForm);
+  const body = Object.fromEntries(formData.entries());
+  const response = await fetch("/api/settings", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const payload = await response.json();
+  if (!response.ok || payload.ok === false) {
+    throw new Error(payload.error || `HTTP ${response.status}`);
+  }
+}
+
+async function postAction(url, body, statusEl, successMessage) {
+  setStatus(statusEl, "Working...");
+  try {
+    await saveSettingsFromForm();
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body || {}),
+    });
+    const payload = await response.json();
+    if (!response.ok || payload.ok === false) {
+      throw new Error(payload.error || `HTTP ${response.status}`);
+    }
+    setStatus(statusEl, successMessage);
+    await loadState();
+  } catch (error) {
+    setStatus(statusEl, error.message || String(error), true);
+  }
+}
+
+async function createInvite() {
+  await postAction("/api/botnet/invite", {}, settingsStatus, "Invite created.");
+}
+
+async function redeemInvite() {
+  const code = inviteCode?.value.trim().toUpperCase() || "";
+  if (!code) {
+    setStatus(settingsStatus, "Invite code is required.", true);
+    return;
+  }
+  await postAction("/api/botnet/redeem", { inviteCode: code }, settingsStatus, "Invite redeemed.");
 }
 
 settingsForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   setStatus(settingsStatus, "Saving settings...");
   try {
-    const formData = new FormData(settingsForm);
-    const body = Object.fromEntries(formData.entries());
-    const response = await fetch("/api/settings", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const payload = await response.json();
-    if (!response.ok || payload.ok === false) {
-      throw new Error(payload.error || `HTTP ${response.status}`);
-    }
+    await saveSettingsFromForm();
     setStatus(settingsStatus, "Settings saved.");
     await loadState();
   } catch (error) {
@@ -164,6 +272,7 @@ startForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   setStatus(startStatus, "Starting conversation...");
   try {
+    validateBotnetSetup();
     const formData = new FormData(startForm);
     const body = Object.fromEntries(formData.entries());
     body.botnetMode = botnetMode?.value || "persona-relay";
@@ -179,6 +288,7 @@ startForm.addEventListener("submit", async (event) => {
     setStatus(startStatus, "Conversation started.");
     startForm.reset();
     updateBotnetModeUi(botnetMode?.value || "persona-relay");
+    updateTransportUi(transportMode?.value || "lan-direct");
     document.getElementById("starter").value = "self";
     await loadState();
   } catch (error) {
@@ -226,6 +336,58 @@ refreshBtn.addEventListener("click", async () => {
 
 botnetMode?.addEventListener("change", () => {
   updateBotnetModeUi(botnetMode.value);
+});
+
+transportMode?.addEventListener("change", () => {
+  updateTransportUi(transportMode.value);
+});
+
+testHubBtn?.addEventListener("click", async () => {
+  await postAction("/api/botnet/test", {}, settingsStatus, "Hub test succeeded.");
+});
+
+registerHubBtn?.addEventListener("click", async () => {
+  await postAction("/api/botnet/register", {}, settingsStatus, "Node registered.");
+});
+
+connectHubBtn?.addEventListener("click", async () => {
+  await postAction("/api/botnet/connect", {}, settingsStatus, "Hub connected.");
+});
+
+createInviteBtn?.addEventListener("click", async () => {
+  try {
+    setStatus(settingsStatus, "Creating invite...");
+    await saveSettingsFromForm();
+    const response = await fetch("/api/botnet/invite", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    const payload = await response.json();
+    if (!response.ok || payload.ok === false) {
+      throw new Error(payload.error || `HTTP ${response.status}`);
+    }
+    if (inviteCode) {
+      inviteCode.value = payload.invite?.inviteCode || "";
+    }
+    setStatus(
+      settingsStatus,
+      payload.invite?.inviteCode
+        ? `Invite created: ${payload.invite.inviteCode}`
+        : "Invite created.",
+    );
+    await loadState();
+  } catch (error) {
+    setStatus(settingsStatus, error.message || String(error), true);
+  }
+});
+
+redeemInviteBtn?.addEventListener("click", async () => {
+  await redeemInvite();
+});
+
+disconnectHubBtn?.addEventListener("click", async () => {
+  await postAction("/api/botnet/disconnect", {}, settingsStatus, "Hub disconnected.");
 });
 
 loadState().catch((error) => {
