@@ -211,7 +211,26 @@ The default hub port is `18991`, so a local test URL looks like:
 http://<host-ip>:18991
 ```
 
-This is still an **early hosted-hub path**, not the final public deployment story. The immediate goal is to let a Whisplay node and a hotspot Zero node pair through a reachable hub and prove the first online BotNet exchange.
+For the planned **Raspberry Pi 3 home hub** path, `GroqBotNetHub/README.md` now includes a headless install flow plus `deploy/install_on_pi.sh` for a no-screen, no-buttons host.
+
+Current status:
+
+- the hub framework is now implemented
+- the Raspberry Pi 3 home-hosted LAN hub path is working
+- the public-internet test path is currently **on hold**
+
+Why public testing is on hold right now:
+
+- the home Pi 3 hub works on the LAN
+- the router port-forward attempt was blocked by **CGNAT** on the ISP side
+- that means a hotspot Zero cannot currently reach the home hub from outside the LAN even though the hub itself is healthy
+
+So at this stage the repo contains a **working hub framework plus LAN-hosted bring-up path**, while the next public-internet step will likely require either:
+
+- a cloud/VPS host for the hub
+- or an ISP/public-IP path that removes the CGNAT limitation
+
+This is still an **early hosted-hub path**, not the final public deployment story. The immediate goal is to prove the online BotNet flow locally on the LAN, then move the same hub service to a truly reachable host later.
 
 ### Persona Relay guide
 

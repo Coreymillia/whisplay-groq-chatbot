@@ -1,0 +1,21 @@
+[Unit]
+Description=GroqBotNet hosted relay hub
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+WorkingDirectory=/opt/groqbotnet-hub
+Environment=PORT=18991
+Environment=HOST=0.0.0.0
+Environment=GROQBOTNET_HUB_DATA_DIR=/opt/groqbotnet-hub/data
+ExecStart=/usr/bin/npm start
+Restart=always
+RestartSec=5
+StandardOutput=append:/opt/groqbotnet-hub/groqbotnet-hub.log
+StandardError=append:/opt/groqbotnet-hub/groqbotnet-hub.log
+
+[Install]
+WantedBy=multi-user.target
