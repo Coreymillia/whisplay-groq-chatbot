@@ -42,10 +42,32 @@ export function isWeatherConfigured(): boolean {
   return getConfiguredCoordinates() !== null;
 }
 
-async function fetchJson(url: string): Promise<any> {
+async function fetchJson(
+  url: string,
+  requestLabel: "points lookup" | "forecast lookup" | "alerts lookup",
+): Promise<any> {
   const response = await fetch(url, { headers: NWS_HEADERS });
   if (!response.ok) {
-    throw new Error(`NWS request failed (${response.status})`);
+    const responseText = await response.text();
+    let problemDetail = "";
+    if (responseText) {
+      try {
+        const problem = JSON.parse(responseText) as {
+          detail?: unknown;
+          title?: unknown;
+        };
+        problemDetail = String(problem.detail || problem.title || "").trim();
+      } catch {
+        problemDetail = responseText.trim();
+      }
+    }
+    if (requestLabel === "points lookup" && response.status === 404) {
+      throw new Error(
+        "NWS has no forecast data for the saved latitude/longitude. Check Settings and make sure the coordinates are correct.",
+      );
+    }
+    const suffix = problemDetail ? `: ${problemDetail}` : "";
+    throw new Error(`NWS ${requestLabel} failed (${response.status})${suffix}`);
   }
   return response.json();
 }
@@ -120,6 +142,7 @@ export async function fetchWeatherSnapshot(
 
   const points = await fetchJson(
     `https://api.weather.gov/points/${coordinates.latitude},${coordinates.longitude}`,
+    "points lookup",
   );
   const forecastUrl = String(points?.properties?.forecast || "").trim();
   if (!forecastUrl) {
@@ -133,7 +156,7 @@ export async function fetchWeatherSnapshot(
       .filter(Boolean)
       .join(", ") || cacheKey;
 
-  const forecast = await fetchJson(forecastUrl);
+  const forecast = await fetchJson(forecastUrl, "forecast lookup");
   const periods = Array.isArray(forecast?.properties?.periods)
     ? forecast.properties.periods
     : [];
@@ -143,6 +166,7 @@ export async function fetchWeatherSnapshot(
 
   const alerts = await fetchJson(
     `https://api.weather.gov/alerts/active?point=${coordinates.latitude},${coordinates.longitude}`,
+    "alerts lookup",
   );
   const alertFeatures = Array.isArray(alerts?.features) ? alerts.features : [];
 
