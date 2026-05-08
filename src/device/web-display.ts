@@ -21,6 +21,7 @@ import {
   getLatestVisionAnalysis,
 } from "../utils/vision-analysis";
 import {
+  archiveCurrentChatHistory,
   recognizeAudio,
   listSavedChatHistories,
   loadSavedChatHistory,
@@ -34,6 +35,7 @@ import {
   getPublicRuntimeSettings,
   IDLE_TIMEOUT_OPTIONS,
   RECORD_TIMEOUT_OPTIONS,
+  SCREEN_BLANK_TIMEOUT_OPTIONS,
   SCROLL_SPEED_OPTIONS,
   VOLUME_LEVEL_OPTIONS,
   saveRuntimeSettings,
@@ -574,6 +576,16 @@ export class WebDisplayServer implements WebAudioBridgeServer {
       ctx.body = { ok: true };
     });
 
+    this.router.post("/api/chat/archive-reset", (ctx) => {
+      const archivedFile = archiveCurrentChatHistory();
+      resetChatHistory();
+      ctx.body = {
+        ok: true,
+        archived: Boolean(archivedFile),
+        fileName: archivedFile,
+      };
+    });
+
     this.router.post("/api/chat/load", (ctx) => {
       const body = normalizeRequestBody((ctx.request as any).body);
       const fileName = getBodyString(body, "fileName") || "";
@@ -851,6 +863,7 @@ export class WebDisplayServer implements WebAudioBridgeServer {
         case "new_chat":
         case "reset-chat":
         case "reset_chat":
+          archiveCurrentChatHistory();
           resetChatHistory();
           break;
         case "repeat":
@@ -896,6 +909,7 @@ export class WebDisplayServer implements WebAudioBridgeServer {
         scrollSpeedOptions: SCROLL_SPEED_OPTIONS,
         recordTimeoutOptions: RECORD_TIMEOUT_OPTIONS,
         idleTimeoutOptions: IDLE_TIMEOUT_OPTIONS,
+        screenBlankTimeoutOptions: SCREEN_BLANK_TIMEOUT_OPTIONS,
       };
     });
 
@@ -917,6 +931,7 @@ export class WebDisplayServer implements WebAudioBridgeServer {
         headerMode: getBodyString(body, "headerMode"),
         screensaverMode: getBodyString(body, "screensaverMode"),
         idleTimeoutSec: getBodyNumber(body, "idleTimeoutSec"),
+        screenBlankTimeoutSec: getBodyNumber(body, "screenBlankTimeoutSec"),
         weatherLatitude: getBodyNumber(body, "weatherLatitude"),
         weatherLongitude: getBodyNumber(body, "weatherLongitude"),
       });
@@ -940,6 +955,7 @@ export class WebDisplayServer implements WebAudioBridgeServer {
           headerMode: settings.headerMode,
           screensaverMode: settings.screensaverMode,
           idleTimeoutSec: settings.idleTimeoutSec,
+          screenBlankTimeoutSec: settings.screenBlankTimeoutSec,
           weatherLatitude: settings.weatherLatitude,
           weatherLongitude: settings.weatherLongitude,
         },
@@ -948,6 +964,7 @@ export class WebDisplayServer implements WebAudioBridgeServer {
         scrollSpeedOptions: SCROLL_SPEED_OPTIONS,
         recordTimeoutOptions: RECORD_TIMEOUT_OPTIONS,
         idleTimeoutOptions: IDLE_TIMEOUT_OPTIONS,
+        screenBlankTimeoutOptions: SCREEN_BLANK_TIMEOUT_OPTIONS,
       };
     });
 

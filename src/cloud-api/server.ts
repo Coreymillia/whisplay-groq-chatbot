@@ -16,6 +16,7 @@ import {
   resetChatHistory,
   listSavedChatHistories,
   loadSavedChatHistory,
+  archiveCurrentChatHistory,
 } from "./llm";
 import {
   RecognizeAudioFunction,
@@ -75,6 +76,7 @@ export {
   resetChatHistory,
   listSavedChatHistories,
   loadSavedChatHistory,
+  archiveCurrentChatHistory,
   vectorDB,
   embedText,
 };

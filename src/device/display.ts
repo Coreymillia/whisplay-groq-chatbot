@@ -42,6 +42,7 @@ export interface Status {
   header_mode: string;
   screensaver_mode: string;
   idle_timeout_sec: number;
+  screen_blank_timeout_sec: number;
 }
 
 function getInitialStatus(): Status {
@@ -71,6 +72,7 @@ function getInitialStatus(): Status {
     header_mode: settings.headerMode,
     screensaver_mode: settings.screensaverMode,
     idle_timeout_sec: settings.idleTimeoutSec,
+    screen_blank_timeout_sec: settings.screenBlankTimeoutSec,
   };
 }
 
@@ -134,8 +136,16 @@ export class WhisplayDisplay {
             header_mode: settings.headerMode,
             screensaver_mode: settings.screensaverMode,
             idle_timeout_sec: settings.idleTimeoutSec,
+            screen_blank_timeout_sec: settings.screenBlankTimeoutSec,
             scroll_speed: this.currentStatus.scroll_speed,
             scroll_speed_factor: getScrollSpeedFactor(settings.scrollSpeedLevel),
+          });
+        },
+        onImageUploaded: (imagePath) => {
+          void this.display({
+            image: imagePath,
+            image_icon_visible: false,
+            text: "[camera]Photo captured.",
           });
         },
       });
@@ -433,6 +443,7 @@ export class WhisplayDisplay {
       header_mode,
       screensaver_mode,
       idle_timeout_sec,
+      screen_blank_timeout_sec,
     } = {
       ...this.currentStatus,
       ...normalizedStatus,
@@ -468,6 +479,7 @@ export class WhisplayDisplay {
     this.currentStatus.header_mode = header_mode;
     this.currentStatus.screensaver_mode = screensaver_mode;
     this.currentStatus.idle_timeout_sec = idle_timeout_sec;
+    this.currentStatus.screen_blank_timeout_sec = screen_blank_timeout_sec;
     this.syncAudioLevelMonitor(status, header_mode);
     
     const changedValuesObj = Object.fromEntries(changedValues);

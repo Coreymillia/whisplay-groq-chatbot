@@ -40,6 +40,7 @@ export interface RuntimeSettings {
   headerMode: HeaderMode;
   screensaverMode: ScreensaverMode;
   idleTimeoutSec: number;
+  screenBlankTimeoutSec: number;
   weatherLatitude: number | null;
   weatherLongitude: number | null;
 }
@@ -60,6 +61,7 @@ export interface RuntimeSettingsUpdate {
   headerMode?: string;
   screensaverMode?: string;
   idleTimeoutSec?: number;
+  screenBlankTimeoutSec?: number;
   weatherLatitude?: number | null;
   weatherLongitude?: number | null;
 }
@@ -81,12 +83,14 @@ const DEFAULT_MANUAL_RECORD_MAX_SEC = 15;
 const DEFAULT_HEADER_MODE: HeaderMode = "emoji";
 const DEFAULT_SCREENSAVER_MODE: ScreensaverMode = "retro-geometry";
 const DEFAULT_IDLE_TIMEOUT_SEC = 120;
+const DEFAULT_SCREEN_BLANK_TIMEOUT_SEC = 0;
 const DEFAULT_WEATHER_LATITUDE = null;
 const DEFAULT_WEATHER_LONGITUDE = null;
 export const RECORD_TIMEOUT_OPTIONS = [10, 15, 20, 30, 45, 60];
 export const VOLUME_LEVEL_OPTIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 export const SCROLL_SPEED_OPTIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 export const IDLE_TIMEOUT_OPTIONS = [0, 60, 120, 180, 240, 300, 360, 420, 480, 540, 600];
+export const SCREEN_BLANK_TIMEOUT_OPTIONS = [...IDLE_TIMEOUT_OPTIONS];
 export const VOICE_MODES: VoiceMode[] = [
   "text-only",
   "speak-on-demand",
@@ -251,6 +255,15 @@ function normalizeIdleTimeoutSec(value: unknown): number {
   return Math.max(0, Math.min(3600, Math.round(numeric)));
 }
 
+function normalizeScreenBlankTimeoutSec(value: unknown): number {
+  const numeric =
+    typeof value === "number" ? value : parseInt(String(value), 10);
+  if (!Number.isFinite(numeric)) {
+    return DEFAULT_SCREEN_BLANK_TIMEOUT_SEC;
+  }
+  return Math.max(0, Math.min(3600, Math.round(numeric)));
+}
+
 function normalizeCoordinate(
   value: unknown,
   min: number,
@@ -290,6 +303,7 @@ function sanitizeSettings(input: Partial<RuntimeSettings> | null | undefined): R
     headerMode: normalizeHeaderMode(input?.headerMode),
     screensaverMode: normalizeScreensaverMode(input?.screensaverMode),
     idleTimeoutSec: normalizeIdleTimeoutSec(input?.idleTimeoutSec),
+    screenBlankTimeoutSec: normalizeScreenBlankTimeoutSec(input?.screenBlankTimeoutSec),
     weatherLatitude: normalizeCoordinate(input?.weatherLatitude, -90, 90) ?? DEFAULT_WEATHER_LATITUDE,
     weatherLongitude: normalizeCoordinate(input?.weatherLongitude, -180, 180) ?? DEFAULT_WEATHER_LONGITUDE,
   };
@@ -386,6 +400,10 @@ export function saveRuntimeSettings(
 
   if (typeof update.idleTimeoutSec === "number") {
     next.idleTimeoutSec = normalizeIdleTimeoutSec(update.idleTimeoutSec);
+  }
+
+  if (typeof update.screenBlankTimeoutSec === "number") {
+    next.screenBlankTimeoutSec = normalizeScreenBlankTimeoutSec(update.screenBlankTimeoutSec);
   }
 
   if ("weatherLatitude" in update) {
@@ -521,6 +539,7 @@ export function getPublicRuntimeSettings(): {
   headerMode: HeaderMode;
   screensaverMode: ScreensaverMode;
   idleTimeoutSec: number;
+  screenBlankTimeoutSec: number;
   weatherLatitude: number | null;
   weatherLongitude: number | null;
 } {
@@ -543,6 +562,10 @@ export function getPublicRuntimeSettings(): {
     headerMode: settings.headerMode,
     screensaverMode: settings.screensaverMode,
     idleTimeoutSec: settings.idleTimeoutSec,
+    screenBlankTimeoutSec:
+      typeof settings.screenBlankTimeoutSec === "number"
+        ? settings.screenBlankTimeoutSec
+        : DEFAULT_SCREEN_BLANK_TIMEOUT_SEC,
     weatherLatitude: settings.weatherLatitude,
     weatherLongitude: settings.weatherLongitude,
   };

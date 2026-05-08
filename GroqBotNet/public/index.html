@@ -23,8 +23,8 @@
           <label>
             BotNet mode
             <select id="botnetMode" name="botnetMode">
-              <option value="persona-relay">Persona Relay</option>
-              <option value="auto-bot">Auto Bot Conversation</option>
+              <option value="persona-relay">One Message at a Time</option>
+              <option value="auto-bot">Auto Conversation</option>
             </select>
           </label>
           <label>
@@ -66,27 +66,30 @@
             Personality prompt
             <textarea id="personalityPrompt" name="personalityPrompt" rows="5"></textarea>
           </label>
-          <div class="grid two">
-            <label>
-              Memory turns
-              <input id="memoryTurns" name="memoryTurns" type="number" min="1" max="50" />
-            </label>
-            <label>
-              Reply delay (sec)
-              <input id="replyDelaySec" name="replyDelaySec" type="number" min="0" max="3600" />
-            </label>
-            <label>
-              Max auto replies / conversation
-              <input id="maxBotReplies" name="maxBotReplies" type="number" min="0" max="200" />
-            </label>
-            <label>
-              Max Groq requests / hour
-              <input id="maxRequestsPerHour" name="maxRequestsPerHour" type="number" min="1" max="500" />
-            </label>
-          </div>
-          <p class="muted" id="autoReplyLimitHint">
-            Set auto replies to <strong>0</strong> to turn off the per-conversation cap. The hourly request cap still applies.
-          </p>
+          <details class="card stack">
+            <summary>Advanced bot tuning</summary>
+            <div class="grid two">
+              <label>
+                Memory turns
+                <input id="memoryTurns" name="memoryTurns" type="number" min="1" max="50" />
+              </label>
+              <label id="replyDelayWrap">
+                Reply delay (sec)
+                <input id="replyDelaySec" name="replyDelaySec" type="number" min="0" max="3600" />
+              </label>
+              <label id="maxBotRepliesWrap">
+                Max auto replies / conversation
+                <input id="maxBotReplies" name="maxBotReplies" type="number" min="0" max="200" />
+              </label>
+              <label>
+                Max Groq requests / hour
+                <input id="maxRequestsPerHour" name="maxRequestsPerHour" type="number" min="1" max="500" />
+              </label>
+            </div>
+            <p class="muted" id="autoReplyLimitHint">
+              One Message at a Time ignores the auto-reply settings. Auto Conversation uses them.
+            </p>
+          </details>
           <div class="actions">
             <button type="submit">Save settings</button>
             <span id="settingsStatus" class="muted"></span>

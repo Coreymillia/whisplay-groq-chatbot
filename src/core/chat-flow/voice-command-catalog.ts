@@ -49,6 +49,10 @@ export const VOICE_COMMAND_HELP_ENTRIES: VoiceCommandHelpEntry[] = [
     summary: "take photo / capture image",
   },
   {
+    id: "camera-switch",
+    summary: "switch camera / swap camera",
+  },
+  {
     id: "photo-browser",
     summary: "browse photos / images",
   },

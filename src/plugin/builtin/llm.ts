@@ -11,20 +11,21 @@ export function registerLLMPlugins(): void {
     type: "llm",
     description: "Placeholder LLM plugin that reminds users to configure LLM_SERVER",
     activate: () => {
-      return {
-        chatWithLLMStream: async (
-          _inputMessages: any[],
-          partialCallback: (partialAnswer: string) => void,
-          endCallBack: () => void,
+        return {
+          chatWithLLMStream: async (
+            _inputMessages: any[],
+            partialCallback: (partialAnswer: string) => void,
+            endCallBack: () => void,
         ) => {
           console.warn(NOT_CONFIGURED_MSG);
           partialCallback(NOT_CONFIGURED_MSG);
           endCallBack();
-        },
-        resetChatHistory: () => {},
-      };
-    },
-  } as LLMPlugin);
+          },
+          resetChatHistory: () => {},
+          archiveCurrentChatHistory: () => null,
+        };
+      },
+    } as LLMPlugin);
 
   pluginRegistry.register({
     name: "volcengine",
@@ -56,6 +57,9 @@ export function registerLLMPlugins(): void {
         chatWithLLMStream: mod.chatWithLLMStream,
         resetChatHistory: mod.resetChatHistory,
         summaryTextWithLLM: mod.summaryTextWithLLM,
+        listSavedChatHistories: mod.listSavedChatHistories,
+        loadSavedChatHistory: mod.loadSavedChatHistory,
+        archiveCurrentChatHistory: mod.archiveCurrentChatHistory,
       };
     },
   } as LLMPlugin);

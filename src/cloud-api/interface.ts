@@ -18,6 +18,7 @@ export interface SavedChatHistorySummary {
 }
 export type ListSavedChatHistoriesFunction = () => SavedChatHistorySummary[];
 export type LoadSavedChatHistoryFunction = (fileName: string) => boolean;
+export type ArchiveCurrentChatHistoryFunction = () => string | null;
 export type TTSProcessorFunction = (text: string) => Promise<any>;
 
 

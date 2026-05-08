@@ -20,6 +20,9 @@ const starterWrap = document.getElementById("starterWrap");
 const startModeHint = document.getElementById("startModeHint");
 const startSubmitBtn = document.getElementById("startSubmitBtn");
 const topicInput = document.getElementById("topic");
+const maxBotRepliesWrap = document.getElementById("maxBotRepliesWrap");
+const replyDelayWrap = document.getElementById("replyDelayWrap");
+const soloMessage = document.getElementById("soloMessage");
 const testHubBtn = document.getElementById("testHubBtn");
 const registerHubBtn = document.getElementById("registerHubBtn");
 const connectHubBtn = document.getElementById("connectHubBtn");
@@ -40,8 +43,14 @@ function updateBotnetModeUi(mode) {
   if (botnetMode) {
     botnetMode.value = currentMode;
   }
+  if (maxBotRepliesWrap) {
+    maxBotRepliesWrap.style.display = currentMode === "auto-bot" ? "" : "none";
+  }
+  if (replyDelayWrap) {
+    replyDelayWrap.style.display = currentMode === "auto-bot" ? "" : "none";
+  }
   if (currentMode === "persona-relay") {
-    if (startFormTitle) startFormTitle.textContent = "Persona Relay";
+    if (startFormTitle) startFormTitle.textContent = "One Message at a Time";
     if (startPromptLabel) startPromptLabel.textContent = "Your prompt";
     if (topicInput) {
       topicInput.placeholder = "Type what you want your bot to reinterpret and send to the peer bot.";
@@ -49,12 +58,12 @@ function updateBotnetModeUi(mode) {
     if (starterWrap) starterWrap.style.display = "none";
     if (startModeHint) {
       startModeHint.textContent =
-        "Your bot rewrites your prompt in its own personality, sends that to the peer, and waits for your next prompt.";
+        "Recommended. Your bot rewrites one prompt in its own personality, sends it once, and waits for your next prompt.";
     }
     if (startSubmitBtn) startSubmitBtn.textContent = "Send through your bot";
     return;
   }
-  if (startFormTitle) startFormTitle.textContent = "Start bot conversation";
+  if (startFormTitle) startFormTitle.textContent = "Start auto conversation";
   if (startPromptLabel) startPromptLabel.textContent = "Topic / opening idea";
   if (topicInput) {
     topicInput.placeholder = "Have two bots debate whether old hardware has charm.";
@@ -62,9 +71,9 @@ function updateBotnetModeUi(mode) {
   if (starterWrap) starterWrap.style.display = "";
   if (startModeHint) {
     startModeHint.textContent =
-      "Auto Bot Conversation lets the bots keep talking until the conversation cap or hourly limit stops them.";
+      "Auto Conversation lets the bots keep talking until the reply cap or hourly limit stops them.";
   }
-  if (startSubmitBtn) startSubmitBtn.textContent = "Start conversation";
+  if (startSubmitBtn) startSubmitBtn.textContent = "Start auto conversation";
 }
 
 function updateTransportUi(mode) {
@@ -321,6 +330,20 @@ soloForm.addEventListener("submit", async (event) => {
     await loadState();
   } catch (error) {
     setStatus(soloStatus, error.message || String(error), true);
+  }
+});
+
+topicInput?.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+    event.preventDefault();
+    startForm.requestSubmit();
+  }
+});
+
+soloMessage?.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+    event.preventDefault();
+    soloForm.requestSubmit();
   }
 });
 

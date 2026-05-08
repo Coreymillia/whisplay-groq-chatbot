@@ -63,6 +63,7 @@ current_audio_level = 0
 current_header_mode = "emoji"
 current_screensaver_mode = "off"
 current_idle_timeout_sec = 120
+current_screen_blank_timeout_sec = 0
 last_activity_at = time.time()
 camera_mode = False
 camera_capture_image_path = ""
@@ -164,6 +165,10 @@ class RenderThread(threading.Thread):
         self.pending_auto_scroll_after_hold = False
         if camera_mode:
             return False  # Skip rendering if in camera mode
+        if self.should_blank_screen():
+            self.whisplay.set_backlight(0)
+            return False
+        self.whisplay.set_backlight(100)
         if self.should_show_screensaver():
             saver_image = Image.new("RGBA", (self.whisplay.LCD_WIDTH, self.whisplay.LCD_HEIGHT), (0, 0, 0, 255))
             saver_draw = ImageDraw.Draw(saver_image)
@@ -383,6 +388,14 @@ class RenderThread(threading.Thread):
             and (time.time() - last_activity_at) >= current_idle_timeout_sec
         )
 
+    def should_blank_screen(self):
+        return (
+            current_screen_blank_timeout_sec > 0
+            and current_status == "idle"
+            and not current_image_path
+            and (time.time() - last_activity_at) >= current_screen_blank_timeout_sec
+        )
+
     def get_screensaver_wait_timeout(self):
         if (
             current_screensaver_mode == "off"
@@ -392,6 +405,16 @@ class RenderThread(threading.Thread):
         ):
             return None
         remaining = current_idle_timeout_sec - (time.time() - last_activity_at)
+        return max(0.0, remaining)
+
+    def get_screen_blank_wait_timeout(self):
+        if (
+            current_screen_blank_timeout_sec <= 0
+            or current_status != "idle"
+            or current_image_path
+        ):
+            return None
+        remaining = current_screen_blank_timeout_sec - (time.time() - last_activity_at)
         return max(0.0, remaining)
 
     def get_matrix_speed(self, status, screensaver=False):
@@ -905,6 +928,13 @@ class RenderThread(threading.Thread):
                     if wait_timeout is None
                     else min(wait_timeout, screensaver_wait_timeout)
                 )
+            screen_blank_wait_timeout = self.get_screen_blank_wait_timeout()
+            if screen_blank_wait_timeout is not None:
+                wait_timeout = (
+                    screen_blank_wait_timeout
+                    if wait_timeout is None
+                    else min(wait_timeout, screen_blank_wait_timeout)
+                )
             self.render_event.wait(wait_timeout)
             self.render_event.clear()
             
@@ -917,7 +947,7 @@ def update_display_data(status=None, emoji=None, text=None,
                    network_connected=None, vpn_connected=None, rag_icon_visible=None, image_icon_visible=None, transaction_id=None,
                    wifi_signal_level=None, audio_level=None,
                    music_progress=None, music_duration_ms=None, header_mode=None,
-                   screensaver_mode=None, idle_timeout_sec=None):
+                   screensaver_mode=None, idle_timeout_sec=None, screen_blank_timeout_sec=None):
     global current_status, current_emoji, current_text, current_battery_level
     global current_battery_color, current_scroll_top, current_scroll_speed, current_image_path
     global current_scroll_speed_factor
@@ -928,7 +958,7 @@ def update_display_data(status=None, emoji=None, text=None,
     global current_wifi_signal_level
     global current_music_progress, current_music_duration_ms
     global current_audio_level
-    global current_header_mode, current_screensaver_mode, current_idle_timeout_sec
+    global current_header_mode, current_screensaver_mode, current_idle_timeout_sec, current_screen_blank_timeout_sec
     global render_thread
 
     if (
@@ -943,6 +973,7 @@ def update_display_data(status=None, emoji=None, text=None,
         or header_mode is not None
         or screensaver_mode is not None
         or idle_timeout_sec is not None
+        or screen_blank_timeout_sec is not None
     ):
         note_activity()
 
@@ -1047,6 +1078,11 @@ def update_display_data(status=None, emoji=None, text=None,
             current_idle_timeout_sec = max(0, int(idle_timeout_sec))
         except (TypeError, ValueError):
             print(f"[Display] Invalid idle_timeout_sec payload: {idle_timeout_sec}")
+    if screen_blank_timeout_sec is not None:
+        try:
+            current_screen_blank_timeout_sec = max(0, int(screen_blank_timeout_sec))
+        except (TypeError, ValueError):
+            print(f"[Display] Invalid screen_blank_timeout_sec payload: {screen_blank_timeout_sec}")
     if render_thread is not None:
         render_thread.request_render()
 
@@ -1137,6 +1173,7 @@ def handle_client(client_socket, addr, whisplay):
                     header_mode = content.get("header_mode", None)
                     screensaver_mode = content.get("screensaver_mode", None)
                     idle_timeout_sec = content.get("idle_timeout_sec", None)
+                    screen_blank_timeout_sec = content.get("screen_blank_timeout_sec", None)
                     capture_image_path = content.get("capture_image_path", None)
                     trigger_camera_capture = content.get("camera_capture", None)
                     # boolean to enable camera mode
@@ -1182,12 +1219,13 @@ def handle_client(client_socket, addr, whisplay):
                     if (text is not None) or (status is not None) or (emoji is not None) or \
                        (battery_level is not None) or (battery_color is not None) or \
                               (image_path is not None) or (network_connected is not None) or \
-                             (wifi_signal_level is not None) or \
-                             (audio_level is not None) or \
-                             (vpn_connected is not None) or \
-                             (rag_icon_visible is not None) or (image_icon_visible is not None) or (scroll_sync is not None) or \
-                             (music_progress is not None) or (music_duration_ms is not None) or \
-                             (header_mode is not None) or (screensaver_mode is not None) or (idle_timeout_sec is not None):
+                              (wifi_signal_level is not None) or \
+                              (audio_level is not None) or \
+                              (vpn_connected is not None) or \
+                              (rag_icon_visible is not None) or (image_icon_visible is not None) or (scroll_sync is not None) or \
+                              (music_progress is not None) or (music_duration_ms is not None) or \
+                              (header_mode is not None) or (screensaver_mode is not None) or (idle_timeout_sec is not None) or \
+                              (screen_blank_timeout_sec is not None):
                         update_display_data(status=status, emoji=emoji,
                                      text=text, scroll_speed=scroll_speed, scroll_speed_factor=scroll_speed_factor, scroll_sync=scroll_sync,
                                      battery_level=battery_level, battery_color=battery_tuple,
@@ -1199,10 +1237,11 @@ def handle_client(client_socket, addr, whisplay):
                                           image_icon_visible=image_icon_visible,
                                                   transaction_id=transaction_id,
                                                   music_progress=music_progress,
-                                                  music_duration_ms=music_duration_ms,
-                                                  header_mode=header_mode,
-                                                  screensaver_mode=screensaver_mode,
-                                                  idle_timeout_sec=idle_timeout_sec)
+                                                   music_duration_ms=music_duration_ms,
+                                                   header_mode=header_mode,
+                                                   screensaver_mode=screensaver_mode,
+                                                   idle_timeout_sec=idle_timeout_sec,
+                                                   screen_blank_timeout_sec=screen_blank_timeout_sec)
 
                     client_socket.send(b"OK\n")
                     if response_to_client:

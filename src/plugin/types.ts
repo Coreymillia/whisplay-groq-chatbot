@@ -37,6 +37,7 @@ export interface LLMProvider {
     preview: string;
   }>;
   loadSavedChatHistory?: (fileName: string) => boolean;
+  archiveCurrentChatHistory?: () => string | null;
 }
 
 /** TTS (Text-to-Speech) provider */

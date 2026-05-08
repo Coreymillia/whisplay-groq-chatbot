@@ -94,7 +94,7 @@ const DEFAULT_SETTINGS: BotNetSettings = {
   publicUrl: "",
   hubUrl: "",
   nodeHandle: "Whisplay Bot",
-  botnetMode: "auto-bot",
+  botnetMode: "persona-relay",
   maxBotReplies: 8,
   replyDelaySec: 6,
 };

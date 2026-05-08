@@ -18,7 +18,7 @@ command_exists() {
 
 # apt install sox libsox-fmt-mp3 mpg123
 sudo apt-get update
-sudo apt-get install -y sox mpg123 libsox-fmt-mp3 python3-dev libcairo2 libcairo2-dev unzip python3-lgpio
+sudo apt-get install -y sox mpg123 libsox-fmt-mp3 python3-dev python3-pip libcairo2 libcairo2-dev unzip python3-lgpio libopenblas0-pthread
 
 # enable spi
 sudo raspi-config nonint do_spi 0
@@ -26,7 +26,7 @@ sudo raspi-config nonint do_spi 0
 # install python dependencies
 echo "Installing Python dependencies..."
 cd python
-pip install -r requirements.txt --break-system-packages
+python3 -m pip install -r requirements.txt --break-system-packages
 # download fonts and emojis
 if command_exists wget; then
     if [ ! -f "NotoSansSC-Bold.ttf" ]; then

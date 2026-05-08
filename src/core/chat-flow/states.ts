@@ -57,6 +57,8 @@ import { autoSaveExchange } from "../../config/mempalace";
 import { STATE_EMOJIS } from "../../config/state-emojis";
 import { llmFuncMap } from "../../config/llm-tools";
 import {
+  CAMERA_SOURCES,
+  getCameraSourceLabel,
   getIdleTimeoutLabel,
   getRuntimeSettings,
   getVoiceModeLabel,
@@ -349,6 +351,25 @@ function shouldCaptureImage(prompt: string): boolean {
     return false;
   }
   return captureIntentPatterns.some((pattern) => pattern.test(trimmed));
+}
+
+function shouldSwitchCamera(prompt: string): boolean {
+  const trimmed = prompt.trim();
+  if (!trimmed) {
+    return false;
+  }
+  return [
+    /^\s*(?:switch|swap|change|toggle)\s+camera\s*[.!?]*$/i,
+    /^\s*(?:switch|swap|change|toggle)\s+(?:the\s+)?camera\s*(?:source)?\s*[.!?]*$/i,
+  ].some((pattern) => pattern.test(trimmed));
+}
+
+function getNextCameraSource(current: string): string {
+  const currentIndex = CAMERA_SOURCES.findIndex((value) => value === current);
+  if (currentIndex === -1) {
+    return CAMERA_SOURCES[0];
+  }
+  return CAMERA_SOURCES[(currentIndex + 1) % CAMERA_SOURCES.length];
 }
 
 function shouldBrowsePhotos(prompt: string): boolean {
@@ -1261,6 +1282,17 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
           ? "Screen timeout off."
           : `Screen timeout ${getIdleTimeoutLabel(screenTimeoutCommand)}.`,
       );
+      return;
+    }
+    if (shouldSwitchCamera(ctx.asrText)) {
+      const currentSource = getRuntimeSettings().cameraSource;
+      const nextSource = getNextCameraSource(currentSource);
+      saveRuntimeSettings({ cameraSource: nextSource });
+      const label = getCameraSourceLabel(nextSource);
+      display({
+        text: `[camera]Camera source ${label}.`,
+      });
+      finishDirectMessage(`Camera source ${label}.`);
       return;
     }
     if (shouldShutdown(ctx.asrText)) {

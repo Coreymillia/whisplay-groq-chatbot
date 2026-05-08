@@ -59,6 +59,7 @@ const weatherLongitudeInput = document.getElementById("weatherLongitudeInput");
 const headerModeSelect = document.getElementById("headerModeSelect");
 const screensaverModeSelect = document.getElementById("screensaverModeSelect");
 const idleTimeoutSelect = document.getElementById("idleTimeoutSelect");
+const screenBlankTimeoutSelect = document.getElementById("screenBlankTimeoutSelect");
 const saveSettingsBtn = document.getElementById("saveSettingsBtn");
 const clearKeyBtn = document.getElementById("clearKeyBtn");
 const shutdownBtn = document.getElementById("shutdownBtn");
@@ -79,6 +80,8 @@ const botNetPeerUrlWrap = document.getElementById("botNetPeerUrlWrap");
 const botNetPublicUrlWrap = document.getElementById("botNetPublicUrlWrap");
 const botNetMaxRepliesInput = document.getElementById("botNetMaxRepliesInput");
 const botNetReplyDelayInput = document.getElementById("botNetReplyDelayInput");
+const botNetMaxRepliesWrap = document.getElementById("botNetMaxRepliesWrap");
+const botNetReplyDelayWrap = document.getElementById("botNetReplyDelayWrap");
 const botNetTopicInput = document.getElementById("botNetTopicInput");
 const botNetTopicLabel = document.getElementById("botNetTopicLabel");
 const botNetSaveBtn = document.getElementById("botNetSaveBtn");
@@ -116,6 +119,7 @@ let latestVisionAnalysisStamp = 0;
 let savedPhotos = [];
 let showAllSavedPhotos = false;
 let savedChatHistories = [];
+let screenBlankTimeoutOptions = [];
 let musicTracks = [];
 let botNetState = null;
 let botNetSettingsDirty = false;
@@ -180,21 +184,30 @@ function updateBotNetModeUi(mode) {
   if (botNetModeSelect) {
     botNetModeSelect.value = currentMode;
   }
+  if (botNetMaxRepliesWrap) {
+    botNetMaxRepliesWrap.style.display = currentMode === "auto-bot" ? "block" : "none";
+  }
+  if (botNetReplyDelayWrap) {
+    botNetReplyDelayWrap.style.display = currentMode === "auto-bot" ? "block" : "none";
+  }
   if (botNetModeHint) {
     botNetModeHint.textContent =
       currentMode === "persona-relay"
-        ? "Persona Relay rewrites your prompt in Whisplay's own voice before it goes to the peer bot."
-        : "Auto Bot Conversation lets the bots keep talking until the auto reply cap or hourly limit stops them.";
+        ? "Recommended. Whisplay rewrites one prompt in character, sends it once, and waits for you."
+        : "Auto Conversation keeps both bots talking on their own until the reply limit stops them.";
   }
   if (botNetTopicLabel) {
     botNetTopicLabel.textContent =
-      currentMode === "persona-relay" ? "Tell Whisplay what to send" : "Start Bot Conversation";
+      currentMode === "persona-relay" ? "Tell Whisplay what to send" : "Start Auto Conversation";
   }
   if (botNetTopicInput) {
     botNetTopicInput.placeholder =
       currentMode === "persona-relay"
         ? "Ask Whisplay to relay something to the peer in its own words..."
-        : "Give the bots a topic, mood, or scenario...";
+        : "Give the bots a topic, mood, or scenario for auto-chat...";
+  }
+  if (botNetPeerStartBtn) {
+    botNetPeerStartBtn.style.display = currentMode === "auto-bot" ? "" : "none";
   }
 }
 
@@ -1077,12 +1090,12 @@ async function loadChatHistories() {
 }
 
 async function resetChat() {
-  setChatStatus("Starting new chat...");
+  setChatStatus("Ending current chat...");
   if (newChatBtn) {
     newChatBtn.disabled = true;
   }
   try {
-    const response = await fetch("/api/chat/reset", {
+    const response = await fetch("/api/chat/archive-reset", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -1093,12 +1106,16 @@ async function resetChat() {
     if (!response.ok || payload.ok === false) {
       throw new Error(payload.error || `HTTP ${response.status}`);
     }
-    setChatStatus("Started a new chat.");
+    setChatStatus(
+      payload.archived
+        ? "Chat archived to Saved Chats. Fresh conversation ready."
+        : "Fresh conversation ready.",
+    );
     await loadChatHistories();
   } catch (error) {
     console.error("Failed to reset chat:", error);
     const message = error instanceof Error ? error.message : String(error);
-    setChatStatus(`New chat failed: ${message}`, true);
+    setChatStatus(`End chat failed: ${message}`, true);
   } finally {
     if (newChatBtn) {
       newChatBtn.disabled = false;
@@ -1256,6 +1273,27 @@ function populateIdleTimeoutOptions(selectedValue) {
   idleTimeoutSelect.value = fallbackValue;
 }
 
+function populateScreenBlankTimeoutOptions(selectedValue) {
+  if (!screenBlankTimeoutSelect) return;
+  screenBlankTimeoutSelect.innerHTML = "";
+  screenBlankTimeoutOptions.forEach((value) => {
+    const option = document.createElement("option");
+    option.value = String(value);
+    option.textContent = formatIdleTimeoutLabel(value);
+    screenBlankTimeoutSelect.appendChild(option);
+  });
+  const fallbackValue = String(
+    Number.isFinite(selectedValue) ? selectedValue : 0,
+  );
+  if (![...screenBlankTimeoutSelect.options].some((option) => option.value === fallbackValue)) {
+    const option = document.createElement("option");
+    option.value = fallbackValue;
+    option.textContent = formatIdleTimeoutLabel(parseInt(fallbackValue, 10));
+    screenBlankTimeoutSelect.appendChild(option);
+  }
+  screenBlankTimeoutSelect.value = fallbackValue;
+}
+
 function syncPresetSelectionFromPrompt(prompt) {
   if (!personalityPresetSelect) return;
   const match = personalityPresets.find((preset) => preset.prompt === prompt);
@@ -1307,6 +1345,7 @@ function applySettings(settings) {
       settings.screensaverMode || DEFAULT_SCREENSAVER_MODE;
   }
   populateIdleTimeoutOptions(settings.idleTimeoutSec);
+  populateScreenBlankTimeoutOptions(settings.screenBlankTimeoutSec);
   applyTheme(settings.uiTheme || DEFAULT_UI_THEME);
   if (groqKeyHint) {
     groqKeyHint.textContent = settings.groqApiKeyConfigured
@@ -1347,6 +1386,9 @@ async function loadSettings() {
     idleTimeoutOptions = Array.isArray(payload.idleTimeoutOptions)
       ? payload.idleTimeoutOptions
       : [];
+    screenBlankTimeoutOptions = Array.isArray(payload.screenBlankTimeoutOptions)
+      ? payload.screenBlankTimeoutOptions
+      : idleTimeoutOptions;
     applySettings(payload.settings || {});
     settingsLoaded = true;
     setSettingsStatus("Settings ready.");
@@ -1652,6 +1694,10 @@ async function saveSettings({ clearGroqApiKey = false } = {}) {
       screensaverModeSelect?.value || DEFAULT_SCREENSAVER_MODE,
     idleTimeoutSec: parseInt(
       idleTimeoutSelect?.value || String(DEFAULT_IDLE_TIMEOUT_SEC),
+      10,
+    ),
+    screenBlankTimeoutSec: parseInt(
+      screenBlankTimeoutSelect?.value || "0",
       10,
     ),
   };
@@ -2370,46 +2416,6 @@ function updateTextInputState(enabled, status) {
 async function sendTextInput() {
   const text = (textInput.value || "").trim();
   if (!text) return;
-  if (botNetEnabledCheckbox?.checked) {
-    if (!validateBotNetConversationSetup()) {
-      return;
-    }
-    try {
-      const botnetMode = botNetModeSelect?.value || "auto-bot";
-      setBotNetStatus(
-        botnetMode === "persona-relay"
-          ? "Relaying your prompt through Whisplay..."
-          : "Starting BotNet conversation from text input...",
-      );
-      await saveBotNetSettings(false);
-      const response = await fetch("/api/botnet/user-message", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text, botnetMode }),
-      });
-      const payload = await response.json();
-      if (!response.ok || payload.ok === false) {
-        throw new Error(payload.error || `HTTP ${response.status}`);
-      }
-      textInput.value = "";
-      if (botNetTopicInput) {
-        botNetTopicInput.value = text;
-      }
-      await loadBotNetState();
-      setBotNetStatus(
-        botnetMode === "persona-relay"
-          ? "Whisplay relayed your prompt to the peer bot."
-          : "BotNet conversation started from the text box.",
-      );
-    } catch (error) {
-      console.error("Failed to route text input to BotNet:", error);
-      setBotNetStatus(
-        error instanceof Error ? error.message : "Failed to route text input to BotNet.",
-        true,
-      );
-    }
-    return;
-  }
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
   ws.send(JSON.stringify({ type: "text_input", text }));
   textInput.value = "";
@@ -2417,7 +2423,7 @@ async function sendTextInput() {
 
 textSendBtn.addEventListener("click", sendTextInput);
 textInput.addEventListener("keydown", (e) => {
-  if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && !e.isComposing) {
+  if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
     e.preventDefault();
     sendTextInput();
   }

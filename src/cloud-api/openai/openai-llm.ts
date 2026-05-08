@@ -40,15 +40,16 @@ const openaiMaxMessagesLength = parseInt(
   10,
 );
 
+const buildChatHistoryFileName = (): string =>
+  `openai_chat_history_${moment().format("YYYY-MM-DD_HH-mm-ss_SSS")}.json`;
+
 const buildImageDataUrl = (imagePath: string): string => {
   const mimeType = getImageMimeType(imagePath) || "image/jpeg";
   const base64 = fs.readFileSync(imagePath).toString("base64");
   return `data:${mimeType};base64,${base64}`;
 };
 
-const chatHistoryFileName = `openai_chat_history_${moment().format(
-  "YYYY-MM-DD_HH-mm-ss",
-)}.json`;
+const chatHistoryFileName = buildChatHistoryFileName();
 const CHAT_HISTORY_FILE_PATTERN = /^openai_chat_history_.*\.json$/;
 
 const messages: Message[] = [
@@ -76,6 +77,23 @@ const resetChatHistory = (): void => {
     role: "system",
     content: getSystemPrompt(),
   });
+};
+
+const writeChatHistory = (fileName: string, history: Message[]): void => {
+  fs.mkdirSync(chatHistoryDir, { recursive: true });
+  fs.writeFileSync(path.join(chatHistoryDir, fileName), JSON.stringify(history, null, 2));
+};
+
+const archiveCurrentChatHistory = (): string | null => {
+  const hasConversation = messages.some(
+    (message, index) => index > 0 && message.content.trim().length > 0,
+  );
+  if (!hasConversation) {
+    return null;
+  }
+  const fileName = buildChatHistoryFileName();
+  writeChatHistory(fileName, messages);
+  return fileName;
 };
 
 const getSafeChatHistoryPath = (fileName: string): string => {
@@ -177,10 +195,7 @@ const chatWithLLMStream: ChatWithLLMStreamFunction = async (
   const promise = new Promise<void>((resolve) => {
     endResolve = resolve;
   }).finally(() => {
-    fs.writeFileSync(
-      path.join(chatHistoryDir, chatHistoryFileName),
-      JSON.stringify(messages, null, 2),
-    );
+    writeChatHistory(chatHistoryFileName, messages);
   });
   messages.push(...inputMessages);
   // Trim messages to MAX_MESSAGES_LENGTH (keep first system prompt + last N messages)
@@ -399,4 +414,5 @@ export default {
   summaryTextWithLLM,
   listSavedChatHistories,
   loadSavedChatHistory,
+  archiveCurrentChatHistory,
 };

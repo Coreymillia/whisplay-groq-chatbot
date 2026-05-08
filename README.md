@@ -41,6 +41,8 @@ This project starts from the official PiSugar Whisplay chatbot, but is being tai
 - **Local photo effects:** apply deterministic voice-triggered filters such as **retro**, **comic**, **sketch**, **pixelate**, **spooky**, **dreamy**, **warm**, **cyberpunk**, **glitch**, and more to the currently shown image
 - **Preset personalities:** Neutral, Friendly, Cranky, Roast Bot, Sleepy Pi, Affirmation, Philosopher, Mythic Oracle, Joke Bot, Tutor, Detective, and Zen
 - **HAT visuals:** switchable header effects plus full-screen screensavers such as Matrix, Retro Geometry, Plasma, Neon Rain, and new VU-style mic meters
+- **Optional PiSugar battery button support:** if a PiSugar service is present, the app can auto-wire **short press** to capture a photo from the selected camera source and **long press** to request a safe Pi shutdown without forcing battery cut-off, without affecting installs that do not use PiSugar
+- **Separate HAT idle controls:** the browser UI now splits **screensaver delay** from a separate **screen blank timeout**, so the device can stay on while the backlight turns off later for power saving
 - **Improved HAT readability:** reply text now wraps more naturally on the device instead of breaking as aggressively mid-word
 - **Companion CYD controls:** touch actions for **New Chat**, **Repeat**, **Capture**, **Voice**, plus an on-screen **Setup** button for reopening the Wi-Fi portal
 - **Companion Cardputer controls:** keyboard text send, message viewing, local setup portal, saved text sizes, and a split receive/send screen layout
@@ -83,47 +85,113 @@ These are a few representative shots of the current build. GitHub README pages a
 
 These steps are meant for a **fresh Raspberry Pi OS install** on the Pi that will run the chatbot.
 
-1. Start from your normal Pi user account and install the basic tools:
+1. Install the base tools on the Pi:
    ```bash
    sudo apt-get update
    sudo apt-get install -y git curl
    ```
-2. Clone this project and enter it:
+2. Install the official Whisplay HAT driver first, then reboot:
    ```bash
-   git clone <your-repo-url> /home/coreymillia/Documents/complete-projects/WhisplayGroqHat
-   cd /home/coreymillia/Documents/complete-projects/WhisplayGroqHat
+   git clone https://github.com/PiSugar/Whisplay.git --depth 1
+   cd Whisplay/Driver
+   sudo bash install_wm8960_drive.sh
+   sudo reboot
    ```
-3. Run the dependency installer:
+3. Clone this project and enter it:
+   ```bash
+   git clone <your-repo-url> /home/coreymillia/WhisplayGroqHat
+   cd /home/coreymillia/WhisplayGroqHat
+   ```
+4. Run the dependency installer:
    ```bash
    bash install_dependencies.sh
    source ~/.bashrc
    ```
-   This script installs the Python and Node dependencies used by this fork, audio tools like `sox` and `mpg123`, enables SPI for the HAT, and sets up Node 20.
-4. Create your env file and add your Groq key:
+   This installs the Python and Node dependencies used by this fork, the required audio tools (`sox`, `mpg123`, `libsox-fmt-mp3`), `python3-pip`, the OpenBLAS runtime used by `numpy`, enables SPI for the HAT, and sets up Node 20.
+5. Create your env file:
    ```bash
    cp .env.template .env
    ```
-   Then edit `.env` and set `OPENAI_API_KEY` to your Groq key. If you want Gemini vision ready from the start, also set `GEMINI_API_KEY`.
-5. Build and run:
+6. Edit `.env` for a real Whisplay device install:
+   ```ini
+   LLM_SERVER=openai
+   ASR_SERVER=openai
+   TTS_SERVER=test
+   OPENAI_API_KEY=your_groq_key
+   GEMINI_API_KEY=your_gemini_key
+   WHISPLAY_DEVICE_ENABLED=true
+   WHISPLAY_WEB_ENABLED=true
+   ```
+   Notes:
+   - `OPENAI_API_BASE_URL=https://api.groq.com/openai/v1` is already set in the template for Groq.
+    - Keeping `WHISPLAY_WEB_ENABLED=true` is useful even on-device so the browser UI at port `17880` still works for settings and recovery.
+    - If you are only using the browser simulator on a non-HAT machine, set `WHISPLAY_DEVICE_ENABLED=false`.
+    - PiSugar button actions are optional. Leave `PISUGAR_BUTTON_ACTIONS_ENABLED=true` to auto-wire them when a PiSugar service is detected, or set it to `false` to leave PiSugar button behavior untouched.
+    - The default PiSugar long-press action is a **safe Pi shutdown only**. This avoids the PiSugar 2 behavior where a full battery cut-off can make later restarts fall back to wall power only until the battery path is re-armed.
+    - If you want PiSugar button support on a real battery-backed build, install the official PiSugar power manager on the Pi and keep `pisugar-poweroff.service` disabled if you want normal Pi shutdown without cutting the battery rail:
+      ```bash
+      curl -fsSL -o /tmp/pisugar-power-manager.sh https://cdn.pisugar.com/release/pisugar-power-manager.sh
+      sudo bash /tmp/pisugar-power-manager.sh -c release
+      sudo systemctl disable --now pisugar-poweroff
+      ```
+7. Build the app:
    ```bash
    bash build.sh
+   ```
+8. Start it once manually or install the service:
+   ```bash
    bash run_chatbot.sh
    ```
-6. Open the browser simulator and settings UI:
-   ```text
-   http://<host-or-pi-ip>:17880
-   ```
-7. Optional: set the bot to start on boot:
+   or
    ```bash
    bash startup.sh
    ```
    Run `startup.sh` as your normal user, not with `sudo`.
+9. Open the browser settings UI and confirm your keys save correctly:
+   ```text
+   http://<host-or-pi-ip>:17880
+   ```
+10. After the first full start on real hardware, confirm all three paths:
+   - the Whisplay LCD shows the normal idle screen
+   - long press enters listening mode and records from the HAT microphone
+   - the browser UI loads on port `17880`
 
 The default template in this fork was originally set up for **web simulator first** bring-up. The project has now also been validated on a real Whisplay HAT, while keeping the web UI available for debugging and settings.
 
 For actual device use, prefer the `chatbot.service` boot path over ad-hoc `nohup` launches so the bot comes back cleanly after shutdown or reboot.
 
 A reboot after the first dependency install is a good idea, especially if you just enabled SPI, attached the Whisplay HAT, or connected a camera for the first time.
+
+### Fresh-install recovery notes
+
+If a brand-new image boots the browser UI but the Whisplay LCD stays blank, or the button/mic path does not respond yet, check these first:
+
+1. **Blank Whisplay display**
+   - make sure the official `install_wm8960_drive.sh` driver step was completed and the Pi was rebooted afterward
+   - make sure `.env` has `WHISPLAY_DEVICE_ENABLED=true`
+   - restart the service:
+     ```bash
+     sudo systemctl restart chatbot.service
+     ```
+2. **Button works but microphone does not start recording**
+   - make sure `sox`, `mpg123`, and `libsox-fmt-mp3` are installed
+   - check that the WM8960 card appears in both:
+     ```bash
+     aplay -l
+     arecord -l
+     ```
+3. **Python display process crashes on a fresh image**
+   - rerun:
+     ```bash
+     bash install_dependencies.sh
+     ```
+   - this repo now installs `python3-pip` and the OpenBLAS runtime needed by `numpy`
+4. **Package manager got interrupted during first setup**
+   - repair it, then rerun the dependency installer:
+     ```bash
+     sudo dpkg --configure -a
+     bash install_dependencies.sh
+     ```
 
 ## Companion CYD status
 
@@ -359,13 +427,15 @@ TTS_SERVER=espeak-ng
 
 ## Settings UI notes
 
-The browser simulator includes a settings panel for the Groq key, Gemini key, preset personalities, freeform personality editing, voice mode, record time, text scroll speed, UI theme, HAT header mode, HAT screensaver mode, HAT idle timeout, **weather latitude/longitude**, the saved **music shuffle** toggle, and a shutdown button for clean power-off without SSH.
+The browser simulator includes a settings panel for the Groq key, Gemini key, preset personalities, freeform personality editing, voice mode, record time, text scroll speed, UI theme, HAT header mode, HAT screensaver mode, **HAT screensaver delay**, **HAT screen blank timeout**, **weather latitude/longitude**, the saved **music shuffle** toggle, and a shutdown button for clean power-off without SSH.
 
 The Groq and Gemini keys can be stored there without editing `.env`. Runtime settings are saved to the local settings file on the Pi, and both **Gemini vision** and **Gemini image generation** in this fork will use the saved browser key before falling back to `GEMINI_API_KEY` from `.env`.
 
 The browser UI also now includes a simple **Vision Test** image upload box. You can upload a photo from your PC, then say or type **"what do you see?"** to get a response in the tone of the currently selected chatbot personality.
 
 The browser settings panel now also includes an optional **Camera Source** selector for vision hardware. Right now it supports the local **Pi Camera** path and an **ESP32-CAM** network source with a configurable URL. The Vision Test card can either upload an image from your PC or capture one from the configured camera source.
+
+The active camera source can now also be changed by voice with **"switch camera"** or **"swap camera"**. In the current two-camera setup that just toggles between **Pi Camera** and **ESP32-CAM**.
 
 For the local Pi camera path, this fork now supports either the Python **Picamera2** stack or the native **rpicam-still** toolchain, which makes the common Raspberry Pi Camera modules more reliable across different Pi OS installs. The hardware we have already wired up and used in this fork is the **Raspberry Pi Camera Module v2.1**. **Camera Module 3** is the next planned Pi camera target, but it has not been hardware-validated here yet.
 
@@ -522,11 +592,12 @@ The browser UI and HAT menu share the same stored settings.
 - In **Speak on demand** mode, start a request with **`tell me ...`** to make that **one reply** speak without changing the saved voice mode
 - **set volume to 1-10** / **volume 1-10** = set speaker volume on a 1-10 scale
 - **volume up** / **volume down** = raise or lower the current speaker volume by one step
-- **screen timeout 1-10 minutes** / **display timeout 1-10 minutes** = set the HAT screen/saver timeout
-- **screen timeout off** / **display timeout off** = disable the HAT screen/saver timeout
+- **screen timeout 1-10 minutes** / **display timeout 1-10 minutes** = set the HAT screensaver delay
+- **screen timeout off** / **display timeout off** = disable the HAT screensaver delay
 - **shutdown** / **shutdown raspberry** / **shutdown pi** = request Raspberry Pi shutdown
 - **browse photos** / **browse images** = open the saved-photo browser on the HAT
 - **take photo** / **capture image** = capture a still image from the configured camera source
+- **switch camera** / **swap camera** = toggle the active camera source between **Pi Camera** and **ESP32-CAM**
 - **what's the weather** / **weather forecast** = fetch the saved-location NWS forecast and answer in the current chatbot personality
 - **weather alerts** / **any alerts** = fetch active NWS alerts for the saved location
 - **is it going to snow** / **snow forecast** = ask for a snow-focused forecast summary for the saved location
@@ -850,7 +921,7 @@ bash build.sh
 If If you encounter `ModuleNotFoundError` or there's new third-party libraries to the python code, please run the following command to update the dependencies for python:
 ```
 cd python
-pip install -r requirements.txt --break-system-packages
+python3 -m pip install -r requirements.txt --break-system-packages
 ```
 
 The env template may be updated from time to time. If you want to upgrade your existing `.env` file based on the latest `.env.template`, you can run the following command:

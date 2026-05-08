@@ -75,7 +75,7 @@
         <div class="card" id="textInputCard">
           <div class="title">Text Input</div>
           <div class="text-toolbar">
-            <button class="button secondary compact" id="newChatBtn" type="button">New Chat</button>
+            <button class="button secondary compact" id="newChatBtn" type="button">End Chat</button>
             <div class="text-history-controls">
               <select class="settings-select" id="chatHistorySelect">
                 <option value="">Saved chats</option>
@@ -88,7 +88,7 @@
             <button id="textSendBtn" title="Send">➤</button>
           </div>
           <div class="status-text vision-status" id="chatStatus">
-            New chat starts a fresh conversation. Load brings an older saved chat back into memory.
+            End Chat archives the current conversation to Saved Chats and starts fresh. Load reopens an older chat.
           </div>
         </div>
         <div class="card" id="botNetCard">
@@ -97,20 +97,20 @@
             <div class="settings-field">
               <label class="music-shuffle-toggle" for="botNetEnabledCheckbox">
                 <input id="botNetEnabledCheckbox" type="checkbox" />
-                <span>Enable BotNet mode</span>
+                <span>Enable BotNet link</span>
               </label>
               <div class="field-hint">
-                When enabled, browser text input starts bot-to-bot conversations instead of normal direct replies.
+                BotNet stays inside this card. The normal Text Input box still talks to Whisplay directly.
               </div>
             </div>
             <div class="settings-field">
               <label class="field-label" for="botNetModeSelect">BotNet mode</label>
               <select class="settings-select" id="botNetModeSelect">
-                <option value="persona-relay">Persona Relay</option>
-                <option value="auto-bot">Auto Bot Conversation</option>
+                <option value="persona-relay">One Message at a Time</option>
+                <option value="auto-bot">Auto Conversation</option>
               </select>
               <div class="field-hint" id="botNetModeHint">
-                Persona Relay rewrites your prompt in Whisplay's own voice before it goes to the peer bot.
+                Recommended. Whisplay rewrites one prompt in character, sends it once, and waits for you.
               </div>
             </div>
             <div class="settings-field">
@@ -188,7 +188,7 @@
                 This is the address the peer uses to call back into this Whisplay.
               </div>
             </div>
-            <div class="settings-field">
+            <div class="settings-field" id="botNetMaxRepliesWrap">
               <label class="field-label" for="botNetMaxRepliesInput">Max Bot Replies</label>
               <input
                 class="settings-input"
@@ -199,8 +199,11 @@
                 step="1"
                 value="8"
               />
+              <div class="field-hint">
+                Auto Conversation only. Set how many back-and-forth bot replies are allowed before stopping.
+              </div>
             </div>
-            <div class="settings-field">
+            <div class="settings-field" id="botNetReplyDelayWrap">
               <label class="field-label" for="botNetReplyDelayInput">Reply Delay Seconds</label>
               <input
                 class="settings-input"
@@ -211,6 +214,9 @@
                 step="1"
                 value="6"
               />
+              <div class="field-hint">
+                Auto Conversation only. Adds a short pause before each automatic reply.
+              </div>
             </div>
             <div class="settings-field settings-field-wide">
               <label class="field-label" for="botNetTopicInput" id="botNetTopicLabel">Start Bot Conversation</label>
@@ -490,10 +496,18 @@
               </div>
 
               <div class="settings-field">
-                <label class="field-label" for="idleTimeoutSelect">HAT Screen Timeout</label>
+                <label class="field-label" for="idleTimeoutSelect">HAT Screensaver Delay</label>
                 <select class="settings-select" id="idleTimeoutSelect"></select>
                 <div class="field-hint">
-                  After this much idle time, the HAT can switch to the full-screen saver. Set Off to disable it.
+                  After this much idle time, the HAT can switch to the full-screen saver. Set Off to disable the screensaver.
+                </div>
+              </div>
+
+              <div class="settings-field">
+                <label class="field-label" for="screenBlankTimeoutSelect">HAT Screen Blank Timeout</label>
+                <select class="settings-select" id="screenBlankTimeoutSelect"></select>
+                <div class="field-hint">
+                  Turns the backlight off after this much idle time to save power while leaving the device itself on. Set Off to disable blanking.
                 </div>
               </div>
 

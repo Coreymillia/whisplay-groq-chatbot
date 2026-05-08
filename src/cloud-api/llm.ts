@@ -2,6 +2,7 @@ import { noop } from "lodash";
 import dotenv from "dotenv";
 import { LLMServer } from "../type";
 import {
+  ArchiveCurrentChatHistoryFunction,
   ChatWithLLMStreamFunction,
   ListSavedChatHistoriesFunction,
   LoadSavedChatHistoryFunction,
@@ -17,6 +18,7 @@ let resetChatHistory: ResetChatHistoryFunction = noop as any;
 let summaryTextWithLLM: SummaryTextWithLLMFunction = async (text, _) => text;
 let listSavedChatHistories: ListSavedChatHistoriesFunction = () => [];
 let loadSavedChatHistory: LoadSavedChatHistoryFunction = () => false;
+let archiveCurrentChatHistory: ArchiveCurrentChatHistoryFunction = () => null;
 
 const MAX_FUNCTION_CALL_DEPTH = 5;
 let functionCallDepth = 0;
@@ -71,6 +73,9 @@ try {
   if (llmProvider.loadSavedChatHistory) {
     loadSavedChatHistory = llmProvider.loadSavedChatHistory;
   }
+  if (llmProvider.archiveCurrentChatHistory) {
+    archiveCurrentChatHistory = llmProvider.archiveCurrentChatHistory;
+  }
 } catch (e: any) {
   console.warn(e.message);
 }
@@ -83,5 +88,6 @@ export {
   summaryTextWithLLM,
   listSavedChatHistories,
   loadSavedChatHistory,
+  archiveCurrentChatHistory,
   isImMode,
 };
