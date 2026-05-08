@@ -36,6 +36,7 @@ This project starts from the official PiSugar Whisplay chatbot, but is being tai
 - **One-button device flow:** long press to talk, double press to replay the last answer, and voice shortcuts for settings and help
 - **Voice controls:** settings, voice on/off, photo capture, photo browsing, shutdown, and an on-device voice-command cheat sheet
 - **Vision flow:** upload a photo or capture one from the configured camera source, then ask **"what do you see?"**
+- **Per-camera rotation controls:** the browser UI can rotate the **Pi Camera** and **ESP32-CAM** independently in 90-degree steps so previews and captures match your mounting direction
 - **NWS weather bot:** save a latitude/longitude in Settings, then ask **"what's the weather?"** or **"weather alerts"** to get a National Weather Service forecast answered in the currently selected chatbot personality
 - **MP3 player:** upload MP3 files from the browser UI, play the full library in order by default or enable shuffle, and control playback from the browser or voice
 - **Local photo effects:** apply deterministic voice-triggered filters such as **retro**, **comic**, **sketch**, **pixelate**, **spooky**, **dreamy**, **warm**, **cyberpunk**, **glitch**, and more to the currently shown image
@@ -43,6 +44,7 @@ This project starts from the official PiSugar Whisplay chatbot, but is being tai
 - **HAT visuals:** switchable header effects plus full-screen screensavers such as Matrix, Retro Geometry, Plasma, Neon Rain, and new VU-style mic meters
 - **Optional PiSugar battery button support:** if a PiSugar service is present, the app can auto-wire **short press** to capture a photo from the selected camera source and **long press** to request a safe Pi shutdown without forcing battery cut-off, without affecting installs that do not use PiSugar
 - **Separate HAT idle controls:** the browser UI now splits **screensaver delay** from a separate **screen blank timeout**, so the device can stay on while the backlight turns off later for power saving
+- **Room monitor gallery:** the browser UI can now auto-capture from the selected camera source on a fixed interval and keep a separate room-monitor gallery trimmed dynamically to preserve at least **8 GB** of free SD-card space by deleting the oldest captures first
 - **Improved HAT readability:** reply text now wraps more naturally on the device instead of breaking as aggressively mid-word
 - **Companion CYD controls:** touch actions for **New Chat**, **Repeat**, **Capture**, **Voice**, plus an on-screen **Setup** button for reopening the Wi-Fi portal
 - **Companion Cardputer controls:** keyboard text send, message viewing, local setup portal, saved text sizes, and a split receive/send screen layout
@@ -427,7 +429,7 @@ TTS_SERVER=espeak-ng
 
 ## Settings UI notes
 
-The browser simulator includes a settings panel for the Groq key, Gemini key, preset personalities, freeform personality editing, voice mode, record time, text scroll speed, UI theme, HAT header mode, HAT screensaver mode, **HAT screensaver delay**, **HAT screen blank timeout**, **weather latitude/longitude**, the saved **music shuffle** toggle, and a shutdown button for clean power-off without SSH.
+The browser simulator includes a settings panel for the Groq key, Gemini key, preset personalities, freeform personality editing, voice mode, record time, text scroll speed, UI theme, **camera source**, **per-camera 90-degree rotation controls**, HAT header mode, HAT screensaver mode, **HAT screensaver delay**, **HAT screen blank timeout**, **room monitor auto-capture interval**, **weather latitude/longitude**, the saved **music shuffle** toggle, and a shutdown button for clean power-off without SSH.
 
 The Groq and Gemini keys can be stored there without editing `.env`. Runtime settings are saved to the local settings file on the Pi, and both **Gemini vision** and **Gemini image generation** in this fork will use the saved browser key before falling back to `GEMINI_API_KEY` from `.env`.
 
@@ -440,6 +442,8 @@ The active camera source can now also be changed by voice with **"switch camera"
 For the local Pi camera path, this fork now supports either the Python **Picamera2** stack or the native **rpicam-still** toolchain, which makes the common Raspberry Pi Camera modules more reliable across different Pi OS installs. The hardware we have already wired up and used in this fork is the **Raspberry Pi Camera Module v2.1**. **Camera Module 3** is the next planned Pi camera target, but it has not been hardware-validated here yet.
 
 Captured photos are now kept in the project camera storage and exposed in the browser UI as a **Saved Photos** list. The browser UI can delete saved photos; the HAT browse mode is read-only.
+
+The browser UI also now includes a separate **Room Monitor** gallery fed by optional timed auto-captures from the current camera source. That gallery now trims itself dynamically to leave at least **8 GB** free on the active SD card; when free space drops below that reserve, the oldest room-monitor images are removed first.
 
 The saved **Text Scroll Speed** setting applies to both the browser simulator and the physical HAT, so you can speed up long replies without changing the existing button behavior.
 

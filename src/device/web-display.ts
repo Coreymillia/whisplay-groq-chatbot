@@ -35,6 +35,7 @@ import {
   getPublicRuntimeSettings,
   IDLE_TIMEOUT_OPTIONS,
   RECORD_TIMEOUT_OPTIONS,
+  ROOM_MONITOR_INTERVAL_OPTIONS,
   SCREEN_BLANK_TIMEOUT_OPTIONS,
   SCROLL_SPEED_OPTIONS,
   VOLUME_LEVEL_OPTIONS,
@@ -59,6 +60,12 @@ import {
 } from "./music-player";
 import { musicDir } from "../utils/dir";
 import { getBotNetManager } from "./botnet";
+import {
+  applyRoomMonitorSettings,
+  getRoomMonitorCapturePath,
+  getRoomMonitorStatus,
+  listRoomMonitorCaptures,
+} from "./room-monitor";
 
 type ButtonHandler = () => void;
 
@@ -432,6 +439,33 @@ export class WebDisplayServer implements WebAudioBridgeServer {
         };
       });
       ctx.body = { photos };
+    });
+
+    this.router.get("/api/room-monitor/photos", (ctx) => {
+      ctx.set("Cache-Control", "no-store");
+      const photos = listRoomMonitorCaptures().map((photo) => ({
+        fileName: photo.fileName,
+        imageUrl: `/api/room-monitor/photos/image/${encodeURIComponent(photo.fileName)}`,
+        updatedAt: photo.updatedAt,
+        sizeBytes: photo.sizeBytes,
+      }));
+      ctx.body = {
+        photos,
+        status: getRoomMonitorStatus(),
+      };
+    });
+
+    this.router.get("/api/room-monitor/photos/image/:fileName", (ctx) => {
+      ctx.set("Cache-Control", "no-store");
+      const fileName = decodeURIComponent(String(ctx.params.fileName || ""));
+      const photoPath = getRoomMonitorCapturePath(fileName);
+      if (!photoPath) {
+        ctx.status = 404;
+        ctx.body = "Room monitor photo not found";
+        return;
+      }
+      ctx.type = getImageMimeType(photoPath);
+      ctx.body = fs.createReadStream(photoPath);
     });
 
     this.router.get("/api/photos/image/:fileName", (ctx) => {
@@ -910,6 +944,7 @@ export class WebDisplayServer implements WebAudioBridgeServer {
         recordTimeoutOptions: RECORD_TIMEOUT_OPTIONS,
         idleTimeoutOptions: IDLE_TIMEOUT_OPTIONS,
         screenBlankTimeoutOptions: SCREEN_BLANK_TIMEOUT_OPTIONS,
+        roomMonitorIntervalOptions: ROOM_MONITOR_INTERVAL_OPTIONS,
       };
     });
 
@@ -927,14 +962,18 @@ export class WebDisplayServer implements WebAudioBridgeServer {
         uiTheme: getBodyString(body, "uiTheme"),
         cameraSource: getBodyString(body, "cameraSource"),
         esp32CamUrl: getBodyString(body, "esp32CamUrl"),
+        piCameraRotationDeg: getBodyNumber(body, "piCameraRotationDeg"),
+        esp32CamRotationDeg: getBodyNumber(body, "esp32CamRotationDeg"),
         manualRecordMaxSec: getBodyNumber(body, "manualRecordMaxSec"),
         headerMode: getBodyString(body, "headerMode"),
         screensaverMode: getBodyString(body, "screensaverMode"),
         idleTimeoutSec: getBodyNumber(body, "idleTimeoutSec"),
         screenBlankTimeoutSec: getBodyNumber(body, "screenBlankTimeoutSec"),
+        roomMonitorIntervalSec: getBodyNumber(body, "roomMonitorIntervalSec"),
         weatherLatitude: getBodyNumber(body, "weatherLatitude"),
         weatherLongitude: getBodyNumber(body, "weatherLongitude"),
       });
+      applyRoomMonitorSettings(settings);
       this.onSettingsSaved(settings);
 
       ctx.body = {
@@ -951,11 +990,14 @@ export class WebDisplayServer implements WebAudioBridgeServer {
           uiTheme: settings.uiTheme,
           cameraSource: settings.cameraSource,
           esp32CamUrl: settings.esp32CamUrl,
+          piCameraRotationDeg: settings.piCameraRotationDeg,
+          esp32CamRotationDeg: settings.esp32CamRotationDeg,
           manualRecordMaxSec: settings.manualRecordMaxSec,
           headerMode: settings.headerMode,
           screensaverMode: settings.screensaverMode,
           idleTimeoutSec: settings.idleTimeoutSec,
           screenBlankTimeoutSec: settings.screenBlankTimeoutSec,
+          roomMonitorIntervalSec: settings.roomMonitorIntervalSec,
           weatherLatitude: settings.weatherLatitude,
           weatherLongitude: settings.weatherLongitude,
         },
@@ -965,6 +1007,7 @@ export class WebDisplayServer implements WebAudioBridgeServer {
         recordTimeoutOptions: RECORD_TIMEOUT_OPTIONS,
         idleTimeoutOptions: IDLE_TIMEOUT_OPTIONS,
         screenBlankTimeoutOptions: SCREEN_BLANK_TIMEOUT_OPTIONS,
+        roomMonitorIntervalOptions: ROOM_MONITOR_INTERVAL_OPTIONS,
       };
     });
 

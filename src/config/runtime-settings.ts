@@ -36,11 +36,14 @@ export interface RuntimeSettings {
   uiTheme: UITheme;
   cameraSource: CameraSource;
   esp32CamUrl: string;
+  piCameraRotationDeg: number;
+  esp32CamRotationDeg: number;
   manualRecordMaxSec: number;
   headerMode: HeaderMode;
   screensaverMode: ScreensaverMode;
   idleTimeoutSec: number;
   screenBlankTimeoutSec: number;
+  roomMonitorIntervalSec: number;
   weatherLatitude: number | null;
   weatherLongitude: number | null;
 }
@@ -57,11 +60,14 @@ export interface RuntimeSettingsUpdate {
   uiTheme?: string;
   cameraSource?: string;
   esp32CamUrl?: string;
+  piCameraRotationDeg?: number;
+  esp32CamRotationDeg?: number;
   manualRecordMaxSec?: number;
   headerMode?: string;
   screensaverMode?: string;
   idleTimeoutSec?: number;
   screenBlankTimeoutSec?: number;
+  roomMonitorIntervalSec?: number;
   weatherLatitude?: number | null;
   weatherLongitude?: number | null;
 }
@@ -79,11 +85,14 @@ const DEFAULT_SCROLL_SPEED_LEVEL = 5;
 const DEFAULT_UI_THEME: UITheme = "default";
 const DEFAULT_CAMERA_SOURCE: CameraSource = "pi-camera";
 const DEFAULT_ESP32_CAM_URL = "http://esp32-cam.local";
+const DEFAULT_PI_CAMERA_ROTATION_DEG = 0;
+const DEFAULT_ESP32_CAM_ROTATION_DEG = 0;
 const DEFAULT_MANUAL_RECORD_MAX_SEC = 15;
 const DEFAULT_HEADER_MODE: HeaderMode = "emoji";
 const DEFAULT_SCREENSAVER_MODE: ScreensaverMode = "retro-geometry";
 const DEFAULT_IDLE_TIMEOUT_SEC = 120;
 const DEFAULT_SCREEN_BLANK_TIMEOUT_SEC = 0;
+const DEFAULT_ROOM_MONITOR_INTERVAL_SEC = 0;
 const DEFAULT_WEATHER_LATITUDE = null;
 const DEFAULT_WEATHER_LONGITUDE = null;
 export const RECORD_TIMEOUT_OPTIONS = [10, 15, 20, 30, 45, 60];
@@ -91,6 +100,7 @@ export const VOLUME_LEVEL_OPTIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 export const SCROLL_SPEED_OPTIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 export const IDLE_TIMEOUT_OPTIONS = [0, 60, 120, 180, 240, 300, 360, 420, 480, 540, 600];
 export const SCREEN_BLANK_TIMEOUT_OPTIONS = [...IDLE_TIMEOUT_OPTIONS];
+export const ROOM_MONITOR_INTERVAL_OPTIONS = [0, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600];
 export const VOICE_MODES: VoiceMode[] = [
   "text-only",
   "speak-on-demand",
@@ -218,6 +228,18 @@ function normalizeEsp32CamUrl(value: unknown): string {
   return withProtocol.replace(/\/+$/, "");
 }
 
+function normalizeCameraRotationDeg(
+  value: unknown,
+  defaultValue: number,
+): number {
+  const numeric = typeof value === "number" ? value : parseInt(String(value), 10);
+  if (!Number.isFinite(numeric)) {
+    return defaultValue;
+  }
+  const normalized = ((Math.round(numeric / 90) * 90) % 360 + 360) % 360;
+  return normalized;
+}
+
 function normalizeHeaderMode(value: unknown): HeaderMode {
   if (
     typeof value === "string" &&
@@ -264,6 +286,15 @@ function normalizeScreenBlankTimeoutSec(value: unknown): number {
   return Math.max(0, Math.min(3600, Math.round(numeric)));
 }
 
+function normalizeRoomMonitorIntervalSec(value: unknown): number {
+  const numeric =
+    typeof value === "number" ? value : parseInt(String(value), 10);
+  if (!Number.isFinite(numeric)) {
+    return DEFAULT_ROOM_MONITOR_INTERVAL_SEC;
+  }
+  return Math.max(0, Math.min(86400, Math.round(numeric)));
+}
+
 function normalizeCoordinate(
   value: unknown,
   min: number,
@@ -299,11 +330,20 @@ function sanitizeSettings(input: Partial<RuntimeSettings> | null | undefined): R
     uiTheme: normalizeUITheme(input?.uiTheme),
     cameraSource: normalizeCameraSource(input?.cameraSource),
     esp32CamUrl: normalizeEsp32CamUrl(input?.esp32CamUrl),
+    piCameraRotationDeg: normalizeCameraRotationDeg(
+      input?.piCameraRotationDeg,
+      DEFAULT_PI_CAMERA_ROTATION_DEG,
+    ),
+    esp32CamRotationDeg: normalizeCameraRotationDeg(
+      input?.esp32CamRotationDeg,
+      DEFAULT_ESP32_CAM_ROTATION_DEG,
+    ),
     manualRecordMaxSec: normalizeManualRecordMaxSec(input?.manualRecordMaxSec),
     headerMode: normalizeHeaderMode(input?.headerMode),
     screensaverMode: normalizeScreensaverMode(input?.screensaverMode),
     idleTimeoutSec: normalizeIdleTimeoutSec(input?.idleTimeoutSec),
     screenBlankTimeoutSec: normalizeScreenBlankTimeoutSec(input?.screenBlankTimeoutSec),
+    roomMonitorIntervalSec: normalizeRoomMonitorIntervalSec(input?.roomMonitorIntervalSec),
     weatherLatitude: normalizeCoordinate(input?.weatherLatitude, -90, 90) ?? DEFAULT_WEATHER_LATITUDE,
     weatherLongitude: normalizeCoordinate(input?.weatherLongitude, -180, 180) ?? DEFAULT_WEATHER_LONGITUDE,
   };
@@ -384,6 +424,20 @@ export function saveRuntimeSettings(
     next.esp32CamUrl = normalizeEsp32CamUrl(update.esp32CamUrl);
   }
 
+  if (typeof update.piCameraRotationDeg === "number") {
+    next.piCameraRotationDeg = normalizeCameraRotationDeg(
+      update.piCameraRotationDeg,
+      DEFAULT_PI_CAMERA_ROTATION_DEG,
+    );
+  }
+
+  if (typeof update.esp32CamRotationDeg === "number") {
+    next.esp32CamRotationDeg = normalizeCameraRotationDeg(
+      update.esp32CamRotationDeg,
+      DEFAULT_ESP32_CAM_ROTATION_DEG,
+    );
+  }
+
   if (typeof update.manualRecordMaxSec === "number") {
     next.manualRecordMaxSec = normalizeManualRecordMaxSec(
       update.manualRecordMaxSec,
@@ -404,6 +458,10 @@ export function saveRuntimeSettings(
 
   if (typeof update.screenBlankTimeoutSec === "number") {
     next.screenBlankTimeoutSec = normalizeScreenBlankTimeoutSec(update.screenBlankTimeoutSec);
+  }
+
+  if (typeof update.roomMonitorIntervalSec === "number") {
+    next.roomMonitorIntervalSec = normalizeRoomMonitorIntervalSec(update.roomMonitorIntervalSec);
   }
 
   if ("weatherLatitude" in update) {
@@ -495,6 +553,11 @@ export function getCameraSourceLabel(value: string): string {
   }
 }
 
+export function getCameraRotationLabel(value: number): string {
+  const normalized = normalizeCameraRotationDeg(value, 0);
+  return `${normalized}°`;
+}
+
 export function getScreensaverModeLabel(value: string): string {
   switch (value) {
     case "matrix-binary":
@@ -523,6 +586,17 @@ export function getIdleTimeoutLabel(value: number): string {
   return `${minutes} min`;
 }
 
+export function getRoomMonitorIntervalLabel(value: number): string {
+  if (value <= 0) {
+    return "Off";
+  }
+  if (value < 60) {
+    return `${value} sec`;
+  }
+  const minutes = value / 60;
+  return `${minutes % 1 === 0 ? minutes : minutes.toFixed(1)} min`;
+}
+
 export function getPublicRuntimeSettings(): {
   groqApiKeyConfigured: boolean;
   geminiApiKeyConfigured: boolean;
@@ -535,11 +609,14 @@ export function getPublicRuntimeSettings(): {
   uiTheme: UITheme;
   cameraSource: CameraSource;
   esp32CamUrl: string;
+  piCameraRotationDeg: number;
+  esp32CamRotationDeg: number;
   manualRecordMaxSec: number;
   headerMode: HeaderMode;
   screensaverMode: ScreensaverMode;
   idleTimeoutSec: number;
   screenBlankTimeoutSec: number;
+  roomMonitorIntervalSec: number;
   weatherLatitude: number | null;
   weatherLongitude: number | null;
 } {
@@ -558,6 +635,14 @@ export function getPublicRuntimeSettings(): {
     uiTheme: settings.uiTheme,
     cameraSource: settings.cameraSource,
     esp32CamUrl: settings.esp32CamUrl,
+    piCameraRotationDeg:
+      typeof settings.piCameraRotationDeg === "number"
+        ? settings.piCameraRotationDeg
+        : DEFAULT_PI_CAMERA_ROTATION_DEG,
+    esp32CamRotationDeg:
+      typeof settings.esp32CamRotationDeg === "number"
+        ? settings.esp32CamRotationDeg
+        : DEFAULT_ESP32_CAM_ROTATION_DEG,
     manualRecordMaxSec: settings.manualRecordMaxSec,
     headerMode: settings.headerMode,
     screensaverMode: settings.screensaverMode,
@@ -566,6 +651,10 @@ export function getPublicRuntimeSettings(): {
       typeof settings.screenBlankTimeoutSec === "number"
         ? settings.screenBlankTimeoutSec
         : DEFAULT_SCREEN_BLANK_TIMEOUT_SEC,
+    roomMonitorIntervalSec:
+      typeof settings.roomMonitorIntervalSec === "number"
+        ? settings.roomMonitorIntervalSec
+        : DEFAULT_ROOM_MONITOR_INTERVAL_SEC,
     weatherLatitude: settings.weatherLatitude,
     weatherLongitude: settings.weatherLongitude,
   };

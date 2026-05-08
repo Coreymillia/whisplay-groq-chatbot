@@ -434,6 +434,32 @@
               </div>
 
               <div class="settings-field">
+                <label class="field-label" for="piCameraRotationSelect">Pi Camera Rotation</label>
+                <select class="settings-select" id="piCameraRotationSelect">
+                  <option value="0">0°</option>
+                  <option value="90">90°</option>
+                  <option value="180">180°</option>
+                  <option value="270">270°</option>
+                </select>
+                <div class="field-hint">
+                  Rotates the local Pi camera preview and captured images in 90-degree steps.
+                </div>
+              </div>
+
+              <div class="settings-field">
+                <label class="field-label" for="esp32CamRotationSelect">ESP32-CAM Rotation</label>
+                <select class="settings-select" id="esp32CamRotationSelect">
+                  <option value="0">0°</option>
+                  <option value="90">90°</option>
+                  <option value="180">180°</option>
+                  <option value="270">270°</option>
+                </select>
+                <div class="field-hint">
+                  Rotates the ESP32-CAM preview and captured images in 90-degree steps.
+                </div>
+              </div>
+
+              <div class="settings-field">
                 <label class="field-label" for="weatherLatitudeInput">Weather Latitude</label>
                 <input
                   class="settings-input"
@@ -511,6 +537,14 @@
                 </div>
               </div>
 
+              <div class="settings-field">
+                <label class="field-label" for="roomMonitorIntervalSelect">Room Monitor Auto Capture</label>
+                <select class="settings-select" id="roomMonitorIntervalSelect"></select>
+                <div class="field-hint">
+                  Uses the current camera source and stores captures in a separate gallery that deletes the oldest images first to keep at least 8 GB free on the SD card.
+                </div>
+              </div>
+
               <div class="settings-field settings-field-wide">
                 <div class="settings-actions settings-actions-wrap">
                   <button class="button secondary compact" id="clearKeyBtn" type="button">Clear Groq Key</button>
@@ -525,6 +559,26 @@
                 </div>
               </div>
             </div>
+          </div>
+          <div class="card" id="roomMonitorCard">
+            <div class="title">Room Monitor</div>
+            <div class="saved-photos-header">
+              <div>
+                <div class="field-label saved-photos-title">Monitor Gallery</div>
+                <div class="field-hint saved-photos-subtitle" id="roomMonitorStatus">Loading room monitor gallery...</div>
+              </div>
+              <button
+                class="button secondary compact"
+                id="roomMonitorToggleBtn"
+                type="button"
+              >
+                Gallery
+              </button>
+            </div>
+            <div class="field-hint" style="margin-bottom:12px;">
+              Auto-captures follow the selected camera source and trim the oldest room-monitor images first whenever the Pi needs to keep 8 GB free on the SD card.
+            </div>
+            <div id="roomMonitorGalleryList" class="saved-photos-grid"></div>
           </div>
         </div>
       </div>

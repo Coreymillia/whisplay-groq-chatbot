@@ -4,6 +4,7 @@ import { startBatteryStatus } from "./status/battery-status";
 import { startWifiStatus } from "./status/wifi-status";
 import { startVpnStatus } from "./status/vpn-status";
 import { startPiSugarButtonSupport } from "./device/pisugar-button";
+import { startRoomMonitor } from "./device/room-monitor";
 
 dotenv.config();
 
@@ -11,6 +12,7 @@ startBatteryStatus();
 startWifiStatus();
 startVpnStatus();
 void startPiSugarButtonSupport();
+startRoomMonitor();
 
 new ChatFlow({
   enableCamera: process.env.ENABLE_CAMERA === "true",

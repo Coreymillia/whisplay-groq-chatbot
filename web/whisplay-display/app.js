@@ -54,16 +54,22 @@ const uiThemeSelect = document.getElementById("uiThemeSelect");
 const cameraSourceSelect = document.getElementById("cameraSourceSelect");
 const esp32CamUrlInput = document.getElementById("esp32CamUrlInput");
 const esp32CamUrlWrap = document.getElementById("esp32CamUrlWrap");
+const piCameraRotationSelect = document.getElementById("piCameraRotationSelect");
+const esp32CamRotationSelect = document.getElementById("esp32CamRotationSelect");
 const weatherLatitudeInput = document.getElementById("weatherLatitudeInput");
 const weatherLongitudeInput = document.getElementById("weatherLongitudeInput");
 const headerModeSelect = document.getElementById("headerModeSelect");
 const screensaverModeSelect = document.getElementById("screensaverModeSelect");
 const idleTimeoutSelect = document.getElementById("idleTimeoutSelect");
 const screenBlankTimeoutSelect = document.getElementById("screenBlankTimeoutSelect");
+const roomMonitorIntervalSelect = document.getElementById("roomMonitorIntervalSelect");
 const saveSettingsBtn = document.getElementById("saveSettingsBtn");
 const clearKeyBtn = document.getElementById("clearKeyBtn");
 const shutdownBtn = document.getElementById("shutdownBtn");
 const settingsStatus = document.getElementById("settingsStatus");
+const roomMonitorStatus = document.getElementById("roomMonitorStatus");
+const roomMonitorGalleryList = document.getElementById("roomMonitorGalleryList");
+const roomMonitorToggleBtn = document.getElementById("roomMonitorToggleBtn");
 const botNetEnabledCheckbox = document.getElementById("botNetEnabledCheckbox");
 const botNetModeSelect = document.getElementById("botNetModeSelect");
 const botNetModeHint = document.getElementById("botNetModeHint");
@@ -120,6 +126,10 @@ let savedPhotos = [];
 let showAllSavedPhotos = false;
 let savedChatHistories = [];
 let screenBlankTimeoutOptions = [];
+let roomMonitorIntervalOptions = [];
+let roomMonitorPhotos = [];
+let showAllRoomMonitorPhotos = false;
+let roomMonitorGalleryState = null;
 let musicTracks = [];
 let botNetState = null;
 let botNetSettingsDirty = false;
@@ -127,6 +137,7 @@ let botNetSettingsLoaded = false;
 const DEFAULT_UI_THEME = "default";
 const DEFAULT_CAMERA_SOURCE = "pi-camera";
 const DEFAULT_ESP32_CAM_URL = "http://esp32-cam.local";
+const DEFAULT_CAMERA_ROTATION_DEG = "0";
 const CUSTOM_PERSONALITY_PRESET_ID = "custom";
 let personalityPresets = [];
 let volumeLevelOptions = [];
@@ -1252,6 +1263,16 @@ function formatIdleTimeoutLabel(value) {
   return value <= 0 ? "Off" : `${Math.round(value / 60)} minute${value === 60 ? "" : "s"}`;
 }
 
+function formatRoomMonitorIntervalLabel(value) {
+  if (value <= 0) return "Off";
+  if (value < 60) {
+    return `${value} second${value === 1 ? "" : "s"}`;
+  }
+  const minutes = value / 60;
+  const displayValue = Number.isInteger(minutes) ? String(minutes) : minutes.toFixed(1);
+  return `${displayValue} minute${minutes === 1 ? "" : "s"}`;
+}
+
 function populateIdleTimeoutOptions(selectedValue) {
   if (!idleTimeoutSelect) return;
   idleTimeoutSelect.innerHTML = "";
@@ -1294,6 +1315,25 @@ function populateScreenBlankTimeoutOptions(selectedValue) {
   screenBlankTimeoutSelect.value = fallbackValue;
 }
 
+function populateRoomMonitorIntervalOptions(selectedValue) {
+  if (!roomMonitorIntervalSelect) return;
+  roomMonitorIntervalSelect.innerHTML = "";
+  roomMonitorIntervalOptions.forEach((value) => {
+    const option = document.createElement("option");
+    option.value = String(value);
+    option.textContent = formatRoomMonitorIntervalLabel(value);
+    roomMonitorIntervalSelect.appendChild(option);
+  });
+  const fallbackValue = String(Number.isFinite(selectedValue) ? selectedValue : 0);
+  if (![...roomMonitorIntervalSelect.options].some((option) => option.value === fallbackValue)) {
+    const option = document.createElement("option");
+    option.value = fallbackValue;
+    option.textContent = formatRoomMonitorIntervalLabel(parseInt(fallbackValue, 10));
+    roomMonitorIntervalSelect.appendChild(option);
+  }
+  roomMonitorIntervalSelect.value = fallbackValue;
+}
+
 function syncPresetSelectionFromPrompt(prompt) {
   if (!personalityPresetSelect) return;
   const match = personalityPresets.find((preset) => preset.prompt === prompt);
@@ -1325,6 +1365,12 @@ function applySettings(settings) {
   if (esp32CamUrlInput) {
     esp32CamUrlInput.value = settings.esp32CamUrl || DEFAULT_ESP32_CAM_URL;
   }
+  if (piCameraRotationSelect) {
+    piCameraRotationSelect.value = String(settings.piCameraRotationDeg ?? DEFAULT_CAMERA_ROTATION_DEG);
+  }
+  if (esp32CamRotationSelect) {
+    esp32CamRotationSelect.value = String(settings.esp32CamRotationDeg ?? DEFAULT_CAMERA_ROTATION_DEG);
+  }
   if (weatherLatitudeInput) {
     weatherLatitudeInput.value =
       settings.weatherLatitude === null || settings.weatherLatitude === undefined
@@ -1346,6 +1392,7 @@ function applySettings(settings) {
   }
   populateIdleTimeoutOptions(settings.idleTimeoutSec);
   populateScreenBlankTimeoutOptions(settings.screenBlankTimeoutSec);
+  populateRoomMonitorIntervalOptions(settings.roomMonitorIntervalSec);
   applyTheme(settings.uiTheme || DEFAULT_UI_THEME);
   if (groqKeyHint) {
     groqKeyHint.textContent = settings.groqApiKeyConfigured
@@ -1389,6 +1436,9 @@ async function loadSettings() {
     screenBlankTimeoutOptions = Array.isArray(payload.screenBlankTimeoutOptions)
       ? payload.screenBlankTimeoutOptions
       : idleTimeoutOptions;
+    roomMonitorIntervalOptions = Array.isArray(payload.roomMonitorIntervalOptions)
+      ? payload.roomMonitorIntervalOptions
+      : [];
     applySettings(payload.settings || {});
     settingsLoaded = true;
     setSettingsStatus("Settings ready.");
@@ -1461,6 +1511,130 @@ function setMusicStatus(message, isError = false) {
   if (!musicStatus) return;
   musicStatus.textContent = message;
   musicStatus.style.color = isError ? "#ff8a8a" : "";
+}
+
+function formatBytes(value) {
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let size = Math.max(0, Number(value) || 0);
+  let unitIndex = 0;
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex += 1;
+  }
+  return `${size >= 100 || unitIndex === 0 ? Math.round(size) : size.toFixed(1)} ${units[unitIndex]}`;
+}
+
+function setRoomMonitorGalleryStatus(message, isError = false) {
+  if (!roomMonitorStatus) return;
+  roomMonitorStatus.textContent = message;
+  roomMonitorStatus.style.color = isError ? "#ff8a8a" : "";
+}
+
+function renderRoomMonitorPhotos(status = null) {
+  roomMonitorGalleryState = status || roomMonitorGalleryState;
+  const currentStatus = roomMonitorGalleryState;
+  if (!roomMonitorGalleryList) return;
+  roomMonitorGalleryList.innerHTML = "";
+
+  if (!roomMonitorPhotos.length) {
+    const intervalLabel = formatRoomMonitorIntervalLabel(currentStatus?.intervalSec || 0);
+    const captureMessage = currentStatus?.enabled
+      ? `Auto capture ${intervalLabel}. No room monitor images yet.`
+      : "Room monitor is off. No room monitor images yet.";
+    setRoomMonitorGalleryStatus(
+      currentStatus?.lastError ? `${captureMessage} Last error: ${currentStatus.lastError}` : captureMessage,
+      Boolean(currentStatus?.lastError),
+    );
+    const empty = document.createElement("div");
+    empty.className = "saved-photos-empty";
+    empty.textContent = "No room monitor images yet.";
+    roomMonitorGalleryList.appendChild(empty);
+    if (roomMonitorToggleBtn) {
+      roomMonitorToggleBtn.disabled = true;
+      roomMonitorToggleBtn.textContent = "Gallery";
+    }
+    return;
+  }
+
+  const visiblePhotos = showAllRoomMonitorPhotos
+    ? roomMonitorPhotos
+    : roomMonitorPhotos.slice(0, 4);
+  const usageLabel = `${formatBytes(currentStatus?.totalSizeBytes || 0)} used`;
+  const freeSpaceLabel = `${formatBytes(currentStatus?.freeSpaceBytes || 0)} free`;
+  const reserveLabel = `keeps ${formatBytes(currentStatus?.freeSpaceReserveBytes || 0)} open`;
+  const intervalLabel = formatRoomMonitorIntervalLabel(currentStatus?.intervalSec || 0);
+  let summary = `${currentStatus?.enabled ? `Auto ${intervalLabel}` : "Auto off"} · ${roomMonitorPhotos.length} image${roomMonitorPhotos.length === 1 ? "" : "s"} · ${usageLabel} · ${freeSpaceLabel} · ${reserveLabel}`;
+  if (currentStatus?.captureInProgress) {
+    summary += " · Capturing now";
+  } else if (currentStatus?.lastCaptureAt) {
+    summary += ` · Last capture ${new Date(currentStatus.lastCaptureAt).toLocaleString()}`;
+  }
+  if (currentStatus?.lastError) {
+    summary += ` · Last error: ${currentStatus.lastError}`;
+  }
+  setRoomMonitorGalleryStatus(summary, Boolean(currentStatus?.lastError));
+  if (roomMonitorToggleBtn) {
+    roomMonitorToggleBtn.disabled = roomMonitorPhotos.length <= 4;
+    roomMonitorToggleBtn.textContent =
+      roomMonitorPhotos.length <= 4
+        ? "Gallery"
+        : showAllRoomMonitorPhotos
+          ? "Recent Only"
+          : `Gallery (${roomMonitorPhotos.length})`;
+  }
+
+  for (const photo of visiblePhotos) {
+    const card = document.createElement("div");
+    card.className = "saved-photo-card";
+
+    const img = document.createElement("img");
+    img.src = `${photo.imageUrl}?ts=${photo.updatedAt}`;
+    img.alt = photo.fileName;
+
+    const label = document.createElement("div");
+    label.className = "saved-photo-name";
+    label.textContent = photo.fileName;
+
+    const meta = document.createElement("div");
+    meta.className = "saved-photo-meta";
+    meta.textContent = `${new Date(photo.updatedAt).toLocaleString()} · ${formatBytes(photo.sizeBytes)}`;
+
+    const actions = document.createElement("div");
+    actions.className = "saved-photo-actions";
+
+    const downloadLink = document.createElement("a");
+    downloadLink.className = "button compact saved-photo-download";
+    downloadLink.textContent = "Download";
+    downloadLink.href = photo.imageUrl;
+    downloadLink.download = photo.fileName;
+
+    card.appendChild(img);
+    card.appendChild(label);
+    card.appendChild(meta);
+    actions.appendChild(downloadLink);
+    card.appendChild(actions);
+    roomMonitorGalleryList.appendChild(card);
+  }
+}
+
+async function loadRoomMonitorPhotos() {
+  try {
+    const response = await fetch(`/api/room-monitor/photos?ts=${Date.now()}`, {
+      cache: "no-store",
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    const payload = await response.json();
+    roomMonitorPhotos = Array.isArray(payload.photos) ? payload.photos : [];
+    renderRoomMonitorPhotos(payload.status || null);
+  } catch (error) {
+    console.error("Failed to load room monitor gallery:", error);
+    roomMonitorPhotos = [];
+    roomMonitorGalleryState = null;
+    renderRoomMonitorPhotos(null);
+    setRoomMonitorGalleryStatus("Failed to load room monitor gallery.", true);
+  }
 }
 
 function renderMusicTracks() {
@@ -1687,6 +1861,14 @@ async function saveSettings({ clearGroqApiKey = false } = {}) {
     uiTheme: uiThemeSelect?.value || DEFAULT_UI_THEME,
     cameraSource: cameraSourceSelect?.value || DEFAULT_CAMERA_SOURCE,
     esp32CamUrl: (esp32CamUrlInput?.value || DEFAULT_ESP32_CAM_URL).trim(),
+    piCameraRotationDeg: parseInt(
+      piCameraRotationSelect?.value || DEFAULT_CAMERA_ROTATION_DEG,
+      10,
+    ),
+    esp32CamRotationDeg: parseInt(
+      esp32CamRotationSelect?.value || DEFAULT_CAMERA_ROTATION_DEG,
+      10,
+    ),
     weatherLatitude: parseOptionalFloat(weatherLatitudeInput?.value),
     weatherLongitude: parseOptionalFloat(weatherLongitudeInput?.value),
     headerMode: headerModeSelect?.value || DEFAULT_HEADER_MODE,
@@ -1698,6 +1880,10 @@ async function saveSettings({ clearGroqApiKey = false } = {}) {
     ),
     screenBlankTimeoutSec: parseInt(
       screenBlankTimeoutSelect?.value || "0",
+      10,
+    ),
+    roomMonitorIntervalSec: parseInt(
+      roomMonitorIntervalSelect?.value || "0",
       10,
     ),
   };
@@ -1717,6 +1903,7 @@ async function saveSettings({ clearGroqApiKey = false } = {}) {
     }
     const payload = await response.json();
     applySettings(payload.settings || {});
+    loadRoomMonitorPhotos();
     setSettingsStatus(
       clearGroqApiKey
         ? "Stored Groq key cleared."
@@ -1784,6 +1971,7 @@ loadMusicLibrary();
 loadVisionPreview();
 loadVisionAnalysis();
 loadSavedPhotos();
+loadRoomMonitorPhotos();
 loadChatHistories();
 setVisionAnalysisVisible(false);
 requestAnimationFrame(animateScroll);
@@ -2016,6 +2204,16 @@ if (savedPhotosToggleBtn) {
     }
     showAllSavedPhotos = !showAllSavedPhotos;
     renderSavedPhotos();
+  });
+}
+
+if (roomMonitorToggleBtn) {
+  roomMonitorToggleBtn.addEventListener("click", () => {
+    if (roomMonitorPhotos.length <= 4) {
+      return;
+    }
+    showAllRoomMonitorPhotos = !showAllRoomMonitorPhotos;
+    renderRoomMonitorPhotos();
   });
 }
 

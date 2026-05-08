@@ -41,6 +41,8 @@ DAEMON_PORT = int(os.getenv("WHISPLAY_CAMERA_DAEMON_PORT", "18765"))
 DAEMON_TIMEOUT_SEC = float(os.getenv("WHISPLAY_CAMERA_DAEMON_TIMEOUT_SEC", "2"))
 DEFAULT_CAMERA_SOURCE = "pi-camera"
 DEFAULT_ESP32_CAM_URL = "http://esp32-cam.local"
+DEFAULT_PI_CAMERA_ROTATION_DEG = 0
+DEFAULT_ESP32_CAM_ROTATION_DEG = 0
 
 
 def _normalize_camera_source(value: str | None) -> str:
@@ -60,6 +62,14 @@ def _normalize_camera_url(value: str | None) -> str:
 
 def _format_network_camera_error(base_url: str, error: Exception) -> str:
     return f"Could not reach ESP32-CAM at {base_url}: {error}"
+
+
+def _normalize_rotation_deg(value: int | str | None, default: int = 0) -> int:
+    try:
+        numeric = int(value) if value is not None else default
+    except (TypeError, ValueError):
+        numeric = default
+    return ((round(numeric / 90) * 90) % 360 + 360) % 360
 
 
 class SharedCameraService:
@@ -133,6 +143,25 @@ class SharedCameraService:
 
     def _network_endpoint(self, path: str) -> str:
         return f"{self._current_network_camera_url()}{path}"
+
+    def _current_camera_rotation_deg(self, source: str | None = None) -> int:
+        settings = self._load_runtime_settings()
+        current_source = source or self._current_camera_source()
+        if current_source == "esp32-cam":
+            return _normalize_rotation_deg(
+                settings.get("esp32CamRotationDeg"),
+                DEFAULT_ESP32_CAM_ROTATION_DEG,
+            )
+        return _normalize_rotation_deg(
+            settings.get("piCameraRotationDeg"),
+            DEFAULT_PI_CAMERA_ROTATION_DEG,
+        )
+
+    def _apply_rotation(self, image: Image.Image, source: str | None = None) -> Image.Image:
+        rotation_deg = self._current_camera_rotation_deg(source)
+        if rotation_deg == 0:
+            return image
+        return image.rotate(-rotation_deg, expand=True)
 
     def _fetch_network_image_bytes(self) -> bytes:
         base_url = self._current_network_camera_url()
@@ -277,8 +306,10 @@ class SharedCameraService:
     def _capture_frame_image(self, quality: int | None = None) -> Image.Image:
         source = self._current_camera_source()
         if source == "esp32-cam":
-            return self._capture_network_image()
-        return self._capture_local_pi_image(quality or self.stream_quality)
+            image = self._capture_network_image()
+        else:
+            image = self._capture_local_pi_image(quality or self.stream_quality)
+        return self._apply_rotation(image, source)
 
     def _write_web_frame(self, image: Image.Image) -> None:
         temp_path = f"{self.web_frame_path}.tmp"
@@ -343,6 +374,7 @@ class SharedCameraService:
                 "stream_ref_count": active,
                 "ready": ready,
                 "source": source,
+                "rotation_deg": self._current_camera_rotation_deg(source),
                 "pi_camera_backend": pi_camera_backend,
                 "esp32_cam_url": self._current_network_camera_url(),
                 "error": error,
