@@ -293,6 +293,12 @@ export class WebDisplayServer implements WebAudioBridgeServer {
       ctx.body = fs.createReadStream(path.join(staticRoot, "index.html"));
     });
 
+    this.router.get("/hdmi", (ctx) => {
+      ctx.set("Cache-Control", "no-store");
+      ctx.type = "text/html";
+      ctx.body = fs.createReadStream(path.join(staticRoot, "hdmi.html"));
+    });
+
     this.router.get("/image", (ctx) => {
       ctx.set("Cache-Control", "no-store");
       if (!this.currentStatus?.image) {
@@ -962,6 +968,7 @@ export class WebDisplayServer implements WebAudioBridgeServer {
         uiTheme: getBodyString(body, "uiTheme"),
         cameraSource: getBodyString(body, "cameraSource"),
         esp32CamUrl: getBodyString(body, "esp32CamUrl"),
+        hatTextColor: getBodyString(body, "hatTextColor"),
         piCameraRotationDeg: getBodyNumber(body, "piCameraRotationDeg"),
         esp32CamRotationDeg: getBodyNumber(body, "esp32CamRotationDeg"),
         manualRecordMaxSec: getBodyNumber(body, "manualRecordMaxSec"),
@@ -990,6 +997,7 @@ export class WebDisplayServer implements WebAudioBridgeServer {
           uiTheme: settings.uiTheme,
           cameraSource: settings.cameraSource,
           esp32CamUrl: settings.esp32CamUrl,
+          hatTextColor: settings.hatTextColor,
           piCameraRotationDeg: settings.piCameraRotationDeg,
           esp32CamRotationDeg: settings.esp32CamRotationDeg,
           manualRecordMaxSec: settings.manualRecordMaxSec,

@@ -50,6 +50,7 @@ const voiceModeSelect = document.getElementById("voiceModeSelect");
 const volumeLevelSelect = document.getElementById("volumeLevelSelect");
 const recordTimeSelect = document.getElementById("recordTimeSelect");
 const scrollSpeedSelect = document.getElementById("scrollSpeedSelect");
+const hatTextColorSelect = document.getElementById("hatTextColorSelect");
 const uiThemeSelect = document.getElementById("uiThemeSelect");
 const cameraSourceSelect = document.getElementById("cameraSourceSelect");
 const esp32CamUrlInput = document.getElementById("esp32CamUrlInput");
@@ -137,6 +138,7 @@ let botNetSettingsLoaded = false;
 const DEFAULT_UI_THEME = "default";
 const DEFAULT_CAMERA_SOURCE = "pi-camera";
 const DEFAULT_ESP32_CAM_URL = "http://esp32-cam.local";
+const DEFAULT_HAT_TEXT_COLOR = "white";
 const DEFAULT_CAMERA_ROTATION_DEG = "0";
 const CUSTOM_PERSONALITY_PRESET_ID = "custom";
 let personalityPresets = [];
@@ -1346,6 +1348,9 @@ function applySettings(settings) {
   populateVolumeLevelOptions(settings.volumeLevel || 9);
   populateRecordTimeoutOptions(settings.manualRecordMaxSec || 15);
   populateScrollSpeedOptions(settings.scrollSpeedLevel || 5);
+  if (hatTextColorSelect) {
+    hatTextColorSelect.value = settings.hatTextColor || DEFAULT_HAT_TEXT_COLOR;
+  }
   if (personalityInput) {
     personalityInput.value = settings.personalityPrompt || "";
   }
@@ -1858,6 +1863,7 @@ async function saveSettings({ clearGroqApiKey = false } = {}) {
     volumeLevel: parseInt(volumeLevelSelect?.value || "9", 10),
     manualRecordMaxSec: parseInt(recordTimeSelect?.value || "15", 10),
     scrollSpeedLevel: parseInt(scrollSpeedSelect?.value || "5", 10),
+    hatTextColor: hatTextColorSelect?.value || DEFAULT_HAT_TEXT_COLOR,
     uiTheme: uiThemeSelect?.value || DEFAULT_UI_THEME,
     cameraSource: cameraSourceSelect?.value || DEFAULT_CAMERA_SOURCE,
     esp32CamUrl: (esp32CamUrlInput?.value || DEFAULT_ESP32_CAM_URL).trim(),

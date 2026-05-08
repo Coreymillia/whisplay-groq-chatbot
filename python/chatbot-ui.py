@@ -64,6 +64,7 @@ current_header_mode = "emoji"
 current_screensaver_mode = "off"
 current_idle_timeout_sec = 120
 current_screen_blank_timeout_sec = 0
+current_hat_text_color = "white"
 last_activity_at = time.time()
 camera_mode = False
 camera_capture_image_path = ""
@@ -134,6 +135,7 @@ class RenderThread(threading.Thread):
         self.main_text_line_height = self.main_text_font.getmetrics()[0] + self.main_text_font.getmetrics()[1]
         self.text_cache_image = None
         self.current_render_text = ""
+        self.current_render_style = ""
         self.pending_auto_scroll_after_hold = False
         self.render_event = threading.Event()
         self.green_matrix_columns = self.create_rain_columns(10, "01ABCDEF", self.whisplay.LCD_HEIGHT)
@@ -323,19 +325,28 @@ class RenderThread(threading.Thread):
         fin_show_lines = False
         for i, line in enumerate(lines):
             if (i + 1) * line_height >= current_scroll_top and i * line_height - current_scroll_top <= area_height:
-                display_lines.append(line)
+                display_lines.append((i, line))
                 fin_show_lines = True
             elif fin_show_lines is False:
                 render_y += line_height
         
         # render_text
-        render_text = "\n".join(display_lines)
-        if self.current_render_text != render_text:
+        render_text = "\n".join(line for _, line in display_lines)
+        render_style = str(current_hat_text_color or "white")
+        if self.current_render_text != render_text or self.current_render_style != render_style:
             self.current_render_text = render_text
+            self.current_render_style = render_style
             show_text_image = Image.new("RGBA", (self.whisplay.LCD_WIDTH, render_y + len(display_lines) * line_height), (0, 0, 0, 255))
             show_text_draw = ImageDraw.Draw(show_text_image)
-            for line in display_lines:
-                TextUtils.draw_mixed_text(show_text_draw, show_text_image, line, font, (10, render_y))
+            for line_index, line in display_lines:
+                TextUtils.draw_mixed_text(
+                    show_text_draw,
+                    show_text_image,
+                    line,
+                    font,
+                    (10, render_y),
+                    fill=self.resolve_text_fill(line_index),
+                )
                 render_y += line_height
             # Update cache image
             self.text_cache_image = show_text_image
@@ -375,6 +386,29 @@ class RenderThread(threading.Thread):
                 and time.time() >= current_scroll_sync_hold_until
             )
         )
+
+    def resolve_text_fill(self, line_index):
+        palette_name = str(current_hat_text_color or "white")
+        color_map = {
+            "white": (255, 255, 255, 255),
+            "green": (110, 255, 150, 255),
+            "cyan": (120, 235, 255, 255),
+            "amber": (255, 210, 110, 255),
+            "pink": (255, 150, 220, 255),
+            "purple": (205, 160, 255, 255),
+            "blue": (135, 180, 255, 255),
+        }
+        if palette_name == "multi-line":
+            palette = [
+                (255, 255, 255, 255),
+                (110, 255, 150, 255),
+                (120, 235, 255, 255),
+                (255, 210, 110, 255),
+                (255, 150, 220, 255),
+                (205, 160, 255, 255),
+            ]
+            return palette[line_index % len(palette)]
+        return color_map.get(palette_name, color_map["white"])
 
     def request_render(self):
         self.render_event.set()
@@ -947,7 +981,8 @@ def update_display_data(status=None, emoji=None, text=None,
                    network_connected=None, vpn_connected=None, rag_icon_visible=None, image_icon_visible=None, transaction_id=None,
                    wifi_signal_level=None, audio_level=None,
                    music_progress=None, music_duration_ms=None, header_mode=None,
-                   screensaver_mode=None, idle_timeout_sec=None, screen_blank_timeout_sec=None):
+                   screensaver_mode=None, idle_timeout_sec=None, screen_blank_timeout_sec=None,
+                   hat_text_color=None):
     global current_status, current_emoji, current_text, current_battery_level
     global current_battery_color, current_scroll_top, current_scroll_speed, current_image_path
     global current_scroll_speed_factor
@@ -959,6 +994,7 @@ def update_display_data(status=None, emoji=None, text=None,
     global current_music_progress, current_music_duration_ms
     global current_audio_level
     global current_header_mode, current_screensaver_mode, current_idle_timeout_sec, current_screen_blank_timeout_sec
+    global current_hat_text_color
     global render_thread
 
     if (
@@ -974,6 +1010,7 @@ def update_display_data(status=None, emoji=None, text=None,
         or screensaver_mode is not None
         or idle_timeout_sec is not None
         or screen_blank_timeout_sec is not None
+        or hat_text_color is not None
     ):
         note_activity()
 
@@ -1083,6 +1120,8 @@ def update_display_data(status=None, emoji=None, text=None,
             current_screen_blank_timeout_sec = max(0, int(screen_blank_timeout_sec))
         except (TypeError, ValueError):
             print(f"[Display] Invalid screen_blank_timeout_sec payload: {screen_blank_timeout_sec}")
+    if hat_text_color is not None:
+        current_hat_text_color = str(hat_text_color)
     if render_thread is not None:
         render_thread.request_render()
 
@@ -1174,6 +1213,7 @@ def handle_client(client_socket, addr, whisplay):
                     screensaver_mode = content.get("screensaver_mode", None)
                     idle_timeout_sec = content.get("idle_timeout_sec", None)
                     screen_blank_timeout_sec = content.get("screen_blank_timeout_sec", None)
+                    hat_text_color = content.get("hat_text_color", None)
                     capture_image_path = content.get("capture_image_path", None)
                     trigger_camera_capture = content.get("camera_capture", None)
                     # boolean to enable camera mode
@@ -1223,9 +1263,9 @@ def handle_client(client_socket, addr, whisplay):
                               (audio_level is not None) or \
                               (vpn_connected is not None) or \
                               (rag_icon_visible is not None) or (image_icon_visible is not None) or (scroll_sync is not None) or \
-                              (music_progress is not None) or (music_duration_ms is not None) or \
-                              (header_mode is not None) or (screensaver_mode is not None) or (idle_timeout_sec is not None) or \
-                              (screen_blank_timeout_sec is not None):
+                               (music_progress is not None) or (music_duration_ms is not None) or \
+                               (header_mode is not None) or (screensaver_mode is not None) or (idle_timeout_sec is not None) or \
+                               (screen_blank_timeout_sec is not None) or (hat_text_color is not None):
                         update_display_data(status=status, emoji=emoji,
                                      text=text, scroll_speed=scroll_speed, scroll_speed_factor=scroll_speed_factor, scroll_sync=scroll_sync,
                                      battery_level=battery_level, battery_color=battery_tuple,
@@ -1238,10 +1278,11 @@ def handle_client(client_socket, addr, whisplay):
                                                   transaction_id=transaction_id,
                                                   music_progress=music_progress,
                                                    music_duration_ms=music_duration_ms,
-                                                   header_mode=header_mode,
-                                                   screensaver_mode=screensaver_mode,
-                                                   idle_timeout_sec=idle_timeout_sec,
-                                                   screen_blank_timeout_sec=screen_blank_timeout_sec)
+                                                    header_mode=header_mode,
+                                                    screensaver_mode=screensaver_mode,
+                                                    idle_timeout_sec=idle_timeout_sec,
+                                                    screen_blank_timeout_sec=screen_blank_timeout_sec,
+                                                    hat_text_color=hat_text_color)
 
                     client_socket.send(b"OK\n")
                     if response_to_client:

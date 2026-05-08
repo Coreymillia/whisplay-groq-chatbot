@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Whisplay HDMI Chat</title>
+  <link rel="stylesheet" href="/hdmi.css" />
+</head>
+<body class="hdmi-body">
+  <main class="hdmi-shell">
+    <section class="hdmi-chat-card">
+      <div class="hdmi-eyebrow">Whisplay HDMI Chat</div>
+      <div class="hdmi-topline">
+        <div>
+          <div class="hdmi-status" id="statusText">starting</div>
+          <div class="hdmi-meta" id="metaText">Waiting for live state…</div>
+        </div>
+        <div class="hdmi-emoji" id="emojiText">…</div>
+      </div>
+      <div class="hdmi-text" id="textText">Waiting for chat text…</div>
+      <div class="hdmi-footer">
+        <span id="connectionText">Connecting…</span>
+        <a href="/" target="_blank" rel="noopener">Open full control UI</a>
+      </div>
+    </section>
+
+    <aside class="hdmi-image-card hidden" id="imageCard">
+      <div class="hdmi-image-header">
+        <div class="hdmi-image-title" id="imageTitle">Latest Capture</div>
+        <div class="hdmi-image-subtitle" id="imageSubtitle">No active image</div>
+      </div>
+      <div class="hdmi-image-wrap">
+        <img id="imageDisplay" alt="Whisplay image output" />
+      </div>
+    </aside>
+  </main>
+
+  <script src="/hdmi.js"></script>
+</body>
+</html>

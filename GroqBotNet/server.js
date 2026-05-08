@@ -905,7 +905,8 @@ function contentTypeFor(filePath) {
 }
 
 function serveStatic(req, res) {
-  const requestPath = req.url === "/" ? "/index.html" : req.url;
+  const requestPath =
+    req.url === "/" ? "/index.html" : req.url === "/hdmi" ? "/hdmi.html" : req.url;
   const filePath = path.normalize(path.join(PUBLIC_DIR, requestPath));
   if (!filePath.startsWith(PUBLIC_DIR) || !fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
     res.writeHead(404);

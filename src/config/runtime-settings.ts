@@ -5,6 +5,15 @@ import { getCurrentPersonalityPresetId } from "./personality-presets";
 export type VoiceMode = "text-only" | "speak-on-demand" | "voice-chat";
 export type UITheme = "default" | "matrix" | "plasma" | "amber-terminal";
 export type CameraSource = "pi-camera" | "esp32-cam";
+export type HatTextColor =
+  | "white"
+  | "green"
+  | "cyan"
+  | "amber"
+  | "pink"
+  | "purple"
+  | "blue"
+  | "multi-line";
 export type HeaderMode =
   | "emoji"
   | "matrix"
@@ -36,6 +45,7 @@ export interface RuntimeSettings {
   uiTheme: UITheme;
   cameraSource: CameraSource;
   esp32CamUrl: string;
+  hatTextColor: HatTextColor;
   piCameraRotationDeg: number;
   esp32CamRotationDeg: number;
   manualRecordMaxSec: number;
@@ -60,6 +70,7 @@ export interface RuntimeSettingsUpdate {
   uiTheme?: string;
   cameraSource?: string;
   esp32CamUrl?: string;
+  hatTextColor?: string;
   piCameraRotationDeg?: number;
   esp32CamRotationDeg?: number;
   manualRecordMaxSec?: number;
@@ -85,6 +96,7 @@ const DEFAULT_SCROLL_SPEED_LEVEL = 5;
 const DEFAULT_UI_THEME: UITheme = "default";
 const DEFAULT_CAMERA_SOURCE: CameraSource = "pi-camera";
 const DEFAULT_ESP32_CAM_URL = "http://esp32-cam.local";
+const DEFAULT_HAT_TEXT_COLOR: HatTextColor = "white";
 const DEFAULT_PI_CAMERA_ROTATION_DEG = 0;
 const DEFAULT_ESP32_CAM_ROTATION_DEG = 0;
 const DEFAULT_MANUAL_RECORD_MAX_SEC = 15;
@@ -115,6 +127,16 @@ export const UI_THEMES: UITheme[] = [
 export const CAMERA_SOURCES: CameraSource[] = [
   "pi-camera",
   "esp32-cam",
+];
+export const HAT_TEXT_COLORS: HatTextColor[] = [
+  "white",
+  "green",
+  "cyan",
+  "amber",
+  "pink",
+  "purple",
+  "blue",
+  "multi-line",
 ];
 export const HEADER_MODES: HeaderMode[] = [
   "emoji",
@@ -151,6 +173,16 @@ const VALID_UI_THEMES = new Set<UITheme>([
 const VALID_CAMERA_SOURCES = new Set<CameraSource>([
   "pi-camera",
   "esp32-cam",
+]);
+const VALID_HAT_TEXT_COLORS = new Set<HatTextColor>([
+  "white",
+  "green",
+  "cyan",
+  "amber",
+  "pink",
+  "purple",
+  "blue",
+  "multi-line",
 ]);
 const VALID_HEADER_MODES = new Set<HeaderMode>([
   "emoji",
@@ -226,6 +258,13 @@ function normalizeEsp32CamUrl(value: unknown): string {
     ? trimmed
     : `http://${trimmed}`;
   return withProtocol.replace(/\/+$/, "");
+}
+
+function normalizeHatTextColor(value: unknown): HatTextColor {
+  if (typeof value === "string" && VALID_HAT_TEXT_COLORS.has(value as HatTextColor)) {
+    return value as HatTextColor;
+  }
+  return DEFAULT_HAT_TEXT_COLOR;
 }
 
 function normalizeCameraRotationDeg(
@@ -330,6 +369,7 @@ function sanitizeSettings(input: Partial<RuntimeSettings> | null | undefined): R
     uiTheme: normalizeUITheme(input?.uiTheme),
     cameraSource: normalizeCameraSource(input?.cameraSource),
     esp32CamUrl: normalizeEsp32CamUrl(input?.esp32CamUrl),
+    hatTextColor: normalizeHatTextColor(input?.hatTextColor),
     piCameraRotationDeg: normalizeCameraRotationDeg(
       input?.piCameraRotationDeg,
       DEFAULT_PI_CAMERA_ROTATION_DEG,
@@ -422,6 +462,10 @@ export function saveRuntimeSettings(
 
   if (typeof update.esp32CamUrl === "string") {
     next.esp32CamUrl = normalizeEsp32CamUrl(update.esp32CamUrl);
+  }
+
+  if (typeof update.hatTextColor === "string") {
+    next.hatTextColor = normalizeHatTextColor(update.hatTextColor);
   }
 
   if (typeof update.piCameraRotationDeg === "number") {
@@ -553,6 +597,28 @@ export function getCameraSourceLabel(value: string): string {
   }
 }
 
+export function getHatTextColorLabel(value: string): string {
+  switch (value) {
+    case "green":
+      return "Green";
+    case "cyan":
+      return "Cyan";
+    case "amber":
+      return "Amber";
+    case "pink":
+      return "Pink";
+    case "purple":
+      return "Purple";
+    case "blue":
+      return "Blue";
+    case "multi-line":
+      return "Multi Color (Per Line)";
+    case "white":
+    default:
+      return "White";
+  }
+}
+
 export function getCameraRotationLabel(value: number): string {
   const normalized = normalizeCameraRotationDeg(value, 0);
   return `${normalized}°`;
@@ -609,6 +675,7 @@ export function getPublicRuntimeSettings(): {
   uiTheme: UITheme;
   cameraSource: CameraSource;
   esp32CamUrl: string;
+  hatTextColor: HatTextColor;
   piCameraRotationDeg: number;
   esp32CamRotationDeg: number;
   manualRecordMaxSec: number;
@@ -635,6 +702,7 @@ export function getPublicRuntimeSettings(): {
     uiTheme: settings.uiTheme,
     cameraSource: settings.cameraSource,
     esp32CamUrl: settings.esp32CamUrl,
+    hatTextColor: settings.hatTextColor,
     piCameraRotationDeg:
       typeof settings.piCameraRotationDeg === "number"
         ? settings.piCameraRotationDeg

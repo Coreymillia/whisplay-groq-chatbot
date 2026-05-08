@@ -43,6 +43,7 @@ export interface Status {
   screensaver_mode: string;
   idle_timeout_sec: number;
   screen_blank_timeout_sec: number;
+  hat_text_color: string;
 }
 
 function getInitialStatus(): Status {
@@ -73,6 +74,7 @@ function getInitialStatus(): Status {
     screensaver_mode: settings.screensaverMode,
     idle_timeout_sec: settings.idleTimeoutSec,
     screen_blank_timeout_sec: settings.screenBlankTimeoutSec,
+    hat_text_color: settings.hatTextColor,
   };
 }
 
@@ -137,6 +139,7 @@ export class WhisplayDisplay {
             screensaver_mode: settings.screensaverMode,
             idle_timeout_sec: settings.idleTimeoutSec,
             screen_blank_timeout_sec: settings.screenBlankTimeoutSec,
+            hat_text_color: settings.hatTextColor,
             scroll_speed: this.currentStatus.scroll_speed,
             scroll_speed_factor: getScrollSpeedFactor(settings.scrollSpeedLevel),
           });
@@ -444,6 +447,7 @@ export class WhisplayDisplay {
       screensaver_mode,
       idle_timeout_sec,
       screen_blank_timeout_sec,
+      hat_text_color,
     } = {
       ...this.currentStatus,
       ...normalizedStatus,
@@ -480,6 +484,7 @@ export class WhisplayDisplay {
     this.currentStatus.screensaver_mode = screensaver_mode;
     this.currentStatus.idle_timeout_sec = idle_timeout_sec;
     this.currentStatus.screen_blank_timeout_sec = screen_blank_timeout_sec;
+    this.currentStatus.hat_text_color = hat_text_color;
     this.syncAudioLevelMonitor(status, header_mode);
     
     const changedValuesObj = Object.fromEntries(changedValues);
