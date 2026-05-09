@@ -3,7 +3,10 @@ import {
   getRecordFileDurationMs,
   splitSentences,
 } from "./../utils/index";
-import { display } from "../device/display";
+import {
+  display,
+  recordConversationTurn,
+} from "../device/display";
 import { recognizeAudio, ttsProcessor } from "../cloud-api/server";
 import { isImMode } from "../cloud-api/llm";
 import { DEFAULT_EMOJI, extractEmojis } from "../utils";
@@ -421,6 +424,7 @@ class ChatFlow implements ChatFlowContext {
     this.lastAnswerText = text.trim();
     this.lastAnswerEmoji = emoji || STATE_EMOJIS.answering;
     this.lastAnswerImage = image || "";
+    recordConversationTurn("bot", text.trim());
   };
 
   hasLastAnswer = (): boolean => {

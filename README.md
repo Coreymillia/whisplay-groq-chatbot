@@ -26,7 +26,7 @@ This project starts from the official PiSugar Whisplay chatbot, but is being tai
 - **Spoken replies / TTS:** confirmed working with `espeak-ng`
 - **Spoken photo capture:** working
 - **Captured still image on HAT display:** working
-- **Companion CYD touchscreen client:** working as an early rough-start build, with more tuning planned
+- **Companion CYD touchscreen client:** working as a polished multi-mode touch companion with chat, capture, gallery, and settings screens
 - **Companion Cardputer client:** working as an early rough-start build, with text chat confirmed and more settings/UI work planned
 - **Standalone GroqBotNet Pi Zero node:** working as a separate same-network experiment with browser chat plus Mini PiTFT output
 - **Web simulator/debug UI:** still available at `http://<host-or-pi-ip>:17880`
@@ -48,7 +48,7 @@ This project starts from the official PiSugar Whisplay chatbot, but is being tai
 - **Room monitor gallery:** the browser UI can now auto-capture from the selected camera source on a fixed interval and keep a separate room-monitor gallery trimmed dynamically to preserve at least **8 GB** of free SD-card space by deleting the oldest captures first
 - **HDMI chat page:** both Whisplay and the standalone Pi Zero GroqBotNet node now expose a dedicated browser page at **`/hdmi`**; Whisplay’s view also mirrors the latest captured image or live camera feed when one is active
 - **Improved HAT readability:** reply text now wraps more naturally on the device instead of breaking as aggressively mid-word
-- **Companion CYD controls:** touch actions for **New Chat**, **Repeat**, **Capture**, **Voice**, plus an on-screen **Setup** button for reopening the Wi-Fi portal
+- **Companion CYD controls:** touch-first **Chat / Capture / Gallery / Settings** modes, top-bar **New Chat** and **Repeat**, touch mode navigation, CYD-local chat text size and color controls, and a built-in **Setup** button for reopening the Wi-Fi portal
 - **Companion Cardputer controls:** keyboard text send, message viewing, local setup portal, saved text sizes, and a split receive/send screen layout
 - **Experimental GroqBotNet mode:** optional browser-only controls in Whisplay for connecting to a second bot, testing the link, and starting limited same-network bot-to-bot conversations without replacing the normal Whisplay chatbot flow
 - **Persona Relay mode:** a new GroqBotNet mode where you tell your bot what to send, your local bot rewrites that prompt in character, and the peer bot replies once without falling into an endless loop
@@ -199,17 +199,21 @@ If a brand-new image boots the browser UI but the Whisplay LCD stays blank, or t
 
 ## Companion CYD status
 
-This repo now also includes an early companion firmware project under `CompanionCYD/` for the popular **Cheap Yellow Display (ESP32-2432S028R)**.
+This repo now includes a polished companion firmware project under `CompanionCYD/` for the popular **Cheap Yellow Display (ESP32-2432S028R)**.
 
 - the **Pi stays the chatbot brain**
 - the **CYD acts as a remote touchscreen client**
-- current actions include **New Chat**, **Repeat**, **Capture**, **Voice**, and **Setup**
+- the CYD now has dedicated **Chat**, **Capture**, **Gallery**, and **Settings** screens
+- the top bar keeps **New Chat**, **Repeat**, and **Setup** available without taking over the main content area
+- mode switching is touch-based instead of relying on a bottom row of action buttons
+- the settings screen now exposes the highest-value non-typing chatbot controls plus CYD-local **chat text size** and **chat color** options, including a **multi-color per-line** mode
 - Wi-Fi credentials and Pi host settings are handled from the CYD's own captive portal
+- capture/gallery browsing currently follows the newest **24** images exposed by the Pi companion API and caches the selected preview on demand
 - both **normal** and **inverted** display variants are included
 
 ![Early Whisplay CYD companion build](images/IMG_20260504_155914704_HDR.jpg)
 
-This is intentionally a **rough start**, not a polished final companion UI. It is already usable, but more tuning is planned around layout, diagnostics, and overall interaction flow.
+This is now a **usable polished companion UI** for day-to-day remote control. The next CYD step is better image handling and deeper media/gallery polish rather than a full layout rewrite.
 
 ## Companion Cardputer status
 

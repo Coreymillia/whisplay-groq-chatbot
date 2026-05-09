@@ -1,12 +1,13 @@
 const statusText = document.getElementById("statusText");
 const metaText = document.getElementById("metaText");
 const emojiText = document.getElementById("emojiText");
-const textText = document.getElementById("textText");
 const connectionText = document.getElementById("connectionText");
 const imageCard = document.getElementById("imageCard");
 const imageTitle = document.getElementById("imageTitle");
 const imageSubtitle = document.getElementById("imageSubtitle");
 const imageDisplay = document.getElementById("imageDisplay");
+const conversationLog = document.getElementById("conversationLog");
+const conversationEmpty = document.getElementById("conversationEmpty");
 
 let ws = null;
 let reconnectTimer = null;
@@ -48,13 +49,10 @@ function stopCameraFeed() {
 }
 
 function applyState(data) {
-  if (!data || data.ready === false) {
-    return;
-  }
+  if (!data || data.ready === false) return;
 
   statusText.textContent = data.status || "ready";
   emojiText.textContent = data.emoji || "🙂";
-  textText.textContent = data.text || "Waiting for chat text…";
   metaText.textContent = formatConnectionMeta(data);
 
   if (data.camera_mode) {
@@ -80,6 +78,51 @@ function applyState(data) {
   }
 }
 
+function formatTime(timestamp) {
+  const d = new Date(timestamp);
+  const h = d.getHours().toString().padStart(2, "0");
+  const m = d.getMinutes().toString().padStart(2, "0");
+  const s = d.getSeconds().toString().padStart(2, "0");
+  return `${h}:${m}:${s}`;
+}
+
+function appendTurn(turn) {
+  if (conversationEmpty) conversationEmpty.style.display = "none";
+
+  const bubble = document.createElement("div");
+  bubble.className = `hdmi-bubble hdmi-bubble-${turn.role}`;
+
+  const label = document.createElement("div");
+  label.className = "hdmi-bubble-label";
+  label.textContent = turn.role === "user" ? "You" : "Whisplay";
+
+  const body = document.createElement("div");
+  body.className = "hdmi-bubble-body";
+  body.textContent = turn.text;
+
+  const time = document.createElement("div");
+  time.className = "hdmi-bubble-time";
+  time.textContent = formatTime(turn.timestamp);
+
+  bubble.appendChild(label);
+  bubble.appendChild(body);
+  bubble.appendChild(time);
+  conversationLog.appendChild(bubble);
+
+  conversationLog.scrollTop = conversationLog.scrollHeight;
+}
+
+function loadHistory(turns) {
+  // Clear existing bubbles (keep the empty placeholder)
+  const existing = conversationLog.querySelectorAll(".hdmi-bubble");
+  existing.forEach((el) => el.remove());
+  if (turns.length === 0) {
+    if (conversationEmpty) conversationEmpty.style.display = "";
+    return;
+  }
+  turns.forEach(appendTurn);
+}
+
 function connect() {
   if (reconnectTimer) {
     clearTimeout(reconnectTimer);
@@ -103,6 +146,10 @@ function connect() {
     }
     if (message.type === "state") {
       applyState(message.payload);
+    } else if (message.type === "conversation_turn") {
+      appendTurn(message.payload);
+    } else if (message.type === "conversation_history") {
+      loadHistory(message.payload);
     }
   });
 

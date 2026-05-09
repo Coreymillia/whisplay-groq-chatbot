@@ -2,9 +2,13 @@
 
 #include <Arduino.h>
 #include <ArduinoJson.h>
+#include <FS.h>
 #include <HTTPClient.h>
 
 #include "Portal.h"
+
+static constexpr size_t COMPANION_MAX_PRESETS = 16;
+static constexpr size_t COMPANION_MAX_PHOTOS = 24;
 
 struct CompanionState {
   bool ready = false;
@@ -17,10 +21,42 @@ struct CompanionState {
   uint32_t lastUpdateMs = 0;
 };
 
+struct CompanionPreset {
+  String id;
+  String label;
+  String prompt;
+};
+
 struct CompanionSettings {
   bool loaded = false;
   String voiceMode = "text-only";
   String personalityPresetId = "custom";
+  bool musicShuffle = false;
+  int volumeLevel = 9;
+  int scrollSpeedLevel = 5;
+  int manualRecordMaxSec = 15;
+  int idleTimeoutSec = 120;
+  int screenBlankTimeoutSec = 0;
+  int roomMonitorIntervalSec = 0;
+  String uiTheme = "default";
+  String cameraSource = "pi-camera";
+  String headerMode = "emoji";
+  String screensaverMode = "retro-geometry";
+  size_t presetCount = 0;
+  CompanionPreset presets[COMPANION_MAX_PRESETS];
+};
+
+struct CompanionPhoto {
+  String fileName;
+  String imageUrl;
+  uint32_t sizeBytes = 0;
+};
+
+struct CompanionPhotoLibrary {
+  bool loaded = false;
+  size_t count = 0;
+  CompanionPhoto photos[COMPANION_MAX_PHOTOS];
+  uint32_t lastUpdateMs = 0;
 };
 
 static bool apiBuildUrl(char *buffer, size_t bufferSize, const char *path) {
@@ -29,6 +65,10 @@ static bool apiBuildUrl(char *buffer, size_t bufferSize, const char *path) {
   }
   snprintf(buffer, bufferSize, "http://%s:%u%s", cc_pi_host, cc_pi_port, path);
   return true;
+}
+
+static bool apiBuildUrl(char *buffer, size_t bufferSize, const String &path) {
+  return apiBuildUrl(buffer, bufferSize, path.c_str());
 }
 
 static bool apiPostJson(const char *path, const char *jsonBody, String *responseOut = nullptr) {
@@ -82,6 +122,12 @@ static bool apiFetchState(CompanionState &state) {
   return true;
 }
 
+static bool apiPostSettingsDocument(JsonDocument &doc) {
+  String body;
+  serializeJson(doc, body);
+  return apiPostJson("/api/settings", body.c_str());
+}
+
 static bool apiFetchSettings(CompanionSettings &settings) {
   char url[192];
   if (!apiBuildUrl(url, sizeof(url), "/api/settings")) {
@@ -109,8 +155,111 @@ static bool apiFetchSettings(CompanionSettings &settings) {
 
   settings.voiceMode = String(settingsObj["voiceMode"] | "text-only");
   settings.personalityPresetId = String(settingsObj["personalityPresetId"] | "custom");
+  settings.musicShuffle = settingsObj["musicShuffle"] | false;
+  settings.volumeLevel = settingsObj["volumeLevel"] | 9;
+  settings.scrollSpeedLevel = settingsObj["scrollSpeedLevel"] | 5;
+  settings.manualRecordMaxSec = settingsObj["manualRecordMaxSec"] | 15;
+  settings.idleTimeoutSec = settingsObj["idleTimeoutSec"] | 120;
+  settings.screenBlankTimeoutSec = settingsObj["screenBlankTimeoutSec"] | 0;
+  settings.roomMonitorIntervalSec = settingsObj["roomMonitorIntervalSec"] | 0;
+  settings.uiTheme = String(settingsObj["uiTheme"] | "default");
+  settings.cameraSource = String(settingsObj["cameraSource"] | "pi-camera");
+  settings.headerMode = String(settingsObj["headerMode"] | "emoji");
+  settings.screensaverMode = String(settingsObj["screensaverMode"] | "retro-geometry");
+  settings.presetCount = 0;
+
+  JsonArray presetsArray = doc["presets"].as<JsonArray>();
+  if (!presetsArray.isNull()) {
+    for (JsonVariant presetVariant : presetsArray) {
+      if (settings.presetCount >= COMPANION_MAX_PRESETS) {
+        break;
+      }
+      JsonObject presetObject = presetVariant.as<JsonObject>();
+      if (presetObject.isNull()) {
+        continue;
+      }
+      CompanionPreset &preset = settings.presets[settings.presetCount++];
+      preset.id = String(presetObject["id"] | "");
+      preset.label = String(presetObject["label"] | "");
+      preset.prompt = String(presetObject["prompt"] | "");
+    }
+  }
   settings.loaded = true;
   return true;
+}
+
+static bool apiFetchPhotos(CompanionPhotoLibrary &library, size_t maxPhotos = COMPANION_MAX_PHOTOS) {
+  char url[192];
+  if (!apiBuildUrl(url, sizeof(url), "/api/photos")) {
+    return false;
+  }
+  HTTPClient http;
+  http.begin(url);
+  http.setTimeout(5000);
+  int code = http.GET();
+  if (code != 200) {
+    http.end();
+    return false;
+  }
+  String body = http.getString();
+  http.end();
+
+  JsonDocument doc;
+  if (deserializeJson(doc, body)) {
+    return false;
+  }
+
+  JsonArray photosArray = doc["photos"].as<JsonArray>();
+  if (photosArray.isNull()) {
+    return false;
+  }
+
+  library.count = 0;
+  for (JsonVariant photoVariant : photosArray) {
+    if (library.count >= maxPhotos || library.count >= COMPANION_MAX_PHOTOS) {
+      break;
+    }
+    JsonObject photoObject = photoVariant.as<JsonObject>();
+    if (photoObject.isNull()) {
+      continue;
+    }
+    CompanionPhoto &photo = library.photos[library.count++];
+    photo.fileName = String(photoObject["fileName"] | "");
+    photo.imageUrl = String(photoObject["imageUrl"] | "");
+    photo.sizeBytes = photoObject["sizeBytes"] | 0;
+  }
+
+  library.loaded = true;
+  library.lastUpdateMs = millis();
+  return true;
+}
+
+static bool apiDownloadFile(const String &requestPath, fs::FS &fileSystem, const char *localPath) {
+  char url[256];
+  if (!apiBuildUrl(url, sizeof(url), requestPath)) {
+    return false;
+  }
+
+  HTTPClient http;
+  http.begin(url);
+  http.setTimeout(15000);
+  int code = http.GET();
+  if (code != 200) {
+    http.end();
+    return false;
+  }
+
+  fileSystem.remove(localPath);
+  File file = fileSystem.open(localPath, "w");
+  if (!file) {
+    http.end();
+    return false;
+  }
+
+  int written = http.writeToStream(&file);
+  file.close();
+  http.end();
+  return written >= 0;
 }
 
 static const char *apiNextVoiceMode(const String &currentMode) {
@@ -126,9 +275,7 @@ static const char *apiNextVoiceMode(const String &currentMode) {
 static bool apiSetVoiceMode(const char *voiceMode) {
   JsonDocument doc;
   doc["voiceMode"] = voiceMode;
-  String body;
-  serializeJson(doc, body);
-  return apiPostJson("/api/settings", body.c_str());
+  return apiPostSettingsDocument(doc);
 }
 
 static bool apiCycleVoiceMode(CompanionSettings &settings) {
@@ -139,6 +286,33 @@ static bool apiCycleVoiceMode(CompanionSettings &settings) {
   settings.voiceMode = String(nextMode);
   settings.loaded = true;
   return true;
+}
+
+static bool apiSetStringSetting(const char *key, const String &value) {
+  JsonDocument doc;
+  doc[key] = value;
+  return apiPostSettingsDocument(doc);
+}
+
+static bool apiSetIntSetting(const char *key, int value) {
+  JsonDocument doc;
+  doc[key] = value;
+  return apiPostSettingsDocument(doc);
+}
+
+static bool apiSetBoolSetting(const char *key, bool value) {
+  JsonDocument doc;
+  doc[key] = value;
+  return apiPostSettingsDocument(doc);
+}
+
+static bool apiSetPersonalityPreset(const CompanionPreset &preset) {
+  if (!preset.prompt.length()) {
+    return false;
+  }
+  JsonDocument doc;
+  doc["personalityPrompt"] = preset.prompt;
+  return apiPostSettingsDocument(doc);
 }
 
 static bool apiResetChat() {

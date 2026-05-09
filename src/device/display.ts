@@ -557,6 +557,10 @@ export class WhisplayDisplay {
     this.webDisplay = null;
   }
 
+  recordConversationTurn(role: "user" | "bot", text: string): void {
+    this.webDisplay?.addConversationTurn(role, text);
+  }
+
   private isVuHeaderMode(headerMode: string): boolean {
     return (
       headerMode === "vu-bars" ||
@@ -743,6 +747,8 @@ export const onTextInput =
   displayInstance.onTextInput.bind(displayInstance);
 export const isButtonDown =
   displayInstance.isButtonDown.bind(displayInstance);
+export const recordConversationTurn =
+  displayInstance.recordConversationTurn.bind(displayInstance);
 
 function cleanup() {
   console.log("Cleaning up display process before exit...");

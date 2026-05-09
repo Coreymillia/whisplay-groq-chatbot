@@ -9,6 +9,7 @@ import {
   onCameraCapture,
   onTextInput,
   isButtonDown,
+  recordConversationTurn,
 } from "../../device/display";
 import {
   recordAudio,
@@ -1067,6 +1068,9 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
   answer: (ctx: ChatFlowContext) => {
     ctx.enterMusicAfterAnswer = false;
     ctx.musicDisplayText = "";
+    if (ctx.asrText) {
+      recordConversationTurn("user", ctx.asrText);
+    }
     display({
       status: "answering...",
       emoji: STATE_EMOJIS.answering,

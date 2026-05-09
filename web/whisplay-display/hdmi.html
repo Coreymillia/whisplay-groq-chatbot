@@ -3,13 +3,15 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Whisplay HDMI Chat</title>
+  <title>Whisplay HDMI Mirror</title>
   <link rel="stylesheet" href="/hdmi.css" />
 </head>
 <body class="hdmi-body">
   <main class="hdmi-shell">
+
     <section class="hdmi-chat-card">
-      <div class="hdmi-eyebrow">Whisplay HDMI Chat</div>
+      <div class="hdmi-eyebrow">Whisplay · Live Mirror</div>
+
       <div class="hdmi-topline">
         <div>
           <div class="hdmi-status" id="statusText">starting</div>
@@ -17,10 +19,14 @@
         </div>
         <div class="hdmi-emoji" id="emojiText">…</div>
       </div>
-      <div class="hdmi-text" id="textText">Waiting for chat text…</div>
+
+      <div class="hdmi-conversation" id="conversationLog">
+        <div class="hdmi-conversation-empty" id="conversationEmpty">Conversation will appear here…</div>
+      </div>
+
       <div class="hdmi-footer">
         <span id="connectionText">Connecting…</span>
-        <a href="/" target="_blank" rel="noopener">Open full control UI</a>
+        <a href="/" target="_blank" rel="noopener">Open full UI</a>
       </div>
     </section>
 
@@ -33,8 +39,8 @@
         <img id="imageDisplay" alt="Whisplay image output" />
       </div>
     </aside>
-  </main>
 
+  </main>
   <script src="/hdmi.js"></script>
 </body>
 </html>

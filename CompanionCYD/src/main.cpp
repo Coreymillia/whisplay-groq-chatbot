@@ -1,7 +1,10 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <SPI.h>
+#include <FS.h>
+#include <SPIFFS.h>
 #include <Arduino_GFX_Library.h>
+#include <JPEGDEC.h>
 #include <XPT2046_Touchscreen.h>
 
 #include "Portal.h"
@@ -31,6 +34,65 @@ static const uint16_t COLOR_DIM = 0x7BEF;
 static const uint16_t COLOR_ACCENT = 0x07E0;
 static const uint16_t COLOR_WARN = 0xFFE0;
 static const uint16_t COLOR_ERROR = 0xF800;
+static const uint16_t COLOR_ACTION = 0x01CF;
+static const uint16_t COLOR_ACTION_ALT = 0x02A0;
+static const uint16_t COLOR_CAPTURE = 0x4200;
+static const uint16_t COLOR_SETTINGS = 0x780F;
+static const uint16_t COLOR_MULTI[] = {
+  RGB565_WHITE,
+  RGB565_GREEN,
+  RGB565_CYAN,
+  RGB565_YELLOW,
+  RGB565_MAGENTA,
+  RGB565_BLUE,
+};
+
+static constexpr unsigned long TOUCH_DEBOUNCE_MS = 220;
+static constexpr unsigned long STATE_POLL_MS = 900;
+static constexpr unsigned long SETTINGS_POLL_MS = 6000;
+static constexpr unsigned long PHOTOS_POLL_MS = 12000;
+static constexpr unsigned long PHOTO_REFRESH_BOOST_MS = 8000;
+static constexpr unsigned long PHOTO_REFRESH_BOOST_POLL_MS = 1500;
+static constexpr unsigned long BOOT_PORTAL_HOLD_MS = 3000;
+static constexpr size_t MAX_LOG_ENTRIES = 32;
+static constexpr size_t MAX_RENDER_LINES = 96;
+static constexpr char PREVIEW_CACHE_PATH[] = "/preview.jpg";
+
+enum class UiMode : uint8_t {
+  Chat = 0,
+  Capture,
+  Gallery,
+  Settings,
+};
+
+enum ChatColorMode : uint8_t {
+  ChatColorWhite = 0,
+  ChatColorGreen,
+  ChatColorCyan,
+  ChatColorAmber,
+  ChatColorPink,
+  ChatColorPurple,
+  ChatColorBlue,
+  ChatColorMulti,
+};
+
+enum class SettingsItemId : uint8_t {
+  Personality = 0,
+  VoiceMode,
+  Volume,
+  ScrollSpeed,
+  RecordTime,
+  UiTheme,
+  HeaderMode,
+  ScreensaverMode,
+  IdleTimeout,
+  ScreenBlankTimeout,
+  RoomMonitorInterval,
+  CameraSource,
+  MusicShuffle,
+  ChatTextSize,
+  ChatTextColor,
+};
 
 struct TouchButton {
   const char *label;
@@ -41,36 +103,132 @@ struct TouchButton {
   uint16_t bg;
 };
 
-static TouchButton buttons[] = {
-  { "NEW CHAT", 10, 170, 145, 26, 0x02A0 },
-  { "REPEAT", 165, 170, 145, 26, 0x01CF },
-  { "CAPTURE", 10, 204, 145, 26, 0x4200 },
-  { "VOICE", 165, 204, 145, 26, 0x780F },
+static const TouchButton buttonModePrev = { "<", 4, 24, 24, 20, COLOR_SETTINGS };
+static const TouchButton buttonNewChat = { "NEW CHAT", 34, 24, 94, 20, COLOR_ACTION_ALT };
+static const TouchButton buttonRepeat = { "REPEAT", 132, 24, 82, 20, COLOR_ACTION };
+static const TouchButton buttonModeNext = { ">", 218, 24, 24, 20, COLOR_SETTINGS };
+static const TouchButton buttonSetup = { "SETUP", 246, 24, 70, 20, 0x5008 };
+static const TouchButton buttonCaptureAction = { "CAPTURE", 92, 188, 136, 28, COLOR_CAPTURE };
+static const TouchButton buttonGalleryPrev = { "PREV", 18, 188, 84, 28, COLOR_ACTION };
+static const TouchButton buttonGalleryNext = { "NEXT", 218, 188, 84, 28, COLOR_ACTION_ALT };
+static const TouchButton buttonGalleryLatest = { "LATEST", 114, 188, 92, 28, COLOR_CAPTURE };
+static const TouchButton buttonSettingsPrevItem = { "ITEM -", 12, 164, 142, 24, COLOR_ACTION };
+static const TouchButton buttonSettingsNextItem = { "ITEM +", 166, 164, 142, 24, COLOR_ACTION_ALT };
+static const TouchButton buttonSettingsPrevValue = { "VALUE -", 12, 194, 142, 24, COLOR_SETTINGS };
+static const TouchButton buttonSettingsNextValue = { "VALUE +", 166, 194, 142, 24, COLOR_CAPTURE };
+
+static const SettingsItemId SETTINGS_ITEMS[] = {
+  SettingsItemId::Personality,
+  SettingsItemId::VoiceMode,
+  SettingsItemId::Volume,
+  SettingsItemId::ScrollSpeed,
+  SettingsItemId::RecordTime,
+  SettingsItemId::UiTheme,
+  SettingsItemId::HeaderMode,
+  SettingsItemId::ScreensaverMode,
+  SettingsItemId::IdleTimeout,
+  SettingsItemId::ScreenBlankTimeout,
+  SettingsItemId::RoomMonitorInterval,
+  SettingsItemId::CameraSource,
+  SettingsItemId::MusicShuffle,
+  SettingsItemId::ChatTextSize,
+  SettingsItemId::ChatTextColor,
 };
-static TouchButton setupButton = { "SETUP", 244, 3, 56, 16, 0x5008 };
+
+static const char *VOICE_MODE_OPTIONS[] = {
+  "text-only",
+  "speak-on-demand",
+  "voice-chat",
+};
+static const char *UI_THEME_OPTIONS[] = {
+  "default",
+  "matrix",
+  "plasma",
+  "amber-terminal",
+};
+static const char *HEADER_MODE_OPTIONS[] = {
+  "emoji",
+  "matrix",
+  "matrix-binary",
+  "matrix-blue",
+  "retro-geometry",
+  "plasma",
+  "neon-rain",
+  "vu-bars",
+  "vu-scope",
+  "vu-wave",
+};
+static const char *SCREENSAVER_MODE_OPTIONS[] = {
+  "off",
+  "matrix",
+  "matrix-binary",
+  "matrix-blue",
+  "retro-geometry",
+  "plasma",
+  "neon-rain",
+};
+static const char *CAMERA_SOURCE_OPTIONS[] = {
+  "pi-camera",
+  "esp32-cam",
+};
+static const int RECORD_TIME_OPTIONS[] = {10, 15, 20, 30, 45, 60};
+static const int IDLE_TIMEOUT_OPTIONS[] = {0, 60, 120, 180, 240, 300, 360, 420, 480, 540, 600};
+static const int ROOM_MONITOR_INTERVAL_OPTIONS[] = {0, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600};
+static const char *CHAT_COLOR_LABELS[] = {
+  "White",
+  "Green",
+  "Cyan",
+  "Amber",
+  "Pink",
+  "Purple",
+  "Blue",
+  "Multi",
+};
 
 static CompanionState companionState;
 static CompanionSettings companionSettings;
+static CompanionPhotoLibrary photoLibrary;
+static JPEGDEC previewJpeg;
 static String toastMessage;
+static String lastLoggedBotText;
+static String previewFileName;
+static String previewError;
+static String conversationLog[MAX_LOG_ENTRIES];
+static size_t conversationLogCount = 0;
 static bool renderDirty = true;
 static bool touchWasDown = false;
+static bool previewReady = false;
 static unsigned long lastTouchMs = 0;
 static unsigned long lastStatePollMs = 0;
 static unsigned long lastSettingsPollMs = 0;
+static unsigned long lastPhotoPollMs = 0;
 static unsigned long lastBootHoldStartMs = 0;
 static unsigned long toastUntilMs = 0;
 static unsigned long lastSuccessfulPollMs = 0;
-
-static const unsigned long TOUCH_DEBOUNCE_MS = 250;
-static const unsigned long STATE_POLL_MS = 900;
-static const unsigned long SETTINGS_POLL_MS = 6000;
-static const unsigned long BOOT_PORTAL_HOLD_MS = 3000;
+static unsigned long photoRefreshBoostUntilMs = 0;
+static UiMode uiMode = UiMode::Chat;
+static size_t galleryIndex = 0;
+static size_t selectedSettingsIndex = 0;
 
 static void mapTouch(uint16_t rawX, uint16_t rawY, int &screenX, int &screenY) {
   screenX = map(rawX, 200, 3800, 0, 320);
   screenY = map(rawY, 200, 3800, 0, 240);
   screenX = constrain(screenX, 0, 319);
   screenY = constrain(screenY, 0, 239);
+}
+
+static const char *uiModeLabel(UiMode mode) {
+  switch (mode) {
+    case UiMode::Capture:
+      return "CAPTURE";
+    case UiMode::Gallery:
+      return "GALLERY";
+    case UiMode::Settings:
+      return "SETTINGS";
+    case UiMode::Chat:
+    default:
+      return "CHAT";
+  }
 }
 
 static const char *voiceModeLabel(const String &mode) {
@@ -85,26 +243,122 @@ static const char *voiceModeLabel(const String &mode) {
 
 static uint16_t voiceModeColor(const String &mode) {
   if (mode == "voice-chat") {
-    return 0x07E0;
+    return COLOR_ACCENT;
   }
   if (mode == "speak-on-demand") {
-    return 0xFFE0;
+    return COLOR_WARN;
   }
-  return 0x07FF;
+  return COLOR_HEADER_TEXT;
 }
 
-static void setToast(const String &message, uint16_t durationMs = 2000) {
+static int chatTextScale() {
+  return constrain(static_cast<int>(cc_chat_text_scale), 1, 3);
+}
+
+static int scaledCharWidth() {
+  return 6 * chatTextScale();
+}
+
+static int scaledLineHeight() {
+  return (8 * chatTextScale()) + 2;
+}
+
+static size_t arrayLength(const char *const *items, size_t sizeBytes) {
+  return sizeBytes / sizeof(items[0]);
+}
+
+static String clampLogText(const String &value, size_t maxChars = 700) {
+  if (value.length() <= maxChars) {
+    return value;
+  }
+  return value.substring(value.length() - maxChars);
+}
+
+static void clearConversationLog() {
+  for (size_t i = 0; i < conversationLogCount; i++) {
+    conversationLog[i] = "";
+  }
+  conversationLogCount = 0;
+  lastLoggedBotText = "";
+}
+
+static void appendLogEntry(const String &prefix, const String &text, bool replaceLast = false) {
+  String normalized = text;
+  normalized.trim();
+  if (!normalized.length()) {
+    return;
+  }
+
+  String entry = prefix + clampLogText(normalized);
+  if (replaceLast && conversationLogCount > 0) {
+    conversationLog[conversationLogCount - 1] = entry;
+  } else {
+    if (conversationLogCount < MAX_LOG_ENTRIES) {
+      conversationLog[conversationLogCount++] = entry;
+    } else {
+      for (size_t i = 1; i < MAX_LOG_ENTRIES; i++) {
+        conversationLog[i - 1] = conversationLog[i];
+      }
+      conversationLog[MAX_LOG_ENTRIES - 1] = entry;
+    }
+  }
+  renderDirty = true;
+}
+
+static void syncIncomingLogText(const String &text) {
+  String normalized = text;
+  normalized.trim();
+  if (!normalized.length()) {
+    return;
+  }
+
+  if (
+    lastLoggedBotText.length() &&
+    normalized.startsWith(lastLoggedBotText) &&
+    conversationLogCount > 0 &&
+    conversationLog[conversationLogCount - 1].startsWith("BOT ")
+  ) {
+    conversationLog[conversationLogCount - 1] = "BOT " + clampLogText(normalized);
+  } else if (normalized != lastLoggedBotText) {
+    appendLogEntry("BOT ", normalized);
+  }
+  lastLoggedBotText = normalized;
+  renderDirty = true;
+}
+
+static void setToast(const String &message, uint16_t durationMs = 2200) {
   toastMessage = message;
   toastUntilMs = millis() + durationMs;
   renderDirty = true;
 }
 
-static void fillWrappedLines(const String &sourceText, String *lines, int &lineCount, int maxLines, int maxChars) {
+static void drawButton(const TouchButton &button) {
+  gfx->fillRoundRect(button.x, button.y, button.w, button.h, 6, button.bg);
+  gfx->drawRoundRect(button.x, button.y, button.w, button.h, 6, COLOR_HEADER_TEXT);
+  gfx->setTextSize(1);
+  gfx->setTextColor(COLOR_TEXT, button.bg);
+  int textX = button.x + (button.w - (strlen(button.label) * 6)) / 2;
+  int textY = button.y + (button.h - 8) / 2;
+  gfx->setCursor(textX, textY);
+  gfx->print(button.label);
+}
+
+static bool pointInButton(int x, int y, const TouchButton &button) {
+  return x >= button.x && x <= (button.x + button.w) && y >= button.y && y <= (button.y + button.h);
+}
+
+static void fillWrappedLines(
+  const String &sourceText,
+  String *lines,
+  int &lineCount,
+  int maxLines,
+  int maxChars
+) {
   lineCount = 0;
   String source = sourceText;
   source.replace("\r", "");
-  if (source.length() > 700) {
-    source = source.substring(source.length() - 700);
+  if (source.length() > 1200) {
+    source = source.substring(source.length() - 1200);
   }
 
   String currentLine;
@@ -140,33 +394,341 @@ static void fillWrappedLines(const String &sourceText, String *lines, int &lineC
   }
 }
 
-static void drawWrappedTailText(int16_t x, int16_t y, int16_t w, int16_t h, const String &text) {
-  const int maxChars = max(10, (w / 6) - 1);
-  const int visibleLines = max(1, h / 10);
-  String wrapped[48];
-  int wrappedCount = 0;
-  fillWrappedLines(text.length() ? text : "Waiting for chatbot text...", wrapped, wrappedCount, 48, maxChars);
-
-  int startLine = max(0, wrappedCount - visibleLines);
-  gfx->setTextColor(COLOR_TEXT, COLOR_PANEL);
-  gfx->setTextSize(1);
-  int cursorY = y;
-  for (int i = startLine; i < wrappedCount; i++) {
-    gfx->setCursor(x, cursorY);
-    gfx->print(wrapped[i]);
-    cursorY += 10;
+static uint16_t currentChatColor() {
+  switch (cc_chat_color_mode) {
+    case ChatColorGreen:
+      return RGB565_GREEN;
+    case ChatColorCyan:
+      return RGB565_CYAN;
+    case ChatColorAmber:
+      return RGB565_YELLOW;
+    case ChatColorPink:
+      return RGB565_MAGENTA;
+    case ChatColorPurple:
+      return RGB565_PURPLE;
+    case ChatColorBlue:
+      return RGB565_BLUE;
+    case ChatColorMulti:
+      return RGB565_WHITE;
+    case ChatColorWhite:
+    default:
+      return RGB565_WHITE;
   }
 }
 
-static void drawButton(const TouchButton &button) {
-  gfx->fillRoundRect(button.x, button.y, button.w, button.h, 6, button.bg);
-  gfx->drawRoundRect(button.x, button.y, button.w, button.h, 6, COLOR_HEADER_TEXT);
+static void buildConversationLines(String *lines, int &lineCount, int maxLines, int maxChars) {
+  lineCount = 0;
+  if (conversationLogCount == 0) {
+    fillWrappedLines("Waiting for Whisplay text...", lines, lineCount, maxLines, maxChars);
+    return;
+  }
+
+  for (size_t i = 0; i < conversationLogCount && lineCount < maxLines; i++) {
+    int wrappedCount = 0;
+    fillWrappedLines(conversationLog[i], lines + lineCount, wrappedCount, maxLines - lineCount, maxChars);
+    lineCount += wrappedCount;
+    if (lineCount < maxLines && i + 1 < conversationLogCount) {
+      lines[lineCount++] = "";
+    }
+  }
+}
+
+static void drawConversationLog(int x, int y, int w, int h) {
+  const int maxChars = max(8, (w / scaledCharWidth()) - 1);
+  const int visibleLines = max(1, h / scaledLineHeight());
+  String lines[MAX_RENDER_LINES];
+  int lineCount = 0;
+  buildConversationLines(lines, lineCount, MAX_RENDER_LINES, maxChars);
+  int startLine = max(0, lineCount - visibleLines);
+
+  gfx->setTextSize(chatTextScale());
+  int cursorY = y;
+  for (int i = startLine; i < lineCount; i++) {
+    uint16_t lineColor = currentChatColor();
+    if (cc_chat_color_mode == ChatColorMulti) {
+      lineColor = COLOR_MULTI[i % (sizeof(COLOR_MULTI) / sizeof(COLOR_MULTI[0]))];
+    }
+    gfx->setTextColor(lineColor, COLOR_PANEL);
+    gfx->setCursor(x, cursorY);
+    gfx->print(lines[i]);
+    cursorY += scaledLineHeight();
+  }
   gfx->setTextSize(1);
-  gfx->setTextColor(COLOR_TEXT, button.bg);
-  int textX = button.x + (button.w - (strlen(button.label) * 6)) / 2;
-  int textY = button.y + (button.h - 8) / 2;
-  gfx->setCursor(textX, textY);
-  gfx->print(button.label);
+}
+
+static String trimTail(const String &value, size_t maxChars) {
+  if (value.length() <= maxChars) {
+    return value;
+  }
+  return value.substring(value.length() - maxChars);
+}
+
+static String compactDurationLabel(int seconds) {
+  if (seconds <= 0) {
+    return "Off";
+  }
+  if (seconds >= 3600) {
+    return String(seconds / 3600) + "h";
+  }
+  if (seconds >= 60) {
+    return String(seconds / 60) + "m";
+  }
+  return String(seconds) + "s";
+}
+
+static String compactThemeLabel(const String &value) {
+  if (value == "amber-terminal") {
+    return "Amber";
+  }
+  if (value == "matrix") {
+    return "Matrix";
+  }
+  if (value == "plasma") {
+    return "Plasma";
+  }
+  return "Default";
+}
+
+static String compactHeaderLabel(const String &value) {
+  if (value == "matrix-binary") {
+    return "Binary";
+  }
+  if (value == "matrix-blue") {
+    return "Blue";
+  }
+  if (value == "retro-geometry") {
+    return "Retro";
+  }
+  if (value == "plasma") {
+    return "Plasma";
+  }
+  if (value == "neon-rain") {
+    return "Neon";
+  }
+  if (value == "vu-bars") {
+    return "VU Bars";
+  }
+  if (value == "vu-scope") {
+    return "VU Scope";
+  }
+  if (value == "vu-wave") {
+    return "VU Wave";
+  }
+  if (value == "matrix") {
+    return "Matrix";
+  }
+  return "Emoji";
+}
+
+static String compactScreensaverLabel(const String &value) {
+  if (value == "matrix-binary") {
+    return "Binary";
+  }
+  if (value == "matrix-blue") {
+    return "Blue";
+  }
+  if (value == "retro-geometry") {
+    return "Retro";
+  }
+  if (value == "plasma") {
+    return "Plasma";
+  }
+  if (value == "neon-rain") {
+    return "Neon";
+  }
+  if (value == "matrix") {
+    return "Matrix";
+  }
+  return "Off";
+}
+
+static String compactCameraSourceLabel(const String &value) {
+  return value == "esp32-cam" ? "ESP32-CAM" : "Pi Camera";
+}
+
+static int findStringOptionIndex(const String &current, const char *const *options, size_t optionCount) {
+  for (size_t i = 0; i < optionCount; i++) {
+    if (current == options[i]) {
+      return static_cast<int>(i);
+    }
+  }
+  return 0;
+}
+
+static int findIntOptionIndex(int current, const int *options, size_t optionCount) {
+  for (size_t i = 0; i < optionCount; i++) {
+    if (current == options[i]) {
+      return static_cast<int>(i);
+    }
+  }
+  return 0;
+}
+
+static size_t currentPresetIndex() {
+  for (size_t i = 0; i < companionSettings.presetCount; i++) {
+    if (companionSettings.presets[i].id == companionSettings.personalityPresetId) {
+      return i;
+    }
+  }
+  return 0;
+}
+
+static String currentPresetLabel() {
+  for (size_t i = 0; i < companionSettings.presetCount; i++) {
+    if (companionSettings.presets[i].id == companionSettings.personalityPresetId) {
+      return companionSettings.presets[i].label.length()
+        ? companionSettings.presets[i].label
+        : companionSettings.presets[i].id;
+    }
+  }
+  return companionSettings.personalityPresetId.length()
+    ? companionSettings.personalityPresetId
+    : "Custom";
+}
+
+static const CompanionPhoto *selectedPhoto() {
+  if (photoLibrary.count == 0) {
+    return nullptr;
+  }
+  if (uiMode == UiMode::Gallery) {
+    if (galleryIndex >= photoLibrary.count) {
+      galleryIndex = photoLibrary.count - 1;
+    }
+    return &photoLibrary.photos[galleryIndex];
+  }
+  return &photoLibrary.photos[0];
+}
+
+static bool photoLibrariesEqual(const CompanionPhotoLibrary &a, const CompanionPhotoLibrary &b) {
+  if (a.count != b.count) {
+    return false;
+  }
+  for (size_t i = 0; i < a.count; i++) {
+    if (a.photos[i].fileName != b.photos[i].fileName || a.photos[i].imageUrl != b.photos[i].imageUrl) {
+      return false;
+    }
+  }
+  return true;
+}
+
+static bool isJpegFileName(const String &fileName) {
+  String normalized = fileName;
+  normalized.toLowerCase();
+  return normalized.endsWith(".jpg") || normalized.endsWith(".jpeg");
+}
+
+static void clearPreviewCache() {
+  previewReady = false;
+  previewFileName = "";
+  previewError = "";
+  SPIFFS.remove(PREVIEW_CACHE_PATH);
+}
+
+static int32_t previewFileRead(JPEGFILE *handle, uint8_t *buffer, int32_t length) {
+  return static_cast<File *>(handle->fHandle)->read(buffer, length);
+}
+
+static int32_t previewFileSeek(JPEGFILE *handle, int32_t position) {
+  return static_cast<File *>(handle->fHandle)->seek(position);
+}
+
+static void previewFileClose(void *handle) {
+  static_cast<File *>(handle)->close();
+}
+
+static int jpegDrawCallback(JPEGDRAW *draw) {
+  gfx->draw16bitBeRGBBitmap(draw->x, draw->y, draw->pPixels, draw->iWidth, draw->iHeight);
+  return 1;
+}
+
+static int jpegScaleOptionForBounds(int width, int height, int maxW, int maxH, int &scaledW, int &scaledH) {
+  int option = 0;
+  scaledW = width;
+  scaledH = height;
+
+  if (scaledW > maxW || scaledH > maxH) {
+    option = JPEG_SCALE_HALF;
+    scaledW = max(1, width / 2);
+    scaledH = max(1, height / 2);
+  }
+  if (scaledW > maxW || scaledH > maxH) {
+    option = JPEG_SCALE_QUARTER;
+    scaledW = max(1, width / 4);
+    scaledH = max(1, height / 4);
+  }
+  if (scaledW > maxW || scaledH > maxH) {
+    option = JPEG_SCALE_EIGHTH;
+    scaledW = max(1, width / 8);
+    scaledH = max(1, height / 8);
+  }
+  return option;
+}
+
+static bool drawPreviewImage(int x, int y, int w, int h) {
+  File previewFile = SPIFFS.open(PREVIEW_CACHE_PATH, "r");
+  if (!previewFile) {
+    return false;
+  }
+
+  int openResult = previewJpeg.open(
+    static_cast<void *>(&previewFile),
+    previewFile.size(),
+    previewFileClose,
+    previewFileRead,
+    previewFileSeek,
+    jpegDrawCallback
+  );
+  if (openResult != JPEG_SUCCESS) {
+    previewFile.close();
+    previewError = "Preview open failed.";
+    return false;
+  }
+
+  previewJpeg.setPixelType(RGB565_BIG_ENDIAN);
+  int scaledW = previewJpeg.getWidth();
+  int scaledH = previewJpeg.getHeight();
+  int decodeOption = jpegScaleOptionForBounds(
+    previewJpeg.getWidth(),
+    previewJpeg.getHeight(),
+    w,
+    h,
+    scaledW,
+    scaledH
+  );
+
+  int drawX = x + max(0, (w - scaledW) / 2);
+  int drawY = y + max(0, (h - scaledH) / 2);
+  bool ok = previewJpeg.decode(drawX, drawY, decodeOption) == JPEG_SUCCESS;
+  previewJpeg.close();
+  return ok;
+}
+
+static bool ensurePreviewForSelection() {
+  const CompanionPhoto *photo = selectedPhoto();
+  if (!photo) {
+    clearPreviewCache();
+    previewError = "No captures yet.";
+    return false;
+  }
+  if (previewReady && previewFileName == photo->fileName) {
+    return true;
+  }
+  if (!isJpegFileName(photo->fileName)) {
+    previewReady = false;
+    previewFileName = photo->fileName;
+    previewError = "JPEG preview only.";
+    return false;
+  }
+  if (!ccEnsureWifiConnected()) {
+    previewReady = false;
+    previewError = "WiFi offline.";
+    return false;
+  }
+  bool ok = apiDownloadFile(photo->imageUrl, SPIFFS, PREVIEW_CACHE_PATH);
+  previewReady = ok;
+  previewFileName = photo->fileName;
+  previewError = ok ? "" : "Preview download failed.";
+  return ok;
 }
 
 static void openSetupPortal() {
@@ -179,73 +741,25 @@ static void openSetupPortal() {
   ccRunPortal();
 }
 
-static void renderUi() {
-  gfx->fillScreen(COLOR_BG);
-
-  gfx->fillRect(0, 0, 320, 22, COLOR_HEADER);
-  gfx->setTextColor(COLOR_HEADER_TEXT, COLOR_HEADER);
-  gfx->setTextSize(1);
-  gfx->setCursor(8, 7);
-  gfx->print("WHISPLAY CYD");
-  drawButton(setupButton);
-
-  uint16_t wifiColor = WiFi.status() == WL_CONNECTED ? COLOR_ACCENT : COLOR_ERROR;
-  gfx->fillCircle(230, 11, 4, wifiColor);
-
-  gfx->fillRect(0, 24, 320, 18, COLOR_BG);
-  gfx->setTextColor(
-    WiFi.status() == WL_CONNECTED ? COLOR_WARN : COLOR_ERROR,
-    COLOR_BG
-  );
-  gfx->setCursor(8, 29);
-  if (WiFi.status() != WL_CONNECTED) {
-    gfx->print("Connecting WiFi...");
-  } else {
-    gfx->print(companionState.status.length() ? companionState.status : "Starting...");
+static void setUiMode(UiMode nextMode) {
+  if (uiMode == nextMode) {
+    return;
   }
-
-  gfx->setTextColor(voiceModeColor(companionSettings.voiceMode), COLOR_BG);
-  const char *voiceLabel = voiceModeLabel(companionSettings.voiceMode);
-  int voiceX = 314 - (strlen(voiceLabel) * 6);
-  gfx->setCursor(voiceX, 29);
-  gfx->print(voiceLabel);
-
-  gfx->drawRoundRect(8, 48, 304, 112, 6, COLOR_DIM);
-  gfx->fillRoundRect(8, 48, 304, 112, 6, COLOR_PANEL);
-
-  gfx->setTextColor(COLOR_DIM, COLOR_PANEL);
-  gfx->setCursor(16, 56);
-  gfx->print("PRESET:");
-  gfx->setTextColor(COLOR_HEADER_TEXT, COLOR_PANEL);
-  gfx->setCursor(60, 56);
-  gfx->print(companionSettings.personalityPresetId.length() ? companionSettings.personalityPresetId : "custom");
-
-  gfx->setTextColor(COLOR_DIM, COLOR_PANEL);
-  gfx->setCursor(236, 56);
-  if (companionState.imageIconVisible) {
-    gfx->print("IMG");
+  uiMode = nextMode;
+  if (uiMode == UiMode::Capture) {
+    galleryIndex = 0;
   }
-  if (companionState.ragIconVisible) {
-    gfx->setCursor(278, 56);
-    gfx->print("RAG");
-  }
+  renderDirty = true;
+}
 
-  drawWrappedTailText(16, 72, 288, 78, companionState.text);
-
-  for (const TouchButton &button : buttons) {
-    drawButton(button);
+static void stepUiMode(int delta) {
+  int next = static_cast<int>(uiMode) + delta;
+  if (next < 0) {
+    next = static_cast<int>(UiMode::Settings);
+  } else if (next > static_cast<int>(UiMode::Settings)) {
+    next = static_cast<int>(UiMode::Chat);
   }
-
-  gfx->fillRect(0, 234, 320, 6, COLOR_BG);
-  gfx->setTextColor(COLOR_DIM, COLOR_BG);
-  gfx->setCursor(8, 234);
-  if (toastUntilMs > millis() && toastMessage.length()) {
-    gfx->print(toastMessage);
-  } else if (lastSuccessfulPollMs > 0) {
-    gfx->print("Tap SETUP or BOOT 3s");
-  } else {
-    gfx->print("Connecting...");
-  }
+  setUiMode(static_cast<UiMode>(next));
 }
 
 static bool fetchStateIfDue() {
@@ -257,6 +771,7 @@ static bool fetchStateIfDue() {
     return false;
   }
   lastStatePollMs = now;
+
   CompanionState nextState;
   if (!apiFetchState(nextState)) {
     return false;
@@ -269,6 +784,10 @@ static bool fetchStateIfDue() {
     nextState.textInputEnabled != companionState.textInputEnabled ||
     nextState.ragIconVisible != companionState.ragIconVisible ||
     nextState.imageIconVisible != companionState.imageIconVisible;
+
+  if (nextState.text != companionState.text && nextState.text.length()) {
+    syncIncomingLogText(nextState.text);
+  }
 
   companionState = nextState;
   lastSuccessfulPollMs = now;
@@ -287,6 +806,7 @@ static bool fetchSettingsIfDue() {
     return false;
   }
   lastSettingsPollMs = now;
+
   CompanionSettings nextSettings;
   if (!apiFetchSettings(nextSettings)) {
     return false;
@@ -295,7 +815,18 @@ static bool fetchSettingsIfDue() {
   bool changed =
     !companionSettings.loaded ||
     nextSettings.voiceMode != companionSettings.voiceMode ||
-    nextSettings.personalityPresetId != companionSettings.personalityPresetId;
+    nextSettings.personalityPresetId != companionSettings.personalityPresetId ||
+    nextSettings.musicShuffle != companionSettings.musicShuffle ||
+    nextSettings.volumeLevel != companionSettings.volumeLevel ||
+    nextSettings.scrollSpeedLevel != companionSettings.scrollSpeedLevel ||
+    nextSettings.manualRecordMaxSec != companionSettings.manualRecordMaxSec ||
+    nextSettings.uiTheme != companionSettings.uiTheme ||
+    nextSettings.headerMode != companionSettings.headerMode ||
+    nextSettings.screensaverMode != companionSettings.screensaverMode ||
+    nextSettings.idleTimeoutSec != companionSettings.idleTimeoutSec ||
+    nextSettings.screenBlankTimeoutSec != companionSettings.screenBlankTimeoutSec ||
+    nextSettings.roomMonitorIntervalSec != companionSettings.roomMonitorIntervalSec ||
+    nextSettings.cameraSource != companionSettings.cameraSource;
 
   companionSettings = nextSettings;
   if (changed) {
@@ -304,33 +835,680 @@ static bool fetchSettingsIfDue() {
   return true;
 }
 
-static bool pointInButton(int x, int y, const TouchButton &button) {
-  return x >= button.x && x <= (button.x + button.w) && y >= button.y && y <= (button.y + button.h);
+static bool fetchPhotosIfDue(bool force = false) {
+  if (!ccEnsureWifiConnected()) {
+    return false;
+  }
+
+  unsigned long now = millis();
+  unsigned long interval = now < photoRefreshBoostUntilMs
+    ? PHOTO_REFRESH_BOOST_POLL_MS
+    : PHOTOS_POLL_MS;
+  if (!force && now - lastPhotoPollMs < interval) {
+    return false;
+  }
+  lastPhotoPollMs = now;
+
+  String currentSelectionFile = selectedPhoto() ? selectedPhoto()->fileName : "";
+  CompanionPhotoLibrary nextPhotos;
+  if (!apiFetchPhotos(nextPhotos)) {
+    return false;
+  }
+
+  bool changed = !photoLibrariesEqual(photoLibrary, nextPhotos);
+  photoLibrary = nextPhotos;
+  if (photoLibrary.count == 0) {
+    galleryIndex = 0;
+    clearPreviewCache();
+  } else if (uiMode == UiMode::Gallery) {
+    size_t matchedIndex = 0;
+    bool found = false;
+    for (size_t i = 0; i < photoLibrary.count; i++) {
+      if (photoLibrary.photos[i].fileName == currentSelectionFile) {
+        matchedIndex = i;
+        found = true;
+        break;
+      }
+    }
+    galleryIndex = found ? matchedIndex : 0;
+  }
+
+  if (!selectedPhoto() || previewFileName != selectedPhoto()->fileName) {
+    previewReady = false;
+  }
+
+  if (changed) {
+    renderDirty = true;
+  }
+  return true;
 }
 
-static void handleButtonTap(const TouchButton &button) {
+static String settingValueLabel(SettingsItemId item) {
+  switch (item) {
+    case SettingsItemId::Personality:
+      return currentPresetLabel();
+    case SettingsItemId::VoiceMode:
+      return voiceModeLabel(companionSettings.voiceMode);
+    case SettingsItemId::Volume:
+      return String(companionSettings.volumeLevel);
+    case SettingsItemId::ScrollSpeed:
+      return String(companionSettings.scrollSpeedLevel);
+    case SettingsItemId::RecordTime:
+      return String(companionSettings.manualRecordMaxSec) + "s";
+    case SettingsItemId::UiTheme:
+      return compactThemeLabel(companionSettings.uiTheme);
+    case SettingsItemId::HeaderMode:
+      return compactHeaderLabel(companionSettings.headerMode);
+    case SettingsItemId::ScreensaverMode:
+      return compactScreensaverLabel(companionSettings.screensaverMode);
+    case SettingsItemId::IdleTimeout:
+      return compactDurationLabel(companionSettings.idleTimeoutSec);
+    case SettingsItemId::ScreenBlankTimeout:
+      return compactDurationLabel(companionSettings.screenBlankTimeoutSec);
+    case SettingsItemId::RoomMonitorInterval:
+      return compactDurationLabel(companionSettings.roomMonitorIntervalSec);
+    case SettingsItemId::CameraSource:
+      return compactCameraSourceLabel(companionSettings.cameraSource);
+    case SettingsItemId::MusicShuffle:
+      return companionSettings.musicShuffle ? "On" : "Off";
+    case SettingsItemId::ChatTextSize:
+      switch (chatTextScale()) {
+        case 3:
+          return "Large";
+        case 2:
+          return "Medium";
+        case 1:
+        default:
+          return "Small";
+      }
+    case SettingsItemId::ChatTextColor:
+      return CHAT_COLOR_LABELS[min(static_cast<int>(cc_chat_color_mode), 7)];
+    default:
+      return "";
+  }
+}
+
+static const char *settingLabel(SettingsItemId item) {
+  switch (item) {
+    case SettingsItemId::Personality:
+      return "Personality";
+    case SettingsItemId::VoiceMode:
+      return "Voice Mode";
+    case SettingsItemId::Volume:
+      return "Volume";
+    case SettingsItemId::ScrollSpeed:
+      return "Scroll Speed";
+    case SettingsItemId::RecordTime:
+      return "Record Time";
+    case SettingsItemId::UiTheme:
+      return "UI Theme";
+    case SettingsItemId::HeaderMode:
+      return "Header Mode";
+    case SettingsItemId::ScreensaverMode:
+      return "Saver Mode";
+    case SettingsItemId::IdleTimeout:
+      return "Idle Timeout";
+    case SettingsItemId::ScreenBlankTimeout:
+      return "Blank Timeout";
+    case SettingsItemId::RoomMonitorInterval:
+      return "Room Monitor";
+    case SettingsItemId::CameraSource:
+      return "Camera Source";
+    case SettingsItemId::MusicShuffle:
+      return "Music Shuffle";
+    case SettingsItemId::ChatTextSize:
+      return "Chat Text Size";
+    case SettingsItemId::ChatTextColor:
+      return "Chat Color";
+    default:
+      return "";
+  }
+}
+
+static bool cycleSettingsValue(int delta) {
+  SettingsItemId item = SETTINGS_ITEMS[selectedSettingsIndex];
   bool ok = false;
-  if (strcmp(button.label, "NEW CHAT") == 0) {
-    ok = apiResetChat();
-    if (ok) {
-      companionState.text = "Started a new chat.";
+  String toast;
+
+  switch (item) {
+    case SettingsItemId::Personality: {
+      if (companionSettings.presetCount == 0) {
+        setToast("No presets loaded.");
+        return false;
+      }
+      int next = static_cast<int>(currentPresetIndex()) + delta;
+      if (next < 0) {
+        next = static_cast<int>(companionSettings.presetCount) - 1;
+      } else if (next >= static_cast<int>(companionSettings.presetCount)) {
+        next = 0;
+      }
+      const CompanionPreset &preset = companionSettings.presets[next];
+      ok = apiSetPersonalityPreset(preset);
+      if (ok) {
+        companionSettings.personalityPresetId = preset.id;
+        toast = "Preset: " + (preset.label.length() ? preset.label : preset.id);
+      }
+      break;
     }
-    setToast(ok ? "Started a new chat." : "New chat failed.");
-  } else if (strcmp(button.label, "REPEAT") == 0) {
-    ok = apiRepeatLastAnswer();
-    setToast(ok ? "Replaying last answer." : "Replay failed.");
-  } else if (strcmp(button.label, "CAPTURE") == 0) {
-    ok = apiCaptureVision();
-    setToast(ok ? "Capture requested." : "Capture failed.");
-  } else if (strcmp(button.label, "VOICE") == 0) {
-    ok = apiCycleVoiceMode(companionSettings);
-    if (ok) {
-      setToast(String("Voice: ") + voiceModeLabel(companionSettings.voiceMode));
-    } else {
-      setToast("Voice mode update failed.");
+    case SettingsItemId::VoiceMode: {
+      int next = findStringOptionIndex(
+        companionSettings.voiceMode,
+        VOICE_MODE_OPTIONS,
+        sizeof(VOICE_MODE_OPTIONS) / sizeof(VOICE_MODE_OPTIONS[0])
+      ) + delta;
+      int count = sizeof(VOICE_MODE_OPTIONS) / sizeof(VOICE_MODE_OPTIONS[0]);
+      if (next < 0) {
+        next = count - 1;
+      } else if (next >= count) {
+        next = 0;
+      }
+      ok = apiSetStringSetting("voiceMode", VOICE_MODE_OPTIONS[next]);
+      if (ok) {
+        companionSettings.voiceMode = VOICE_MODE_OPTIONS[next];
+        toast = "Voice: " + String(voiceModeLabel(companionSettings.voiceMode));
+      }
+      break;
+    }
+    case SettingsItemId::Volume: {
+      int next = companionSettings.volumeLevel + delta;
+      if (next < 1) {
+        next = 10;
+      } else if (next > 10) {
+        next = 1;
+      }
+      ok = apiSetIntSetting("volumeLevel", next);
+      if (ok) {
+        companionSettings.volumeLevel = next;
+        toast = "Volume: " + String(next);
+      }
+      break;
+    }
+    case SettingsItemId::ScrollSpeed: {
+      int next = companionSettings.scrollSpeedLevel + delta;
+      if (next < 1) {
+        next = 10;
+      } else if (next > 10) {
+        next = 1;
+      }
+      ok = apiSetIntSetting("scrollSpeedLevel", next);
+      if (ok) {
+        companionSettings.scrollSpeedLevel = next;
+        toast = "Scroll: " + String(next);
+      }
+      break;
+    }
+    case SettingsItemId::RecordTime: {
+      int next = findIntOptionIndex(
+        companionSettings.manualRecordMaxSec,
+        RECORD_TIME_OPTIONS,
+        sizeof(RECORD_TIME_OPTIONS) / sizeof(RECORD_TIME_OPTIONS[0])
+      ) + delta;
+      int count = sizeof(RECORD_TIME_OPTIONS) / sizeof(RECORD_TIME_OPTIONS[0]);
+      if (next < 0) {
+        next = count - 1;
+      } else if (next >= count) {
+        next = 0;
+      }
+      ok = apiSetIntSetting("manualRecordMaxSec", RECORD_TIME_OPTIONS[next]);
+      if (ok) {
+        companionSettings.manualRecordMaxSec = RECORD_TIME_OPTIONS[next];
+        toast = "Record: " + String(companionSettings.manualRecordMaxSec) + "s";
+      }
+      break;
+    }
+    case SettingsItemId::UiTheme: {
+      int next = findStringOptionIndex(
+        companionSettings.uiTheme,
+        UI_THEME_OPTIONS,
+        sizeof(UI_THEME_OPTIONS) / sizeof(UI_THEME_OPTIONS[0])
+      ) + delta;
+      int count = sizeof(UI_THEME_OPTIONS) / sizeof(UI_THEME_OPTIONS[0]);
+      if (next < 0) {
+        next = count - 1;
+      } else if (next >= count) {
+        next = 0;
+      }
+      ok = apiSetStringSetting("uiTheme", UI_THEME_OPTIONS[next]);
+      if (ok) {
+        companionSettings.uiTheme = UI_THEME_OPTIONS[next];
+        toast = "Theme: " + compactThemeLabel(companionSettings.uiTheme);
+      }
+      break;
+    }
+    case SettingsItemId::HeaderMode: {
+      int next = findStringOptionIndex(
+        companionSettings.headerMode,
+        HEADER_MODE_OPTIONS,
+        sizeof(HEADER_MODE_OPTIONS) / sizeof(HEADER_MODE_OPTIONS[0])
+      ) + delta;
+      int count = sizeof(HEADER_MODE_OPTIONS) / sizeof(HEADER_MODE_OPTIONS[0]);
+      if (next < 0) {
+        next = count - 1;
+      } else if (next >= count) {
+        next = 0;
+      }
+      ok = apiSetStringSetting("headerMode", HEADER_MODE_OPTIONS[next]);
+      if (ok) {
+        companionSettings.headerMode = HEADER_MODE_OPTIONS[next];
+        toast = "Header: " + compactHeaderLabel(companionSettings.headerMode);
+      }
+      break;
+    }
+    case SettingsItemId::ScreensaverMode: {
+      int next = findStringOptionIndex(
+        companionSettings.screensaverMode,
+        SCREENSAVER_MODE_OPTIONS,
+        sizeof(SCREENSAVER_MODE_OPTIONS) / sizeof(SCREENSAVER_MODE_OPTIONS[0])
+      ) + delta;
+      int count = sizeof(SCREENSAVER_MODE_OPTIONS) / sizeof(SCREENSAVER_MODE_OPTIONS[0]);
+      if (next < 0) {
+        next = count - 1;
+      } else if (next >= count) {
+        next = 0;
+      }
+      ok = apiSetStringSetting("screensaverMode", SCREENSAVER_MODE_OPTIONS[next]);
+      if (ok) {
+        companionSettings.screensaverMode = SCREENSAVER_MODE_OPTIONS[next];
+        toast = "Saver: " + compactScreensaverLabel(companionSettings.screensaverMode);
+      }
+      break;
+    }
+    case SettingsItemId::IdleTimeout: {
+      int next = findIntOptionIndex(
+        companionSettings.idleTimeoutSec,
+        IDLE_TIMEOUT_OPTIONS,
+        sizeof(IDLE_TIMEOUT_OPTIONS) / sizeof(IDLE_TIMEOUT_OPTIONS[0])
+      ) + delta;
+      int count = sizeof(IDLE_TIMEOUT_OPTIONS) / sizeof(IDLE_TIMEOUT_OPTIONS[0]);
+      if (next < 0) {
+        next = count - 1;
+      } else if (next >= count) {
+        next = 0;
+      }
+      ok = apiSetIntSetting("idleTimeoutSec", IDLE_TIMEOUT_OPTIONS[next]);
+      if (ok) {
+        companionSettings.idleTimeoutSec = IDLE_TIMEOUT_OPTIONS[next];
+        toast = "Idle: " + compactDurationLabel(companionSettings.idleTimeoutSec);
+      }
+      break;
+    }
+    case SettingsItemId::ScreenBlankTimeout: {
+      int next = findIntOptionIndex(
+        companionSettings.screenBlankTimeoutSec,
+        IDLE_TIMEOUT_OPTIONS,
+        sizeof(IDLE_TIMEOUT_OPTIONS) / sizeof(IDLE_TIMEOUT_OPTIONS[0])
+      ) + delta;
+      int count = sizeof(IDLE_TIMEOUT_OPTIONS) / sizeof(IDLE_TIMEOUT_OPTIONS[0]);
+      if (next < 0) {
+        next = count - 1;
+      } else if (next >= count) {
+        next = 0;
+      }
+      ok = apiSetIntSetting("screenBlankTimeoutSec", IDLE_TIMEOUT_OPTIONS[next]);
+      if (ok) {
+        companionSettings.screenBlankTimeoutSec = IDLE_TIMEOUT_OPTIONS[next];
+        toast = "Blank: " + compactDurationLabel(companionSettings.screenBlankTimeoutSec);
+      }
+      break;
+    }
+    case SettingsItemId::RoomMonitorInterval: {
+      int next = findIntOptionIndex(
+        companionSettings.roomMonitorIntervalSec,
+        ROOM_MONITOR_INTERVAL_OPTIONS,
+        sizeof(ROOM_MONITOR_INTERVAL_OPTIONS) / sizeof(ROOM_MONITOR_INTERVAL_OPTIONS[0])
+      ) + delta;
+      int count = sizeof(ROOM_MONITOR_INTERVAL_OPTIONS) / sizeof(ROOM_MONITOR_INTERVAL_OPTIONS[0]);
+      if (next < 0) {
+        next = count - 1;
+      } else if (next >= count) {
+        next = 0;
+      }
+      ok = apiSetIntSetting("roomMonitorIntervalSec", ROOM_MONITOR_INTERVAL_OPTIONS[next]);
+      if (ok) {
+        companionSettings.roomMonitorIntervalSec = ROOM_MONITOR_INTERVAL_OPTIONS[next];
+        toast = "Monitor: " + compactDurationLabel(companionSettings.roomMonitorIntervalSec);
+      }
+      break;
+    }
+    case SettingsItemId::CameraSource: {
+      int next = findStringOptionIndex(
+        companionSettings.cameraSource,
+        CAMERA_SOURCE_OPTIONS,
+        sizeof(CAMERA_SOURCE_OPTIONS) / sizeof(CAMERA_SOURCE_OPTIONS[0])
+      ) + delta;
+      int count = sizeof(CAMERA_SOURCE_OPTIONS) / sizeof(CAMERA_SOURCE_OPTIONS[0]);
+      if (next < 0) {
+        next = count - 1;
+      } else if (next >= count) {
+        next = 0;
+      }
+      ok = apiSetStringSetting("cameraSource", CAMERA_SOURCE_OPTIONS[next]);
+      if (ok) {
+        companionSettings.cameraSource = CAMERA_SOURCE_OPTIONS[next];
+        toast = "Camera: " + compactCameraSourceLabel(companionSettings.cameraSource);
+      }
+      break;
+    }
+    case SettingsItemId::MusicShuffle: {
+      bool next = !companionSettings.musicShuffle;
+      ok = apiSetBoolSetting("musicShuffle", next);
+      if (ok) {
+        companionSettings.musicShuffle = next;
+        toast = String("Shuffle: ") + (next ? "On" : "Off");
+      }
+      break;
+    }
+    case SettingsItemId::ChatTextSize: {
+      int next = chatTextScale() + delta;
+      if (next < 1) {
+        next = 3;
+      } else if (next > 3) {
+        next = 1;
+      }
+      ccSaveLocalUiSettings(static_cast<uint8_t>(next), cc_chat_color_mode);
+      ok = true;
+      toast = "Chat size: " + settingValueLabel(item);
+      break;
+    }
+    case SettingsItemId::ChatTextColor: {
+      int next = static_cast<int>(cc_chat_color_mode) + delta;
+      if (next < 0) {
+        next = 7;
+      } else if (next > 7) {
+        next = 0;
+      }
+      ccSaveLocalUiSettings(cc_chat_text_scale, static_cast<uint8_t>(next));
+      ok = true;
+      toast = "Chat color: " + settingValueLabel(item);
+      break;
+    }
+    default:
+      break;
+  }
+
+  setToast(ok ? toast : "Setting update failed.");
+  renderDirty = true;
+  return ok;
+}
+
+static void stepSettingsItem(int delta) {
+  int next = static_cast<int>(selectedSettingsIndex) + delta;
+  int count = sizeof(SETTINGS_ITEMS) / sizeof(SETTINGS_ITEMS[0]);
+  if (next < 0) {
+    next = count - 1;
+  } else if (next >= count) {
+    next = 0;
+  }
+  selectedSettingsIndex = static_cast<size_t>(next);
+  renderDirty = true;
+}
+
+static void handleNewChat() {
+  bool ok = apiResetChat();
+  if (ok) {
+    clearConversationLog();
+    appendLogEntry("SYS ", "Started a new chat.");
+    companionState.text = "Started a new chat.";
+  }
+  setToast(ok ? "Started a new chat." : "New chat failed.");
+}
+
+static void handleRepeat() {
+  bool ok = apiRepeatLastAnswer();
+  setToast(ok ? "Replaying last answer." : "Replay failed.");
+}
+
+static void handleCapture() {
+  bool ok = apiCaptureVision();
+  if (ok) {
+    photoRefreshBoostUntilMs = millis() + PHOTO_REFRESH_BOOST_MS;
+    lastPhotoPollMs = 0;
+    setUiMode(UiMode::Capture);
+  }
+  setToast(ok ? "Capture requested." : "Capture failed.");
+}
+
+static void drawHeader() {
+  gfx->fillRect(0, 0, 320, 20, COLOR_HEADER);
+  gfx->setTextSize(1);
+  gfx->setTextColor(COLOR_HEADER_TEXT, COLOR_HEADER);
+  gfx->setCursor(8, 6);
+  gfx->print("WHISPLAY CYD");
+
+  const char *modeLabel = uiModeLabel(uiMode);
+  int modeX = 160 - ((strlen(modeLabel) * 6) / 2);
+  gfx->setCursor(modeX, 6);
+  gfx->print(modeLabel);
+
+  gfx->fillCircle(234, 10, 4, WiFi.status() == WL_CONNECTED ? COLOR_ACCENT : COLOR_ERROR);
+  drawButton(buttonModePrev);
+  drawButton(buttonNewChat);
+  drawButton(buttonRepeat);
+  drawButton(buttonModeNext);
+  drawButton(buttonSetup);
+}
+
+static void drawFooter(const String &message) {
+  gfx->fillRect(0, 222, 320, 18, COLOR_BG);
+  gfx->setTextColor(COLOR_DIM, COLOR_BG);
+  gfx->setCursor(8, 228);
+  gfx->print(trimTail(message, 50));
+}
+
+static void drawPhotoPanel(int x, int y, int w, int h, const String &title, const String &subtitle) {
+  gfx->drawRoundRect(x, y, w, h, 6, COLOR_DIM);
+  gfx->fillRoundRect(x, y, w, h, 6, COLOR_PANEL);
+  gfx->setTextColor(COLOR_DIM, COLOR_PANEL);
+  gfx->setCursor(x + 8, y + 8);
+  gfx->print(title);
+  if (subtitle.length()) {
+    gfx->setTextColor(COLOR_HEADER_TEXT, COLOR_PANEL);
+    gfx->setCursor(x + w - (subtitle.length() * 6) - 8, y + 8);
+    gfx->print(subtitle);
+  }
+}
+
+static void drawPreviewStatusText(int x, int y, int w, int h, const String &line1, const String &line2) {
+  gfx->setTextColor(COLOR_TEXT, COLOR_PANEL);
+  gfx->setTextSize(1);
+  int textX = x + 12;
+  int textY = y + (h / 2) - 8;
+  gfx->setCursor(textX, textY);
+  gfx->print(trimTail(line1, 36));
+  if (line2.length()) {
+    gfx->setCursor(textX, textY + 14);
+    gfx->print(trimTail(line2, 36));
+  }
+}
+
+static void renderChatMode() {
+  gfx->drawRoundRect(8, 50, 304, 164, 6, COLOR_DIM);
+  gfx->fillRoundRect(8, 50, 304, 164, 6, COLOR_PANEL);
+
+  gfx->setTextColor(COLOR_DIM, COLOR_PANEL);
+  gfx->setCursor(16, 58);
+  gfx->print("PRESET");
+  gfx->setTextColor(COLOR_HEADER_TEXT, COLOR_PANEL);
+  gfx->setCursor(58, 58);
+  gfx->print(trimTail(currentPresetLabel(), 20));
+
+  gfx->setTextColor(voiceModeColor(companionSettings.voiceMode), COLOR_PANEL);
+  const char *voiceLabel = voiceModeLabel(companionSettings.voiceMode);
+  gfx->setCursor(258 - (strlen(voiceLabel) * 6), 58);
+  gfx->print(voiceLabel);
+
+  gfx->setTextColor(COLOR_DIM, COLOR_PANEL);
+  gfx->setCursor(264, 58);
+  if (companionState.imageIconVisible) {
+    gfx->print("IMG");
+  }
+  if (companionState.ragIconVisible) {
+    gfx->setCursor(286, 58);
+    gfx->print("RAG");
+  }
+
+  drawConversationLog(16, 74, 288, 130);
+
+  if (toastUntilMs > millis() && toastMessage.length()) {
+    drawFooter(toastMessage);
+  } else if (WiFi.status() != WL_CONNECTED) {
+    drawFooter("WiFi reconnecting...");
+  } else {
+    drawFooter(String("Status: ") + (companionState.status.length() ? companionState.status : "Waiting"));
+  }
+}
+
+static void renderCaptureMode() {
+  const CompanionPhoto *photo = photoLibrary.count > 0 ? &photoLibrary.photos[0] : nullptr;
+  drawPhotoPanel(8, 50, 304, 128, "LATEST CAPTURE", photo ? "1/" + String(photoLibrary.count) : "0/24");
+
+  if (photo && ensurePreviewForSelection() && drawPreviewImage(16, 70, 288, 92)) {
+    // Preview drawn.
+  } else if (photo) {
+    drawPreviewStatusText(8, 50, 304, 128, trimTail(photo->fileName, 30), previewError.length() ? previewError : "Tap capture to refresh.");
+  } else {
+    drawPreviewStatusText(8, 50, 304, 128, "No captured images yet.", "Tap CAPTURE to add one.");
+  }
+
+  drawButton(buttonCaptureAction);
+
+  if (toastUntilMs > millis() && toastMessage.length()) {
+    drawFooter(toastMessage);
+  } else {
+    drawFooter("Latest photo preview from the Pi capture list.");
+  }
+}
+
+static void renderGalleryMode() {
+  String indexLabel = photoLibrary.count > 0
+    ? String(galleryIndex + 1) + "/" + String(photoLibrary.count)
+    : "0/24";
+  drawPhotoPanel(8, 50, 304, 128, "GALLERY", indexLabel);
+
+  const CompanionPhoto *photo = selectedPhoto();
+  if (photo && ensurePreviewForSelection() && drawPreviewImage(16, 70, 288, 92)) {
+    // Preview drawn.
+  } else if (photo) {
+    drawPreviewStatusText(8, 50, 304, 128, trimTail(photo->fileName, 30), previewError.length() ? previewError : "Tap NEXT/PREV to browse.");
+  } else {
+    drawPreviewStatusText(8, 50, 304, 128, "No captures available.", "Use Capture mode first.");
+  }
+
+  drawButton(buttonGalleryPrev);
+  drawButton(buttonGalleryLatest);
+  drawButton(buttonGalleryNext);
+
+  if (toastUntilMs > millis() && toastMessage.length()) {
+    drawFooter(toastMessage);
+  } else {
+    drawFooter("Browse the newest 24 photos from the Pi.");
+  }
+}
+
+static void renderSettingsMode() {
+  SettingsItemId item = SETTINGS_ITEMS[selectedSettingsIndex];
+  gfx->drawRoundRect(8, 50, 304, 102, 6, COLOR_DIM);
+  gfx->fillRoundRect(8, 50, 304, 102, 6, COLOR_PANEL);
+
+  gfx->setTextColor(COLOR_DIM, COLOR_PANEL);
+  gfx->setCursor(16, 60);
+  gfx->print("SETTING");
+  String indexLabel = String(selectedSettingsIndex + 1) + "/" + String(sizeof(SETTINGS_ITEMS) / sizeof(SETTINGS_ITEMS[0]));
+  gfx->setCursor(312 - (indexLabel.length() * 6) - 10, 60);
+  gfx->print(indexLabel);
+
+  gfx->setTextColor(COLOR_HEADER_TEXT, COLOR_PANEL);
+  gfx->setTextSize(2);
+  gfx->setCursor(16, 82);
+  gfx->print(trimTail(settingLabel(item), 24));
+
+  gfx->setTextColor(item == SettingsItemId::ChatTextColor ? currentChatColor() : COLOR_WARN, COLOR_PANEL);
+  gfx->setCursor(16, 114);
+  gfx->print(trimTail(settingValueLabel(item), 18));
+  gfx->setTextSize(1);
+
+  drawButton(buttonSettingsPrevItem);
+  drawButton(buttonSettingsNextItem);
+  drawButton(buttonSettingsPrevValue);
+  drawButton(buttonSettingsNextValue);
+
+  if (toastUntilMs > millis() && toastMessage.length()) {
+    drawFooter(toastMessage);
+  } else {
+    drawFooter("ITEM changes rows, VALUE changes the selected setting.");
+  }
+}
+
+static void renderUi() {
+  gfx->fillScreen(COLOR_BG);
+  drawHeader();
+
+  switch (uiMode) {
+    case UiMode::Capture:
+      renderCaptureMode();
+      break;
+    case UiMode::Gallery:
+      renderGalleryMode();
+      break;
+    case UiMode::Settings:
+      renderSettingsMode();
+      break;
+    case UiMode::Chat:
+    default:
+      renderChatMode();
+      break;
+  }
+}
+
+static void handleModeTouch(int x, int y) {
+  if (pointInButton(x, y, buttonCaptureAction)) {
+    handleCapture();
+    return;
+  }
+
+  if (uiMode == UiMode::Gallery) {
+    if (pointInButton(x, y, buttonGalleryPrev)) {
+      if (photoLibrary.count > 0) {
+        galleryIndex = galleryIndex == 0 ? photoLibrary.count - 1 : galleryIndex - 1;
+        previewReady = false;
+        renderDirty = true;
+      }
+      return;
+    }
+    if (pointInButton(x, y, buttonGalleryLatest)) {
+      galleryIndex = 0;
+      previewReady = false;
+      renderDirty = true;
+      return;
+    }
+    if (pointInButton(x, y, buttonGalleryNext)) {
+      if (photoLibrary.count > 0) {
+        galleryIndex = (galleryIndex + 1) % photoLibrary.count;
+        previewReady = false;
+        renderDirty = true;
+      }
+      return;
     }
   }
-  renderDirty = true;
+
+  if (uiMode == UiMode::Settings) {
+    if (pointInButton(x, y, buttonSettingsPrevItem)) {
+      stepSettingsItem(-1);
+      return;
+    }
+    if (pointInButton(x, y, buttonSettingsNextItem)) {
+      stepSettingsItem(1);
+      return;
+    }
+    if (pointInButton(x, y, buttonSettingsPrevValue)) {
+      cycleSettingsValue(-1);
+      return;
+    }
+    if (pointInButton(x, y, buttonSettingsNextValue)) {
+      cycleSettingsValue(1);
+      return;
+    }
+  }
 }
 
 static void handleTouch() {
@@ -350,17 +1528,28 @@ static void handleTouch() {
   touchWasDown = true;
   lastTouchMs = millis();
 
-  if (pointInButton(x, y, setupButton)) {
+  if (pointInButton(x, y, buttonSetup)) {
     openSetupPortal();
     return;
   }
-
-  for (const TouchButton &button : buttons) {
-    if (pointInButton(x, y, button)) {
-      handleButtonTap(button);
-      return;
-    }
+  if (pointInButton(x, y, buttonModePrev)) {
+    stepUiMode(-1);
+    return;
   }
+  if (pointInButton(x, y, buttonModeNext)) {
+    stepUiMode(1);
+    return;
+  }
+  if (pointInButton(x, y, buttonNewChat)) {
+    handleNewChat();
+    return;
+  }
+  if (pointInButton(x, y, buttonRepeat)) {
+    handleRepeat();
+    return;
+  }
+
+  handleModeTouch(x, y);
 }
 
 static void handleBootPortalHold() {
@@ -388,12 +1577,14 @@ void setup() {
   gfx->setCursor(28, 84);
   gfx->print("Whisplay CYD");
   gfx->setTextSize(1);
-  gfx->setCursor(82, 108);
-  gfx->print("Companion");
+  gfx->setCursor(74, 108);
+  gfx->print("Companion Modes");
 
   touchSPI.begin(XPT2046_CLK, XPT2046_MISO, XPT2046_MOSI, XPT2046_CS);
   ts.begin(touchSPI);
   ts.setRotation(1);
+
+  SPIFFS.begin(true);
 
   bool forcePortal = digitalRead(BOOT_BTN) == LOW;
   ccConnect(forcePortal);
@@ -401,6 +1592,7 @@ void setup() {
   analogWrite(GFX_BL, cc_brightness);
   fetchStateIfDue();
   fetchSettingsIfDue();
+  fetchPhotosIfDue(true);
   renderUi();
 }
 
@@ -408,6 +1600,12 @@ void loop() {
   ccEnsureWifiConnected();
   fetchStateIfDue();
   fetchSettingsIfDue();
+  fetchPhotosIfDue();
+
+  if (uiMode == UiMode::Capture || uiMode == UiMode::Gallery) {
+    ensurePreviewForSelection();
+  }
+
   handleTouch();
   handleBootPortalHold();
 

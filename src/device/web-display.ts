@@ -71,6 +71,12 @@ type ButtonHandler = () => void;
 
 type TextInputHandler = (text: string) => void;
 
+export interface ConversationTurn {
+  role: "user" | "bot";
+  text: string;
+  timestamp: number;
+}
+
 interface WebDisplayOptions {
   host: string;
   port: number;
@@ -157,6 +163,7 @@ export class WebDisplayServer implements WebAudioBridgeServer {
   private currentStatus: Status | null = null;
   private imageRevision = 0;
   private cameraFramePath: string | null = null;
+  private conversationLog: ConversationTurn[] = [];
   private host: string;
   private port: number;
   private onButtonPress: ButtonHandler;
@@ -196,6 +203,9 @@ export class WebDisplayServer implements WebAudioBridgeServer {
       this.wsClients.add(socket);
       if (this.currentStatus) {
         socket.send(JSON.stringify({ type: "state", payload: this.buildStatePayload() }));
+      }
+      if (this.conversationLog.length > 0) {
+        socket.send(JSON.stringify({ type: "conversation_history", payload: this.conversationLog }));
       }
       socket.on("message", (message, isBinary) =>
         this.handleWsMessage(socket, message, isBinary),
@@ -248,6 +258,21 @@ export class WebDisplayServer implements WebAudioBridgeServer {
     this.wsClients.clear();
     this.server?.close();
     this.server = null;
+  }
+
+  addConversationTurn(role: "user" | "bot", text: string): void {
+    if (!text || !text.trim()) return;
+    const turn: ConversationTurn = { role, text: text.trim(), timestamp: Date.now() };
+    this.conversationLog.push(turn);
+    if (this.conversationLog.length > 200) {
+      this.conversationLog.splice(0, this.conversationLog.length - 200);
+    }
+    const message = JSON.stringify({ type: "conversation_turn", payload: turn });
+    for (const client of this.wsClients) {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(message);
+      }
+    }
   }
 
   /** Broadcast a text or binary message to every connected browser client. */

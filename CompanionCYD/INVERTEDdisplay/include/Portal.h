@@ -18,6 +18,8 @@ static char cc_wifi_pass[64] = "";
 static char cc_pi_host[64] = "";
 static uint16_t cc_pi_port = CC_DEFAULT_PORT;
 static uint8_t cc_brightness = 220;
+static uint8_t cc_chat_text_scale = 1;
+static uint8_t cc_chat_color_mode = 0;
 static bool cc_has_settings = false;
 static unsigned long cc_last_wifi_retry_ms = 0;
 static const unsigned long CC_WIFI_RETRY_INTERVAL_MS = 10000;
@@ -33,6 +35,8 @@ static void ccLoadSettings() {
   String host = prefs.getString("host", "");
   cc_pi_port = static_cast<uint16_t>(prefs.getUInt("port", CC_DEFAULT_PORT));
   cc_brightness = prefs.getUChar("bright", 220);
+  cc_chat_text_scale = prefs.getUChar("chatscale", 1);
+  cc_chat_color_mode = prefs.getUChar("chatcolor", 0);
   prefs.end();
 
   ssid.toCharArray(cc_wifi_ssid, sizeof(cc_wifi_ssid));
@@ -46,6 +50,12 @@ static void ccLoadSettings() {
   }
   if (cc_brightness < 10) {
     cc_brightness = 10;
+  }
+  if (cc_chat_text_scale < 1 || cc_chat_text_scale > 3) {
+    cc_chat_text_scale = 1;
+  }
+  if (cc_chat_color_mode > 7) {
+    cc_chat_color_mode = 0;
   }
   cc_has_settings = cc_wifi_ssid[0] != '\0';
 }
@@ -72,6 +82,26 @@ static void ccSaveSettings(
   cc_pi_port = port;
   cc_brightness = brightness;
   cc_has_settings = true;
+}
+
+static void ccSaveLocalUiSettings(uint8_t chatTextScale, uint8_t chatColorMode) {
+  if (chatTextScale < 1) {
+    chatTextScale = 1;
+  } else if (chatTextScale > 3) {
+    chatTextScale = 3;
+  }
+  if (chatColorMode > 7) {
+    chatColorMode = 0;
+  }
+
+  Preferences prefs;
+  prefs.begin("compcyd", false);
+  prefs.putUChar("chatscale", chatTextScale);
+  prefs.putUChar("chatcolor", chatColorMode);
+  prefs.end();
+
+  cc_chat_text_scale = chatTextScale;
+  cc_chat_color_mode = chatColorMode;
 }
 
 static bool ccProbeApiReachable(uint8_t attempts = 4, uint16_t delay_ms = 1200) {
