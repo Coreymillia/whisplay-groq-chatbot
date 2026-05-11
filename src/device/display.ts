@@ -33,6 +33,7 @@ export interface Status {
   camera_capture?: boolean;
   capture_image_path: string;
   wifi_signal_level: number;
+  groq_requests_today: number;
   vpn_connected: boolean;
   rag_icon_visible: boolean;
   image_icon_visible: boolean;
@@ -64,6 +65,7 @@ function getInitialStatus(): Status {
     camera_mode: false,
     capture_image_path: "",
     wifi_signal_level: 0,
+    groq_requests_today: 0,
     vpn_connected: false,
     rag_icon_visible: false,
     image_icon_visible: false,
@@ -437,6 +439,7 @@ export class WhisplayDisplay {
       camera_capture,
       capture_image_path,
       wifi_signal_level,
+      groq_requests_today,
       vpn_connected,
       rag_icon_visible,
       image_icon_visible,
@@ -474,6 +477,7 @@ export class WhisplayDisplay {
     this.currentStatus.camera_mode = camera_mode;
     this.currentStatus.capture_image_path = capture_image_path;
     this.currentStatus.wifi_signal_level = wifi_signal_level;
+    this.currentStatus.groq_requests_today = groq_requests_today;
     this.currentStatus.vpn_connected = vpn_connected;
     this.currentStatus.rag_icon_visible = rag_icon_visible;
     this.currentStatus.image_icon_visible = image_icon_visible;

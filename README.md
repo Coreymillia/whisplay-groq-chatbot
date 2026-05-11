@@ -34,14 +34,16 @@ This project starts from the official PiSugar Whisplay chatbot, but is being tai
 ## Current feature highlights
 
 - **One-button device flow:** long press to talk, double press to replay the last answer, and voice shortcuts for settings and help
-- **Voice controls:** settings, voice on/off, photo capture, photo browsing, shutdown, and an on-device voice-command cheat sheet
+- **Voice controls:** settings, voice on/off, photo capture, photo browsing, BotNet model cycling, shutdown, and an on-device voice-command cheat sheet
 - **Vision flow:** upload a photo or capture one from the configured camera source, then ask **"what do you see?"**
+- **Groq request counter:** both the browser header and the physical HAT header now show a compact **RPD** item beside Wi-Fi so you can track Groq requests sent today without replacing the main status text
 - **Per-camera rotation controls:** the browser UI can rotate the **Pi Camera** and **ESP32-CAM** independently in 90-degree steps so previews and captures match your mounting direction
 - **HAT font color controls:** the browser UI can now set a single HAT reply color or switch to a **multi-color per-line** mode for easier reading on the device
 - **NWS weather bot:** save a latitude/longitude in Settings, then ask **"what's the weather?"** or **"weather alerts"** to get a National Weather Service forecast answered in the currently selected chatbot personality
 - **MP3 player:** upload MP3 files from the browser UI, play the full library in order by default or enable shuffle, and control playback from the browser or voice
 - **Local photo effects:** apply deterministic voice-triggered filters such as **retro**, **comic**, **sketch**, **pixelate**, **spooky**, **dreamy**, **warm**, **cyberpunk**, **glitch**, and more to the currently shown image
 - **Preset personalities:** Neutral, Friendly, Cranky, Roast Bot, Sleepy Pi, Affirmation, Philosopher, Mythic Oracle, Joke Bot, Tutor, Detective, and Zen
+- **Saved personality favorites:** the browser UI can save custom named personalities, and those saved favorites also show up in the HAT preset flow
 - **HAT visuals:** switchable header effects plus full-screen screensavers such as Matrix, Retro Geometry, Plasma, Neon Rain, and new VU-style mic meters
 - **Optional PiSugar battery button support:** if a PiSugar service is present, the app can auto-wire **short press** to capture a photo from the selected camera source and **long press** to request a safe Pi shutdown without forcing battery cut-off, without affecting installs that do not use PiSugar
 - **Separate HAT idle controls:** the browser UI now splits **screensaver delay** from a separate **screen blank timeout**, so the device can stay on while the backlight turns off later for power saving
@@ -51,6 +53,7 @@ This project starts from the official PiSugar Whisplay chatbot, but is being tai
 - **Companion CYD controls:** touch-first **Chat / Capture / Gallery / Settings** modes, top-bar **New Chat** and **Repeat**, touch mode navigation, CYD-local chat text size and color controls, and a built-in **Setup** button for reopening the Wi-Fi portal
 - **Companion Cardputer controls:** keyboard text send, message viewing, local setup portal, saved text sizes, and a split receive/send screen layout
 - **Experimental GroqBotNet mode:** optional browser-only controls in Whisplay for connecting to a second bot, testing the link, and starting limited same-network bot-to-bot conversations without replacing the normal Whisplay chatbot flow
+- **BotNet model selector:** Whisplay BotNet now has a curated Groq model dropdown in the browser plus a voice shortcut to jump to the next model on-device
 - **Persona Relay mode:** a new GroqBotNet mode where you tell your bot what to send, your local bot rewrites that prompt in character, and the peer bot replies once without falling into an endless loop
 - **Online GroqBotNet groundwork:** Whisplay and the standalone Zero node now both support an **Online Hub** transport with node registration, hub connect/disconnect, and invite create/redeem controls for relay-based internet testing
 
@@ -128,16 +131,17 @@ These steps are meant for a **fresh Raspberry Pi OS install** on the Pi that wil
    ```
    Notes:
    - `OPENAI_API_BASE_URL=https://api.groq.com/openai/v1` is already set in the template for Groq.
-    - Keeping `WHISPLAY_WEB_ENABLED=true` is useful even on-device so the browser UI at port `17880` still works for settings and recovery.
-    - If you are only using the browser simulator on a non-HAT machine, set `WHISPLAY_DEVICE_ENABLED=false`.
-    - PiSugar button actions are optional. Leave `PISUGAR_BUTTON_ACTIONS_ENABLED=true` to auto-wire them when a PiSugar service is detected, or set it to `false` to leave PiSugar button behavior untouched.
-    - The default PiSugar long-press action is a **safe Pi shutdown only**. This avoids the PiSugar 2 behavior where a full battery cut-off can make later restarts fall back to wall power only until the battery path is re-armed.
-    - If you want PiSugar button support on a real battery-backed build, install the official PiSugar power manager on the Pi and keep `pisugar-poweroff.service` disabled if you want normal Pi shutdown without cutting the battery rail:
-      ```bash
-      curl -fsSL -o /tmp/pisugar-power-manager.sh https://cdn.pisugar.com/release/pisugar-power-manager.sh
-      sudo bash /tmp/pisugar-power-manager.sh -c release
-      sudo systemctl disable --now pisugar-poweroff
-      ```
+   - Keeping `WHISPLAY_WEB_ENABLED=true` is useful even on-device so the browser UI at port `17880` still works for settings and recovery.
+   - If you are only using the browser simulator on a non-HAT machine, set `WHISPLAY_DEVICE_ENABLED=false`.
+   - To mirror the large-format chat view on the Pi's physical HDMI output, set `WHISPLAY_HDMI_KIOSK_ENABLED=true` before running `startup.sh`. The launcher uses `http://127.0.0.1:17880/hdmi` by default so it does not depend on the Pi's LAN IP.
+   - PiSugar button actions are optional. Leave `PISUGAR_BUTTON_ACTIONS_ENABLED=true` to auto-wire them when a PiSugar service is detected, or set it to `false` to leave PiSugar button behavior untouched.
+   - The default PiSugar long-press action is a **safe Pi shutdown only**. This avoids the PiSugar 2 behavior where a full battery cut-off can make later restarts fall back to wall power only until the battery path is re-armed.
+   - If you want PiSugar button support on a real battery-backed build, install the official PiSugar power manager on the Pi and keep `pisugar-poweroff.service` disabled if you want normal Pi shutdown without cutting the battery rail:
+     ```bash
+     curl -fsSL -o /tmp/pisugar-power-manager.sh https://cdn.pisugar.com/release/pisugar-power-manager.sh
+     sudo bash /tmp/pisugar-power-manager.sh -c release
+     sudo systemctl disable --now pisugar-poweroff
+     ```
 7. Build the app:
    ```bash
    bash build.sh
@@ -150,7 +154,7 @@ These steps are meant for a **fresh Raspberry Pi OS install** on the Pi that wil
    ```bash
    bash startup.sh
    ```
-   Run `startup.sh` as your normal user, not with `sudo`.
+   Run `startup.sh` as your normal user, not with `sudo`. If `WHISPLAY_HDMI_KIOSK_ENABLED=true`, `startup.sh` keeps the Pi in `graphical.target` and installs a desktop autostart entry for the HDMI mirror.
 9. Open the browser settings UI and confirm your keys save correctly:
    ```text
    http://<host-or-pi-ip>:17880
@@ -435,9 +439,23 @@ TTS_SERVER=espeak-ng
 
 ## Settings UI notes
 
-The browser simulator includes a settings panel for the Groq key, Gemini key, preset personalities, freeform personality editing, voice mode, record time, text scroll speed, **HAT font color**, UI theme, **camera source**, **per-camera 90-degree rotation controls**, HAT header mode, HAT screensaver mode, **HAT screensaver delay**, **HAT screen blank timeout**, **room monitor auto-capture interval**, **weather latitude/longitude**, the saved **music shuffle** toggle, and a shutdown button for clean power-off without SSH.
+The browser simulator includes a settings panel for the Groq key, Gemini key, preset personalities, freeform personality editing, a **Save Personality As** box for named favorites, voice mode, record time, text scroll speed, **HAT font color**, UI theme, **camera source**, **per-camera 90-degree rotation controls**, HAT header mode, HAT screensaver mode, **HAT screensaver delay**, **HAT screen blank timeout**, **room monitor auto-capture interval**, **weather latitude/longitude**, the saved **music shuffle** toggle, and a shutdown button for clean power-off without SSH.
 
 The Groq and Gemini keys can be stored there without editing `.env`. Runtime settings are saved to the local settings file on the Pi, and both **Gemini vision** and **Gemini image generation** in this fork will use the saved browser key before falling back to `GEMINI_API_KEY` from `.env`.
+
+The browser header and physical HAT header now also show a compact **RPD** indicator beside Wi-Fi. It tracks Groq requests sent **today**, resets at local midnight, and leaves the main status label such as **idle**, **listening**, or **thinking** untouched.
+
+Saved custom personalities are merged into the same preset list used by both the browser UI and the HAT settings menu, so a favorite you save in the browser can be selected later from either surface.
+
+The Whisplay BotNet panel also now includes a curated Groq **model dropdown** with:
+
+- `llama-3.1-8b-instant`
+- `llama-3.3-70b-versatile`
+- `qwen/qwen3-32b`
+- `groq/compound-mini`
+- `openai/gpt-oss-20b`
+
+That same BotNet model can also be advanced on-device with the **NEXT MODEL** voice command.
 
 The browser UI also now includes a simple **Vision Test** image upload box. You can upload a photo from your PC, then say or type **"what do you see?"** to get a response in the tone of the currently selected chatbot personality.
 
@@ -451,7 +469,7 @@ Captured photos are now kept in the project camera storage and exposed in the br
 
 The browser UI also now includes a separate **Room Monitor** gallery fed by optional timed auto-captures from the current camera source. That gallery now trims itself dynamically to leave at least **8 GB** free on the active SD card; when free space drops below that reserve, the oldest room-monitor images are removed first.
 
-There is now also a dedicated **HDMI** browser page for full-screen chat output. On Whisplay you can open **`/hdmi`** from the same web server to get a larger chat layout that also shows the latest captured image or active camera stream when one is present. The standalone `GroqBotNet/` node now exposes its own **`/hdmi`** page as well for a simple large-format chat/conversation mirror in the browser. Physical HDMI auto-kiosk output is still not considered solved on either device.
+There is now also a dedicated **HDMI** browser page for full-screen chat output. On Whisplay you can open **`/hdmi`** from the same web server to get a larger chat layout that also shows the latest captured image or active camera stream when one is present. The standalone `GroqBotNet/` node now exposes its own **`/hdmi`** page as well for a simple large-format chat/conversation mirror in the browser. On the Whisplay Pi itself, set `WHISPLAY_HDMI_KIOSK_ENABLED=true` and rerun `bash startup.sh` to auto-launch that page locally on HDMI through Chromium at login.
 
 The saved **Text Scroll Speed** setting applies to both the browser simulator and the physical HAT, so you can speed up long replies without changing the existing button behavior.
 
@@ -610,6 +628,7 @@ The browser UI and HAT menu share the same stored settings.
 - **browse photos** / **browse images** = open the saved-photo browser on the HAT
 - **take photo** / **capture image** = capture a still image from the configured camera source
 - **switch camera** / **swap camera** = toggle the active camera source between **Pi Camera** and **ESP32-CAM**
+- **next model** = advance the Whisplay BotNet model to the next item in the curated dropdown list and show the new selection on-screen
 - **what's the weather** / **weather forecast** = fetch the saved-location NWS forecast and answer in the current chatbot personality
 - **weather alerts** / **any alerts** = fetch active NWS alerts for the saved location
 - **is it going to snow** / **snow forecast** = ask for a snow-focused forecast summary for the saved location
@@ -702,6 +721,8 @@ This fork now includes a small set of preset personalities in both the browser U
 The current **Cranky** preset is especially funny on simple questions because it stays helpful while sounding mildly offended that it had to answer at all.
 
 The newer presets are meant to cover supportive, reflective, mythic, joke-first, teaching, analytical, and ultra-calm tones while still staying useful.
+
+You can now also type a custom name into **Save Personality As** in the browser UI and store your own favorite prompt. Saved favorites are added to the shared preset list, so they can be picked later from the browser dropdown or cycled from the HAT settings menu just like the built-in presets.
 
 ### How the Personality box works
 
@@ -820,6 +841,47 @@ Expected result: calm, low-drama answers with a simpler and more soothing tone t
 - Add limits like `not hateful`, `keep it playful`, or `still be helpful`.
 - If you want a consistent gimmick, say it directly: `complain about your weak CPU`, `make dry jokes`, `keep answers short`.
 - Changes apply to **new replies** after you save the settings.
+
+## Troubleshooting
+
+### HDMI kiosk shows a blank screen
+
+**Problem:** When `WHISPLAY_HDMI_KIOSK_ENABLED=true` is set, the HDMI display remains blank even though the browser process is running and the web page loads over SSH.
+
+**Root Cause:** The Pi's boot firmware setting `display_auto_detect=1` in `/boot/firmware/config.txt` can interfere with HDMI initialization on some Raspberry Pi Zero configurations, even when the attached mini TFT display uses SPI (not HDMI).
+
+**Solution:**
+
+1. SSH into the Pi:
+   ```bash
+   ssh coreymillia@<pi-ip>
+   ```
+
+2. Edit `/boot/firmware/config.txt` and disable auto-detect:
+   ```bash
+   sudo nano /boot/firmware/config.txt
+   ```
+
+3. Find the line containing `display_auto_detect=1` and comment it out:
+   ```
+   #display_auto_detect=1
+   ```
+
+4. Save and exit (Ctrl+X, then Y, then Enter).
+
+5. Reboot:
+   ```bash
+   sudo reboot
+   ```
+
+6. After reboot, restart the HDMI service:
+   ```bash
+   sudo systemctl restart groqbotnet-hdmi.service
+   ```
+
+The HDMI kiosk should now display the Firefox browser showing the GroqBotNet HDMI chat page.
+
+**Note:** The mini TFT display will be stopped while HDMI kiosk is active, and automatically re-enabled when the HDMI service stops. This is normal behavior managed by the systemd service.
 
 ## Upstream base
 

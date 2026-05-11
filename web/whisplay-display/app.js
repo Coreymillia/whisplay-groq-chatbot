@@ -3,6 +3,7 @@ const emojiText = document.getElementById("emojiText");
 const textContent = document.getElementById("textContent");
 const batteryFill = document.getElementById("batteryFill");
 const batteryText = document.getElementById("batteryText");
+const dailyRequestsText = document.getElementById("dailyRequestsText");
 const wifiIcon = document.getElementById("wifiIcon");
 const vpnIcon = document.getElementById("vpnIcon");
 const imageIcon = document.getElementById("imageIcon");
@@ -46,6 +47,8 @@ const geminiKeyInput = document.getElementById("geminiKeyInput");
 const geminiKeyHint = document.getElementById("geminiKeyHint");
 const personalityPresetSelect = document.getElementById("personalityPresetSelect");
 const personalityInput = document.getElementById("personalityInput");
+const personalityNameInput = document.getElementById("personalityNameInput");
+const savePersonalityBtn = document.getElementById("savePersonalityBtn");
 const voiceModeSelect = document.getElementById("voiceModeSelect");
 const volumeLevelSelect = document.getElementById("volumeLevelSelect");
 const recordTimeSelect = document.getElementById("recordTimeSelect");
@@ -73,6 +76,7 @@ const roomMonitorGalleryList = document.getElementById("roomMonitorGalleryList")
 const roomMonitorToggleBtn = document.getElementById("roomMonitorToggleBtn");
 const botNetEnabledCheckbox = document.getElementById("botNetEnabledCheckbox");
 const botNetModeSelect = document.getElementById("botNetModeSelect");
+const botNetModelSelect = document.getElementById("botNetModelSelect");
 const botNetModeHint = document.getElementById("botNetModeHint");
 const botNetTransportSelect = document.getElementById("botNetTransportSelect");
 const botNetTransportHint = document.getElementById("botNetTransportHint");
@@ -142,6 +146,7 @@ const DEFAULT_HAT_TEXT_COLOR = "white";
 const DEFAULT_CAMERA_ROTATION_DEG = "0";
 const CUSTOM_PERSONALITY_PRESET_ID = "custom";
 let personalityPresets = [];
+let botNetModelOptions = [];
 let volumeLevelOptions = [];
 let recordTimeoutOptions = [];
 let scrollSpeedOptions = [];
@@ -264,6 +269,7 @@ function applyBotNetSettings(settings, force = false) {
   }
   updateBotNetModeUi(settings.botnetMode || "auto-bot");
   updateBotNetTransportUi(settings.transportMode || "lan-direct");
+  populateBotNetModelOptions(settings.model || "");
   if (botNetEnabledCheckbox) {
     botNetEnabledCheckbox.checked = Boolean(settings.enabled);
   }
@@ -289,12 +295,18 @@ function applyBotNetSettings(settings, force = false) {
       Number.isFinite(settings.replyDelaySec) ? settings.replyDelaySec : 6,
     );
   }
+  if (botNetModelSelect) {
+    botNetModelSelect.value = settings.model || botNetModelOptions[0]?.id || "";
+  }
   botNetSettingsDirty = false;
   botNetSettingsLoaded = true;
 }
 
 function applyBotNetState(state, forceSettings = false) {
   botNetState = state || null;
+  botNetModelOptions = Array.isArray(state?.modelOptions)
+    ? state.modelOptions
+    : botNetModelOptions;
   const settings = state?.settings || {};
   const online = state?.online || null;
   if (!botNetSettingsLoaded || forceSettings) {
@@ -338,6 +350,7 @@ async function saveBotNetSettings(showSavedStatus = true) {
   const body = {
     enabled: Boolean(botNetEnabledCheckbox?.checked),
     botnetMode: botNetModeSelect?.value || "auto-bot",
+    model: botNetModelSelect?.value || botNetModelOptions[0]?.id || "",
     transportMode: botNetTransportSelect?.value || "lan-direct",
     nodeHandle: (botNetNodeHandleInput?.value || "Whisplay Bot").trim(),
     hubUrl: (botNetHubUrlInput?.value || "").trim(),
@@ -363,6 +376,7 @@ async function saveBotNetSettings(showSavedStatus = true) {
       ok: true,
       ...(botNetState || {}),
       settings: payload.settings || body,
+      modelOptions: botNetState?.modelOptions || [],
       connectionStatus: botNetState?.connectionStatus || "Disconnected",
       conversations: botNetState?.conversations || [],
     },
@@ -740,6 +754,13 @@ function formatMs(ms) {
   return min + ":" + (sec < 10 ? "0" : "") + sec;
 }
 
+function formatDailyRequestsLabel(value) {
+  const numeric = Number.isFinite(Number(value))
+    ? Math.max(0, Math.round(Number(value)))
+    : 0;
+  return `RPD ${numeric}`;
+}
+
 function applyState(data) {
   if (!data || !data.ready) return;
 
@@ -768,6 +789,11 @@ function applyState(data) {
     batteryFill.style.width = `${Math.min(100, Math.max(0, batteryLevel))}%`;
   }
   batteryFill.style.background = normalizeColor(data.battery_color);
+  if (dailyRequestsText) {
+    dailyRequestsText.textContent = formatDailyRequestsLabel(
+      data.groq_requests_today,
+    );
+  }
 
   setIconVisible(wifiIcon, updateWifiIcon(data.wifi_signal_level));
   setIconVisible(vpnIcon, Boolean(data.vpn_connected));
@@ -1192,6 +1218,28 @@ function populatePersonalityPresets(selectedId) {
   personalityPresetSelect.value = selectedId || CUSTOM_PERSONALITY_PRESET_ID;
 }
 
+function populateBotNetModelOptions(selectedValue) {
+  if (!botNetModelSelect) return;
+  botNetModelSelect.innerHTML = "";
+  botNetModelOptions.forEach((item) => {
+    const option = document.createElement("option");
+    option.value = item.id;
+    option.textContent = item.label;
+    botNetModelSelect.appendChild(option);
+  });
+  const fallbackValue = selectedValue || botNetModelOptions[0]?.id || "";
+  if (
+    fallbackValue &&
+    ![...botNetModelSelect.options].some((option) => option.value === fallbackValue)
+  ) {
+    const option = document.createElement("option");
+    option.value = fallbackValue;
+    option.textContent = fallbackValue;
+    botNetModelSelect.appendChild(option);
+  }
+  botNetModelSelect.value = fallbackValue;
+}
+
 function populateRecordTimeoutOptions(selectedValue) {
   if (!recordTimeSelect) return;
   recordTimeSelect.innerHTML = "";
@@ -1355,6 +1403,13 @@ function applySettings(settings) {
     personalityInput.value = settings.personalityPrompt || "";
   }
   syncPresetSelectionFromPrompt(settings.personalityPrompt || "");
+  const matchingPreset = personalityPresets.find(
+    (preset) => preset.prompt === (settings.personalityPrompt || ""),
+  );
+  if (personalityNameInput) {
+    personalityNameInput.value =
+      matchingPreset?.id?.startsWith("saved-") ? matchingPreset.label : "";
+  }
   if (voiceModeSelect) {
     voiceModeSelect.value = settings.voiceMode || "text-only";
   }
@@ -1908,6 +1963,9 @@ async function saveSettings({ clearGroqApiKey = false } = {}) {
       throw new Error(`HTTP ${response.status}`);
     }
     const payload = await response.json();
+    personalityPresets = Array.isArray(payload.presets)
+      ? payload.presets
+      : personalityPresets;
     applySettings(payload.settings || {});
     loadRoomMonitorPhotos();
     setSettingsStatus(
@@ -1918,6 +1976,54 @@ async function saveSettings({ clearGroqApiKey = false } = {}) {
   } catch (error) {
     console.error("Failed to save settings:", error);
     setSettingsStatus("Failed to save settings.", true);
+  }
+}
+
+async function savePersonalityPreset() {
+  if (!settingsLoaded) {
+    setSettingsStatus("Settings are still loading.", true);
+    return;
+  }
+  const name = (personalityNameInput?.value || "").trim();
+  const prompt = (personalityInput?.value || "").trim();
+  if (!name) {
+    setSettingsStatus("Enter a personality name first.", true);
+    return;
+  }
+  if (!prompt) {
+    setSettingsStatus("Enter a personality prompt first.", true);
+    return;
+  }
+
+  setSettingsStatus("Saving personality...");
+  if (savePersonalityBtn) {
+    savePersonalityBtn.disabled = true;
+  }
+  try {
+    const response = await fetch("/api/settings/personality-save", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ name, prompt }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || payload.ok === false) {
+      throw new Error(payload.error || `HTTP ${response.status}`);
+    }
+    personalityPresets = Array.isArray(payload.presets)
+      ? payload.presets
+      : personalityPresets;
+    applySettings(payload.settings || {});
+    setSettingsStatus(`Saved personality: ${name}.`);
+  } catch (error) {
+    console.error("Failed to save personality preset:", error);
+    const message = error instanceof Error ? error.message : String(error);
+    setSettingsStatus(message || "Failed to save personality.", true);
+  } finally {
+    if (savePersonalityBtn) {
+      savePersonalityBtn.disabled = false;
+    }
   }
 }
 
@@ -1987,6 +2093,9 @@ setInterval(loadBotNetState, 5000);
 personalityPresetSelect?.addEventListener("change", () => {
   const selectedId = personalityPresetSelect.value;
   if (selectedId === CUSTOM_PERSONALITY_PRESET_ID) {
+    if (personalityNameInput) {
+      personalityNameInput.value = "";
+    }
     return;
   }
   const preset = personalityPresets.find((item) => item.id === selectedId);
@@ -1994,6 +2103,9 @@ personalityPresetSelect?.addEventListener("change", () => {
     return;
   }
   personalityInput.value = preset.prompt;
+  if (personalityNameInput) {
+    personalityNameInput.value = preset.id.startsWith("saved-") ? preset.label : "";
+  }
   setSettingsStatus(`${preset.label} preset loaded. Save to apply.`);
 });
 
@@ -2055,6 +2167,12 @@ if (saveSettingsBtn) {
   });
 }
 
+if (savePersonalityBtn) {
+  savePersonalityBtn.addEventListener("click", () => {
+    savePersonalityPreset();
+  });
+}
+
 if (botNetSaveBtn) {
   botNetSaveBtn.addEventListener("click", () => {
     saveBotNetSettings().catch((error) => {
@@ -2070,6 +2188,7 @@ if (botNetSaveBtn) {
 [
   botNetEnabledCheckbox,
   botNetModeSelect,
+  botNetModelSelect,
   botNetTransportSelect,
   botNetNodeHandleInput,
   botNetHubUrlInput,

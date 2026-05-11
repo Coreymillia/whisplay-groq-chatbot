@@ -23,6 +23,7 @@
               <img class="status-icon" id="imageIcon" src="/img/image.png" alt="image" />
               <img class="status-icon" id="ragIcon" src="/img/rag.png" alt="rag" />
               <img class="status-icon" id="vpnIcon" src="/img/vpn.png" alt="vpn" />
+              <span class="request-count" id="dailyRequestsText">RPD 0</span>
               <img class="status-icon" id="wifiIcon" src="/img/wifi-strong.png" alt="wifi" />
               <div class="battery">
                 <div class="battery-shell">
@@ -112,6 +113,13 @@
               </select>
               <div class="field-hint" id="botNetModeHint">
                 Recommended. Whisplay rewrites one prompt in character, sends it once, and waits for you.
+              </div>
+            </div>
+            <div class="settings-field">
+              <label class="field-label" for="botNetModelSelect">BotNet model</label>
+              <select class="settings-select" id="botNetModelSelect"></select>
+              <div class="field-hint">
+                Choose which Groq model Whisplay uses for BotNet replies.
               </div>
             </div>
             <div class="settings-field">
@@ -370,6 +378,25 @@
                   rows="5"
                   placeholder="Describe how the bot should respond..."
                 ></textarea>
+              </div>
+
+              <div class="settings-field settings-field-wide">
+                <label class="field-label" for="personalityNameInput">Save Personality As</label>
+                <div class="settings-inline-row">
+                  <input
+                    class="settings-input"
+                    id="personalityNameInput"
+                    type="text"
+                    placeholder="My favorite personality"
+                    autocomplete="off"
+                  />
+                  <button class="button compact" id="savePersonalityBtn" type="button">
+                    Save Personality
+                  </button>
+                </div>
+                <div class="field-hint">
+                  Saves the current personality text as a reusable preset in both the browser and HAT preset list.
+                </div>
               </div>
 
               <div class="settings-field">

@@ -3,6 +3,15 @@ import path from "path";
 import { WebSocket, type RawData } from "ws";
 import { dataDir } from "../utils/dir";
 import { getRuntimeSettings } from "../config/runtime-settings";
+import {
+  BOTNET_MODEL_OPTIONS,
+  DEFAULT_BOTNET_MODEL,
+  getBotNetModelOption,
+  getNextBotNetModel,
+  normalizeBotNetModel,
+  type BotNetModelOption,
+} from "../config/botnet-models";
+import { recordGroqRequest } from "../status/groq-usage";
 
 type BotNetMode = "solo" | "botnet";
 type BotNetStarter = "self" | "peer";
@@ -18,6 +27,7 @@ export interface BotNetSettings {
   hubUrl: string;
   nodeHandle: string;
   botnetMode: BotNetRelayMode;
+  model: string;
   maxBotReplies: number;
   replyDelaySec: number;
 }
@@ -78,6 +88,7 @@ export interface BotNetOnlineState {
 
 export interface BotNetState {
   settings: BotNetSettings;
+  modelOptions: BotNetModelOption[];
   connectionStatus: string;
   online: BotNetOnlineState;
   conversations: BotNetConversation[];
@@ -95,6 +106,7 @@ const DEFAULT_SETTINGS: BotNetSettings = {
   hubUrl: "",
   nodeHandle: "Whisplay Bot",
   botnetMode: "persona-relay",
+  model: DEFAULT_BOTNET_MODEL,
   maxBotReplies: 8,
   replyDelaySec: 6,
 };
@@ -171,6 +183,7 @@ function sanitizeSettings(input: Partial<BotNetSettings> | null | undefined): Bo
     hubUrl: normalizeUrl(input?.hubUrl),
     nodeHandle: normalizeNodeHandle(input?.nodeHandle),
     botnetMode: normalizeBotnetMode(input?.botnetMode),
+    model: normalizeBotNetModel(input?.model),
     maxBotReplies: clampInt(input?.maxBotReplies, DEFAULT_SETTINGS.maxBotReplies, 0, 200),
     replyDelaySec: clampInt(input?.replyDelaySec, DEFAULT_SETTINGS.replyDelaySec, 0, 3600),
   };
@@ -559,11 +572,12 @@ class BotNetManager {
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: process.env.OPENAI_LLM_MODEL || "llama-3.1-8b-instant",
+        model: this.settings.model,
         messages,
         temperature: 0.9,
       }),
     });
+    recordGroqRequest();
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
       throw new Error(
@@ -615,6 +629,7 @@ class BotNetManager {
     this.refreshConnectionStatus();
     return {
       settings: { ...this.settings },
+      modelOptions: BOTNET_MODEL_OPTIONS,
       connectionStatus: this.connectionStatus,
       online: this.getPublicOnlineState(),
       conversations: this.conversations.slice(0, 10),
@@ -663,6 +678,18 @@ class BotNetManager {
     }
 
     return { ...this.settings };
+  }
+
+  selectNextModel(): BotNetModelOption {
+    const nextModel = getNextBotNetModel(this.settings.model);
+    this.settings = sanitizeSettings({ ...this.settings, model: nextModel });
+    this.save();
+    return (
+      getBotNetModelOption(this.settings.model) || {
+        id: this.settings.model,
+        label: this.settings.model,
+      }
+    );
   }
 
   private async checkHubHealth(): Promise<string> {

@@ -32,6 +32,7 @@ import {
   sendCameraDaemonCommand,
 } from "./camera-daemon";
 import {
+  getRuntimeSettings,
   getPublicRuntimeSettings,
   IDLE_TIMEOUT_OPTIONS,
   RECORD_TIMEOUT_OPTIONS,
@@ -39,9 +40,10 @@ import {
   SCREEN_BLANK_TIMEOUT_OPTIONS,
   SCROLL_SPEED_OPTIONS,
   VOLUME_LEVEL_OPTIONS,
+  saveNamedPersonalityPreset,
   saveRuntimeSettings,
 } from "../config/runtime-settings";
-import { PERSONALITY_PRESETS } from "../config/personality-presets";
+import { getPersonalityPresets } from "../config/personality-presets";
 import type { RuntimeSettings } from "../config/runtime-settings";
 import {
   webAudioBridge,
@@ -706,6 +708,7 @@ export class WebDisplayServer implements WebAudioBridgeServer {
             getBodyString(body, "botnetMode") === "persona-relay"
               ? "persona-relay"
               : "auto-bot",
+          model: getBodyString(body, "model"),
           maxBotReplies: getBodyNumber(body, "maxBotReplies"),
           replyDelaySec: getBodyNumber(body, "replyDelaySec"),
         }),
@@ -967,9 +970,10 @@ export class WebDisplayServer implements WebAudioBridgeServer {
 
     this.router.get("/api/settings", (ctx) => {
       ctx.set("Cache-Control", "no-store");
+      const settings = getRuntimeSettings();
       ctx.body = {
         settings: getPublicRuntimeSettings(),
-        presets: PERSONALITY_PRESETS,
+        presets: getPersonalityPresets(settings.savedPersonalityPresets),
         volumeLevelOptions: VOLUME_LEVEL_OPTIONS,
         scrollSpeedOptions: SCROLL_SPEED_OPTIONS,
         recordTimeoutOptions: RECORD_TIMEOUT_OPTIONS,
@@ -1010,31 +1014,8 @@ export class WebDisplayServer implements WebAudioBridgeServer {
 
       ctx.body = {
         ok: true,
-        settings: {
-          groqApiKeyConfigured: Boolean(settings.groqApiKey),
-          geminiApiKeyConfigured: Boolean(settings.geminiApiKey),
-          personalityPrompt: settings.personalityPrompt,
-          personalityPresetId: getPublicRuntimeSettings().personalityPresetId,
-          musicShuffle: settings.musicShuffle,
-          volumeLevel: settings.volumeLevel,
-          scrollSpeedLevel: settings.scrollSpeedLevel,
-          voiceMode: settings.voiceMode,
-          uiTheme: settings.uiTheme,
-          cameraSource: settings.cameraSource,
-          esp32CamUrl: settings.esp32CamUrl,
-          hatTextColor: settings.hatTextColor,
-          piCameraRotationDeg: settings.piCameraRotationDeg,
-          esp32CamRotationDeg: settings.esp32CamRotationDeg,
-          manualRecordMaxSec: settings.manualRecordMaxSec,
-          headerMode: settings.headerMode,
-          screensaverMode: settings.screensaverMode,
-          idleTimeoutSec: settings.idleTimeoutSec,
-          screenBlankTimeoutSec: settings.screenBlankTimeoutSec,
-          roomMonitorIntervalSec: settings.roomMonitorIntervalSec,
-          weatherLatitude: settings.weatherLatitude,
-          weatherLongitude: settings.weatherLongitude,
-        },
-        presets: PERSONALITY_PRESETS,
+        settings: getPublicRuntimeSettings(),
+        presets: getPersonalityPresets(settings.savedPersonalityPresets),
         volumeLevelOptions: VOLUME_LEVEL_OPTIONS,
         scrollSpeedOptions: SCROLL_SPEED_OPTIONS,
         recordTimeoutOptions: RECORD_TIMEOUT_OPTIONS,
@@ -1042,6 +1023,32 @@ export class WebDisplayServer implements WebAudioBridgeServer {
         screenBlankTimeoutOptions: SCREEN_BLANK_TIMEOUT_OPTIONS,
         roomMonitorIntervalOptions: ROOM_MONITOR_INTERVAL_OPTIONS,
       };
+    });
+
+    this.router.post("/api/settings/personality-save", (ctx) => {
+      const body = normalizeRequestBody((ctx.request as any).body);
+      try {
+        const settings = saveNamedPersonalityPreset(
+          getBodyString(body, "name") || getBodyString(body, "label") || "",
+          getBodyString(body, "prompt") ||
+            getBodyString(body, "personalityPrompt") ||
+            "",
+        );
+        ctx.body = {
+          ok: true,
+          settings: getPublicRuntimeSettings(),
+          presets: getPersonalityPresets(settings.savedPersonalityPresets),
+        };
+      } catch (error) {
+        ctx.status = 400;
+        ctx.body = {
+          ok: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Failed to save personality preset.",
+        };
+      }
     });
 
     this.router.post("/api/system/shutdown", async (ctx) => {
@@ -1082,6 +1089,7 @@ export class WebDisplayServer implements WebAudioBridgeServer {
       camera_mode: this.currentStatus.camera_mode,
       capture_image_path: this.currentStatus.capture_image_path,
       wifi_signal_level: this.currentStatus.wifi_signal_level,
+      groq_requests_today: this.currentStatus.groq_requests_today,
       vpn_connected: this.currentStatus.vpn_connected,
       rag_icon_visible: this.currentStatus.rag_icon_visible,
       image_icon_visible: this.currentStatus.image_icon_visible,

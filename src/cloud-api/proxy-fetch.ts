@@ -4,8 +4,17 @@ import { HttpsProxyAgent } from "https-proxy-agent";
 import { SocksProxyAgent } from "socks-proxy-agent";
 import { Agent } from "http";
 import dotenv from "dotenv";
+import { recordGroqRequest } from "../status/groq-usage";
 
 dotenv.config();
+
+function shouldTrackGroqRequest(
+  url: string,
+  options: RequestInit,
+): boolean {
+  const method = `${options.method || "GET"}`.toUpperCase();
+  return method !== "GET" && method !== "HEAD" && url.includes("api.groq.com");
+}
 
 /**
  * Automatically creates a proxy-enabled version of node-fetch
@@ -32,6 +41,9 @@ function createProxyFetch() {
     url: string,
     options: RequestInit = {}
   ): Promise<Response> {
+    if (shouldTrackGroqRequest(String(url), options)) {
+      recordGroqRequest();
+    }
     return fetch(url, { agent, ...options });
   };
 }
@@ -58,6 +70,9 @@ function createUndiciProxyFetch() {
     url: string,
     options: RequestInit = {}
   ) {
+    if (shouldTrackGroqRequest(String(url), options)) {
+      recordGroqRequest();
+    }
     // @ts-ignore
     return UndiciFetch(url, { dispatcher, ...options });
   };

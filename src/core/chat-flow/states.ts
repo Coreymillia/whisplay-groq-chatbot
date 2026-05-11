@@ -89,6 +89,8 @@ import {
   fetchWeatherSnapshot,
   isWeatherConfigured,
 } from "../../device/weather";
+import { getBotNetManager } from "../../device/botnet";
+import { getBotNetModelLabel } from "../../config/botnet-models";
 
 const imageIntentPatterns = [
   /\bwhat do you see\b/i,
@@ -371,6 +373,18 @@ function getNextCameraSource(current: string): string {
     return CAMERA_SOURCES[0];
   }
   return CAMERA_SOURCES[(currentIndex + 1) % CAMERA_SOURCES.length];
+}
+
+function shouldAdvanceBotNetModel(prompt: string): boolean {
+  const trimmed = prompt.trim();
+  if (!trimmed) {
+    return false;
+  }
+  return [
+    /^\s*next\s+model\s*[.!?]*$/i,
+    /^\s*(?:switch|swap|change)\s+(?:the\s+)?model\s*[.!?]*$/i,
+    /^\s*next\s+bot(?:net)?\s+model\s*[.!?]*$/i,
+  ].some((pattern) => pattern.test(trimmed));
 }
 
 function shouldBrowsePhotos(prompt: string): boolean {
@@ -1297,6 +1311,12 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
         text: `[camera]Camera source ${label}.`,
       });
       finishDirectMessage(`Camera source ${label}.`);
+      return;
+    }
+    if (shouldAdvanceBotNetModel(ctx.asrText)) {
+      const nextModel = getBotNetManager().selectNextModel();
+      const label = getBotNetModelLabel(nextModel.id);
+      finishDirectMessage(`BotNet model ${label}.`);
       return;
     }
     if (shouldShutdown(ctx.asrText)) {

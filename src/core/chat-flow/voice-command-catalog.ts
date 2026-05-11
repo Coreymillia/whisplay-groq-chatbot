@@ -53,6 +53,10 @@ export const VOICE_COMMAND_HELP_ENTRIES: VoiceCommandHelpEntry[] = [
     summary: "switch camera / swap camera",
   },
   {
+    id: "botnet-model-next",
+    summary: "next model / switch model",
+  },
+  {
     id: "photo-browser",
     summary: "browse photos / images",
   },

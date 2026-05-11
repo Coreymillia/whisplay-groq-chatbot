@@ -1,6 +1,10 @@
 import fs from "fs";
 import path from "path";
-import { getCurrentPersonalityPresetId } from "./personality-presets";
+import {
+  getCurrentPersonalityPresetId,
+  getMatchingPersonalityPreset,
+  type PersonalityPreset,
+} from "./personality-presets";
 
 export type VoiceMode = "text-only" | "speak-on-demand" | "voice-chat";
 export type UITheme = "default" | "matrix" | "plasma" | "amber-terminal";
@@ -38,6 +42,7 @@ export interface RuntimeSettings {
   groqApiKey: string;
   geminiApiKey: string;
   personalityPrompt: string;
+  savedPersonalityPresets: PersonalityPreset[];
   musicShuffle: boolean;
   volumeLevel: number;
   scrollSpeedLevel: number;
@@ -63,6 +68,7 @@ export interface RuntimeSettingsUpdate {
   clearGroqApiKey?: boolean;
   geminiApiKey?: string;
   personalityPrompt?: string;
+  savedPersonalityPresets?: PersonalityPreset[];
   musicShuffle?: boolean;
   volumeLevel?: number;
   scrollSpeedLevel?: number;
@@ -213,6 +219,59 @@ function normalizeVoiceMode(value: unknown): VoiceMode {
   return DEFAULT_VOICE_MODE;
 }
 
+function normalizePersonalityLabel(value: unknown): string {
+  if (typeof value !== "string") {
+    return "";
+  }
+  return value.trim().replace(/\s+/g, " ").slice(0, 40);
+}
+
+function normalizePersonalityPrompt(value: unknown): string {
+  if (typeof value !== "string") {
+    return "";
+  }
+  return value.trim();
+}
+
+function createSavedPersonalityId(label: string, existing: PersonalityPreset[]): string {
+  const base =
+    label
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "favorite";
+  let candidate = `saved-${base}`;
+  let suffix = 2;
+  const existingIds = new Set(existing.map((preset) => preset.id));
+  while (existingIds.has(candidate)) {
+    candidate = `saved-${base}-${suffix}`;
+    suffix += 1;
+  }
+  return candidate;
+}
+
+function normalizeSavedPersonalityPresets(value: unknown): PersonalityPreset[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const normalized: PersonalityPreset[] = [];
+  const seenIds = new Set<string>();
+  const seenPrompts = new Set<string>();
+  for (const item of value) {
+    const label = normalizePersonalityLabel((item as PersonalityPreset)?.label);
+    const prompt = normalizePersonalityPrompt((item as PersonalityPreset)?.prompt);
+    const id = typeof (item as PersonalityPreset)?.id === "string"
+      ? (item as PersonalityPreset).id.trim()
+      : "";
+    if (!label || !prompt || !id || seenIds.has(id) || seenPrompts.has(prompt)) {
+      continue;
+    }
+    seenIds.add(id);
+    seenPrompts.add(prompt);
+    normalized.push({ id, label, prompt });
+  }
+  return normalized;
+}
+
 function normalizeVolumeLevel(value: unknown): number {
   const numeric = typeof value === "number" ? value : parseInt(String(value), 10);
   if (!Number.isFinite(numeric)) {
@@ -359,6 +418,9 @@ function sanitizeSettings(input: Partial<RuntimeSettings> | null | undefined): R
       typeof input?.personalityPrompt === "string"
         ? input.personalityPrompt.trim()
         : "",
+    savedPersonalityPresets: normalizeSavedPersonalityPresets(
+      input?.savedPersonalityPresets,
+    ),
     musicShuffle:
       typeof input?.musicShuffle === "boolean"
         ? input.musicShuffle
@@ -434,6 +496,12 @@ export function saveRuntimeSettings(
 
   if (typeof update.personalityPrompt === "string") {
     next.personalityPrompt = update.personalityPrompt.trim();
+  }
+
+  if (Array.isArray(update.savedPersonalityPresets)) {
+    next.savedPersonalityPresets = normalizeSavedPersonalityPresets(
+      update.savedPersonalityPresets,
+    );
   }
 
   if (typeof update.musicShuffle === "boolean") {
@@ -516,6 +584,58 @@ export function saveRuntimeSettings(
     next.weatherLongitude = normalizeCoordinate(update.weatherLongitude, -180, 180);
   }
 
+  const sanitized = sanitizeSettings(next);
+  writeSettingsFile(sanitized);
+  return sanitized;
+}
+
+export function saveNamedPersonalityPreset(
+  label: string,
+  prompt: string,
+): RuntimeSettings {
+  const normalizedLabel = normalizePersonalityLabel(label);
+  const normalizedPrompt = normalizePersonalityPrompt(prompt);
+  if (!normalizedLabel) {
+    throw new Error("Enter a personality name first.");
+  }
+  if (!normalizedPrompt) {
+    throw new Error("Enter a personality prompt first.");
+  }
+
+  const current = loadSettingsFile();
+  const builtinMatch = getMatchingPersonalityPreset(normalizedPrompt);
+  if (builtinMatch) {
+    throw new Error(
+      `That prompt already matches the built-in ${builtinMatch.label} preset.`,
+    );
+  }
+
+  const nextSaved = [...current.savedPersonalityPresets];
+  const existingByPrompt = nextSaved.find(
+    (preset) => preset.prompt.trim() === normalizedPrompt,
+  );
+  const existingByLabel = nextSaved.find(
+    (preset) => preset.label.trim().toLowerCase() === normalizedLabel.toLowerCase(),
+  );
+
+  if (existingByPrompt) {
+    existingByPrompt.label = normalizedLabel;
+  } else if (existingByLabel) {
+    existingByLabel.label = normalizedLabel;
+    existingByLabel.prompt = normalizedPrompt;
+  } else {
+    nextSaved.push({
+      id: createSavedPersonalityId(normalizedLabel, nextSaved),
+      label: normalizedLabel,
+      prompt: normalizedPrompt,
+    });
+  }
+
+  const next = sanitizeSettings({
+    ...current,
+    personalityPrompt: normalizedPrompt,
+    savedPersonalityPresets: nextSaved,
+  });
   writeSettingsFile(next);
   return next;
 }
@@ -694,6 +814,7 @@ export function getPublicRuntimeSettings(): {
     personalityPrompt: settings.personalityPrompt,
     personalityPresetId: getCurrentPersonalityPresetId(
       settings.personalityPrompt,
+      settings.savedPersonalityPresets,
     ),
     musicShuffle: settings.musicShuffle,
     volumeLevel: settings.volumeLevel,

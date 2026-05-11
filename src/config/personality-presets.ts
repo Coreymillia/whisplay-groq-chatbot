@@ -81,53 +81,81 @@ export const PERSONALITY_PRESETS: PersonalityPreset[] = [
   },
 ];
 
+export function getPersonalityPresets(
+  extraPresets: PersonalityPreset[] = [],
+): PersonalityPreset[] {
+  const merged: PersonalityPreset[] = [];
+  const seenIds = new Set<string>();
+  for (const preset of [...PERSONALITY_PRESETS, ...extraPresets]) {
+    const id = preset.id.trim();
+    if (!id || seenIds.has(id)) {
+      continue;
+    }
+    seenIds.add(id);
+    merged.push({
+      id,
+      label: preset.label.trim(),
+      prompt: preset.prompt.trim(),
+    });
+  }
+  return merged;
+}
+
 export function getPersonalityPresetById(
   id: string | null | undefined,
+  extraPresets: PersonalityPreset[] = [],
 ): PersonalityPreset | null {
   if (!id) {
     return null;
   }
-  return PERSONALITY_PRESETS.find((preset) => preset.id === id) || null;
+  return (
+    getPersonalityPresets(extraPresets).find((preset) => preset.id === id) || null
+  );
 }
 
 export function getMatchingPersonalityPreset(
   prompt: string | null | undefined,
+  extraPresets: PersonalityPreset[] = [],
 ): PersonalityPreset | null {
   const normalized = (prompt || "").trim();
   if (!normalized) {
     return null;
   }
   return (
-    PERSONALITY_PRESETS.find((preset) => preset.prompt.trim() === normalized) ||
-    null
+    getPersonalityPresets(extraPresets).find(
+      (preset) => preset.prompt.trim() === normalized,
+    ) || null
   );
 }
 
 export function getCurrentPersonalityPresetId(
   prompt: string | null | undefined,
+  extraPresets: PersonalityPreset[] = [],
 ): string {
   return (
-    getMatchingPersonalityPreset(prompt)?.id || CUSTOM_PERSONALITY_PRESET_ID
+    getMatchingPersonalityPreset(prompt, extraPresets)?.id ||
+    CUSTOM_PERSONALITY_PRESET_ID
   );
 }
 
 export function getCurrentPersonalityPresetLabel(
   prompt: string | null | undefined,
+  extraPresets: PersonalityPreset[] = [],
 ): string {
-  return getMatchingPersonalityPreset(prompt)?.label || "Custom";
+  return getMatchingPersonalityPreset(prompt, extraPresets)?.label || "Custom";
 }
 
 export function getNextPersonalityPreset(
   prompt: string | null | undefined,
+  extraPresets: PersonalityPreset[] = [],
 ): PersonalityPreset {
-  const currentId = getCurrentPersonalityPresetId(prompt);
-  const currentIndex = PERSONALITY_PRESETS.findIndex(
+  const presets = getPersonalityPresets(extraPresets);
+  const currentId = getCurrentPersonalityPresetId(prompt, extraPresets);
+  const currentIndex = presets.findIndex(
     (preset) => preset.id === currentId,
   );
   if (currentIndex === -1) {
-    return PERSONALITY_PRESETS[0];
+    return presets[0];
   }
-  return PERSONALITY_PRESETS[
-    (currentIndex + 1) % PERSONALITY_PRESETS.length
-  ];
+  return presets[(currentIndex + 1) % presets.length];
 }

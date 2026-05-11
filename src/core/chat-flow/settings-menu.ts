@@ -121,7 +121,10 @@ export function buildSettingsMenuItems(): SettingsMenuItem[] {
     {
       id: "personality",
       label: "Preset",
-      value: getCurrentPersonalityPresetLabel(settings.personalityPrompt),
+      value: getCurrentPersonalityPresetLabel(
+        settings.personalityPrompt,
+        settings.savedPersonalityPresets,
+      ),
     },
     {
       id: "record-time",
@@ -272,7 +275,10 @@ export function applySettingsMenuAction(id: SettingsMenuItemId): {
 
   switch (id) {
     case "personality": {
-      const nextPreset = getNextPersonalityPreset(settings.personalityPrompt);
+      const nextPreset = getNextPersonalityPreset(
+        settings.personalityPrompt,
+        settings.savedPersonalityPresets,
+      );
       saveRuntimeSettings({ personalityPrompt: nextPreset.prompt });
       return {
         message: `Preset ${nextPreset.label}`,

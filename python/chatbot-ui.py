@@ -20,6 +20,7 @@ if STATUS_ICON_DIR not in sys.path:
 
 from battery_icon import BatteryStatusIcon
 from wifi_icon import WifiStatusIcon
+from request_count_icon import RequestCountStatusIcon
 from rag_icon import RagStatusIcon
 from image_icon import ImageStatusIcon
 from wireguard_icon import WireguardStatusIcon
@@ -54,6 +55,7 @@ current_image_path = ""
 current_image = None
 current_network_connected = None
 current_wifi_signal_level = 0
+current_groq_requests_today = 0
 current_vpn_connected = False
 current_rag_icon_visible = False
 current_image_icon_visible = False
@@ -898,6 +900,7 @@ class RenderThread(threading.Thread):
             "status_font_size": status_font_size,
             "network_connected": current_network_connected,
             "wifi_signal_level": current_wifi_signal_level,
+            "groq_requests_today": current_groq_requests_today,
             "vpn_connected": current_vpn_connected,
             "rag_icon_visible": current_rag_icon_visible,
             "image_icon_visible": current_image_icon_visible,
@@ -918,6 +921,14 @@ class RenderThread(threading.Thread):
             icons.append(BatteryStatusIcon(battery_level, battery_color, battery_font, status_font_size))
         if context.get("wifi_signal_level"):
             icons.append(WifiStatusIcon(status_font_size, context.get("wifi_signal_level")))
+        if context.get("groq_requests_today") is not None:
+            icons.append(
+                RequestCountStatusIcon(
+                    context.get("groq_requests_today"),
+                    battery_font,
+                    status_font_size,
+                )
+            )
         if context.get("vpn_connected"):
             icons.append(WireguardStatusIcon(status_font_size))
         if context.get("image_icon_visible"):
@@ -979,7 +990,7 @@ class RenderThread(threading.Thread):
 def update_display_data(status=None, emoji=None, text=None,
                    scroll_speed=None, scroll_speed_factor=None, scroll_sync=None, battery_level=None, battery_color=None, image_path=None,
                    network_connected=None, vpn_connected=None, rag_icon_visible=None, image_icon_visible=None, transaction_id=None,
-                   wifi_signal_level=None, audio_level=None,
+                   wifi_signal_level=None, groq_requests_today=None, audio_level=None,
                    music_progress=None, music_duration_ms=None, header_mode=None,
                    screensaver_mode=None, idle_timeout_sec=None, screen_blank_timeout_sec=None,
                    hat_text_color=None):
@@ -991,6 +1002,7 @@ def update_display_data(status=None, emoji=None, text=None,
     global current_scroll_sync_hold_until
     global current_network_connected, current_vpn_connected, current_rag_icon_visible, current_image_icon_visible, current_transaction_id
     global current_wifi_signal_level
+    global current_groq_requests_today
     global current_music_progress, current_music_duration_ms
     global current_audio_level
     global current_header_mode, current_screensaver_mode, current_idle_timeout_sec, current_screen_blank_timeout_sec
@@ -1083,6 +1095,11 @@ def update_display_data(status=None, emoji=None, text=None,
             current_wifi_signal_level = max(0, min(3, int(wifi_signal_level)))
         except (TypeError, ValueError):
             print(f"[Display] Invalid wifi_signal_level payload: {wifi_signal_level}")
+    if groq_requests_today is not None:
+        try:
+            current_groq_requests_today = max(0, int(groq_requests_today))
+        except (TypeError, ValueError):
+            print(f"[Display] Invalid groq_requests_today payload: {groq_requests_today}")
     if audio_level is not None:
         try:
             current_audio_level = max(0, min(100, int(audio_level)))
