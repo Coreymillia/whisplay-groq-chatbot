@@ -28,6 +28,7 @@ This project starts from the official PiSugar Whisplay chatbot, but is being tai
 - **Captured still image on HAT display:** working
 - **Companion CYD touchscreen client:** working as a polished multi-mode touch companion with chat, capture, gallery, and settings screens
 - **Companion Cardputer client:** working as an early rough-start build, with text chat confirmed and more settings/UI work planned
+- **Groqputer standalone Cardputer firmware:** early standalone Groq Cardputer build now running in this repo, with more tuning planned before it eventually tries to connect back into the Whisplay ecosystem
 - **Standalone GroqBotNet Pi Zero node:** working as a separate same-network experiment with browser chat plus Mini PiTFT output
 - **Web simulator/debug UI:** still available at `http://<host-or-pi-ip>:17880`
 
@@ -229,6 +230,30 @@ This repo also now includes an early companion firmware project under `Companion
 - the firmware includes a local Wi-Fi + Pi setup portal, receive/send screen split, message scrolling, and saved text-size controls
 
 This is also intentionally a **rough start**, not a polished final Cardputer UX. It is already useful for text chat, and more settings/polish are planned. The audio path is implemented in the firmware, but hardware validation is still pending.
+
+## Why `Groqputer/` is also in this repo
+
+This repo now also includes `Groqputer/`, a separate **standalone Cardputer Groq bot** project for the **M5Stack Cardputer**.
+
+- **Whisplay remains the main project**
+- **Groqputer is the stripped-down standalone Cardputer experiment**
+- **the goal is to keep the Cardputer useful by itself first**
+- **the longer-term goal is to let that standalone Cardputer eventually connect back to Whisplay in a cleaner way**
+
+Keeping it in this repo makes sense right now because it is borrowing directly from the same Whisplay/Cardputer work:
+
+- the Cardputer UI/input shell and setup flow
+- the editable personality idea from the Whisplay project
+- the same broader goal of companion/sidecar devices around the Whisplay bot
+
+The first Groqputer target is intentionally narrow:
+
+- standalone Wi-Fi + Groq setup from an AP page
+- local keyboard chat
+- local mic input with direct Groq Whisper transcription
+- direct Groq chat replies on-device
+
+That means `Groqputer/` is **not** trying to be a full Whisplay port. It is meant to become a **small standalone Groq Cardputer** first, then later explore tighter Whisplay integration once the standalone firmware is stable.
 
 ## Why `GroqBotNet/` is also in this repo
 
