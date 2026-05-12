@@ -255,6 +255,18 @@ The first Groqputer target is intentionally narrow:
 
 That means `Groqputer/` is **not** trying to be a full Whisplay port. It is meant to become a **small standalone Groq Cardputer** first, then later explore tighter Whisplay integration once the standalone firmware is stable.
 
+### Current Groqputer hotkeys
+
+- **Enter** = send the current typed message
+- **Hold BtnA** = record a voice message
+- **Fn+A** = open the setup AP
+- **Fn+M** = switch the main chat window to **incoming** history
+- **Fn+S** = switch the main chat window to **outgoing** history
+- **Fn+N** = start a new chat / clear the active conversation
+- **Fn+;** = scroll the current history view one direction
+- **Fn+.** = scroll the current history view the other direction
+- **Fn++** / **Fn+-** = increase or decrease Cardputer text size
+
 ## Why `GroqBotNet/` is also in this repo
 
 This repo now includes a separate `GroqBotNet/` app because it is part of the same broader Whisplay bring-up experiment rather than a completely unrelated side project.
