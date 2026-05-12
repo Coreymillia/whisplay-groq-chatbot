@@ -1,8 +1,8 @@
 # Core2Groq 📻🤖
 
-Unified **M5Stack Core2** firmware that keeps the OTR radio project and now starts adding a **Groq chatbot mode** beside it.
+Unified **M5Stack Core2** firmware that keeps the OTR radio project and now adds a **Groq chatbot mode** beside it.
 
-The radio side still comes from [M5RadioStream](../M5RadioStream) (Core1 Basic), upgraded with **16-bit I2S audio** and an optional **SI4713 FM modulator** so the stream can be broadcast to any FM radio in the room.
+The radio side still comes from [M5RadioStream](../M5RadioStream) (Core1 Basic), upgraded with **16-bit I2S audio** for clean standalone playback on the Core2 speaker.
 
 Original concept: **[winRadio by Volos Projects](https://github.com/VolosR/WaveshareRadioStream)**
 
@@ -10,13 +10,13 @@ Original concept: **[winRadio by Volos Projects](https://github.com/VolosR/Waves
 
 ## Photos
 
-### v1.3 — Core2 + CJMCU-4713 SI4713 FM Modulator wired up
+### Earlier prototype — Core2 + CJMCU-4713 SI4713 FM modulator
 ![M5Core2Radio with SI4713 FM module](IMG_20260330_112507.jpg)
-*Retro amber "M5 SHORTWAVE FM" skin — 1940s Radio playing, SI4713 module connected via jumper wires to Port A (I2C) and Port B (DAC audio)*
+*Earlier prototype photo from the FM-transmitter phase of the project.*
 
-### FM broadcast in action — received on a Raddy shortwave radio
+### Earlier prototype broadcast test
 ![FM broadcast received on Raddy radio](IMG_20260330_112658.jpg)
-*The Core2 streams OTR internet radio and re-broadcasts it over FM. The Raddy is tuned to the SI4713's frequency and picking it up live. Ticker: "You Bet Your Life - Secret Word" (Groucho Marx, 1947)*
+*Historical test image from when the project also included FM re-broadcast hardware.*
 
 ---
 
@@ -29,7 +29,6 @@ Original concept: **[winRadio by Volos Projects](https://github.com/VolosR/Waves
 | Touch input | Physical buttons only | **Capacitive touch + physical** |
 | Haptic feedback | None | **Vibration motor on every tap** |
 | PSRAM | None | **4MB** |
-| FM broadcast | None | **Optional SI4713 modulator** |
 
 ---
 
@@ -42,14 +41,10 @@ Both the **on-screen touch footer** and **physical virtual buttons** work:
 | Touch Zone | Button | Normal Mode | Settings Mode |
 |---|---|---|---|
 | [SET] | BtnA (short) | Open sound settings | — |
-| — | **BtnA (hold 1s)** | **Toggle FM ↔ Speaker output** | — |
 | [STA] | BtnB | Cycle station (1.5s debounce) | Select next parameter |
 | [VOL] | BtnC (short) | Cycle volume 0–10 (0=mute) | Increase value |
 | — | **BtnC (hold 1s)** | **Toggle screen on/off** | — |
 | [BACK] | BtnA | — | Exit settings |
-
-> **FM badge** in header: green = FM mode active, grey = speaker mode active.
-> RDS song title updates automatically on the receiving radio as each show changes.
 
 ### Bot mode
 
@@ -57,15 +52,17 @@ Both the **on-screen touch footer** and **physical virtual buttons** work:
 - bottom capacitive **REC** button records for the configured max time
 - bottom capacitive **STOP** button stops an active recording
 - bottom capacitive **HOLD** button records while held and stops on release
+- top-center **BOT / YOU** chip toggles between the latest bot reply and the latest user transcript
 - on-screen **SET** opens the bot settings menu
 - settings menu currently includes:
   - **Setup**
   - **Personality** preset cycling
   - **Model** cycling
+  - **Auto-scroll speed**
 - on-screen **RADIO** switches into radio mode
 - on-screen **NEW** clears the current bot chat
-- left side of the bot reply panel = scroll up
-- right side of the bot reply panel = scroll down
+- long replies now **auto-scroll and repeat**
+- tapping the reply panel can still manually bump the scroll position if needed
 - in radio mode, tap the **BOT** button in the header to return
 
 ---
@@ -80,28 +77,27 @@ Both the **on-screen touch footer** and **physical virtual buttons** work:
 | Audio amp | I2S → NS4168 (BCK=GPIO12, LRC=GPIO0, DOUT=GPIO2) |
 | Speaker | 1W, 8Ω onboard |
 | PSRAM | 4MB |
-| FM module | CJMCU-4713 SI4713 *(optional)* |
+| Optional LCD | 16x2 I2C character LCD *(0x27 / 0x3F typical)* |
 
 ---
 
-## Optional SI4713 FM Modulator Wiring
+## Optional 16x2 I2C LCD Wiring
 
-The SI4713 is **fully optional** — the firmware detects it on I2C at boot and enables FM features automatically if present.
+The same style of 16x2 LCD used on **Groqputer** can also be connected here for an external status and message marquee.
 
-| CJMCU-4713 Pin | Core2 Connection | Notes |
-|---|---|---|
-| VIN | 5V | Module has onboard 3.3V regulator |
-| GND | GND | |
-| SDA | GPIO21 (Port A) | |
-| SCL | GPIO22 (Port A) | |
-| RST | GPIO13 (expansion) | Required — library toggles it |
-| LIN | GPIO26 (Port B) | ESP32 DAC2 analog audio |
-| RIN | GPIO26 (Port B) | Same pin — mono |
-| CS/SEN | Module's own 3V0 pin | Sets I2C address to 0x63 |
-| ANT | ~2 inch wire (recommended) | See FCC disclaimer below — shorter is safer |
-| GP1, GP2, 3V0 | Unconnected | Not needed |
+| LCD pin | Core2Groq connection |
+|---|---|
+| VCC | 5V |
+| GND | GND |
+| SDA | GPIO33 |
+| SCL | GPIO32 |
 
-**FM frequency** is set in the sound settings menu (FM MHz) and persists in NVS across reboots.
+Notes:
+
+- this follows the requested mapping of **G33 = Cardputer G1** and **G32 = Cardputer G2**
+- the firmware scans common backpack addresses **0x27** and **0x3F**
+- line 1 shows mode / recording / connectivity status
+- line 2 scrolls the current bot reply, user transcript, or radio title using the same auto-scroll speed setting as the bot screen
 
 ---
 
@@ -159,45 +155,8 @@ Settings are stored in NVS and survive power cycles.
 
 ## Planned Features
 
-- **FM passthrough / aux input mode** — stop the internet stream but leave the SI4713 modulator active, allowing an external MP3 player or audio source to be plugged in and broadcast over FM. Turns the Core2 into a general-purpose FM transmitter.
-
----
-
-## ⚠️ FCC Disclaimer — FM Transmission Legal Notice
-
-> **Read this before connecting an antenna to the SI4713 module.**
-
-### Legal Status
-
-In the United States, low-power FM transmission is governed by **47 CFR Part 15, Subpart D** (unlicensed intentional radiators). Under these rules:
-
-- Transmission is permitted **without a license** only when the signal is so weak it cannot cause interference to licensed stations.
-- The FCC does **not** define a specific wattage or distance limit — it defines an **interference threshold**. If your signal reaches a licensed station's coverage area and causes interference, you are in violation regardless of intent.
-- The FCC **actively enforces** FM interference complaints. They use direction-finding equipment to locate illegal transmitters. Fines start in the thousands of dollars and equipment can be confiscated.
-
-### Antenna Guidance
-
-Antenna length dramatically affects range:
-
-| Antenna | Approximate range | Risk level |
-|---|---|---|
-| No antenna (PCB trace only) | < 3 ft | Minimal |
-| **~2 inch wire (recommended)** | **~10–15 ft** | **Safe for personal use** |
-| 12 inch wire | ~30–50 ft | Use caution |
-| 75 cm / 30 inch (λ/4) | ~80–150 ft | High — may leave your property |
-| Full dipole or amplified | 300+ ft | Likely illegal — do not use |
-
-**Recommendation:** Use a stub of 1–2 inches of wire. This is sufficient to fill a single room and keeps the signal well within your home. The SI4713 at full power with a proper quarter-wave antenna can reach 80+ feet even under non-ideal conditions — confirmed during testing of this project.
-
-### Best Practices
-
-1. **Keep the signal on your own property.** The signal should not be receivable from a public road, a neighbor's property, or anywhere you do not own or control.
-2. **Choose an unused frequency.** Use the settings menu to pick an FM frequency with no existing licensed station in your area. Scan your local FM band before transmitting.
-3. **Use the shortest practical antenna.** 2 inches is recommended. Longer = more range = more legal risk.
-4. **Do not rebroadcast copyrighted content** beyond your own private use. The stations included in this firmware are Old Time Radio (public domain) content intended for personal, private listening only.
-5. **This firmware is provided for educational and personal hobbyist use only.** The authors accept no responsibility for any regulatory violations resulting from its use.
-
-> The FCC takes FM interference seriously. They will find you. Keep it short, keep it local, keep it legal.
+- continue polishing the touchscreen bot UI
+- keep radio playback simple and reliable as a standalone speaker-based player
 
 ---
 

@@ -10,12 +10,12 @@
 #include <M5Core2.h>
 #include <WiFiMulti.h>
 #include <Audio.h>
-#include <Adafruit_Si4713.h>
 #include <Preferences.h>
 #include <ArduinoJson.h>
 #include <driver/i2s.h>
 
 #include "GroqApi.h"
+#include "Core2Lcd.h"
 #include "Portal.h"
 
 #define SCREEN_W 320
@@ -54,25 +54,24 @@
 #define I2S_LRC 0
 #define I2S_DOUT 2
 
-#define SI4713_RST 13
-#define FM_FREQ_MIN 8790
-#define FM_FREQ_MAX 10790
-#define FM_FREQ_STEP 20
-
 static constexpr size_t BOT_MAX_VISIBLE_CHARS = 420;
 static constexpr uint32_t BOT_SAMPLE_RATE = 44100;
 static constexpr int BOT_REPLY_X = 10;
 static constexpr int BOT_REPLY_Y = 30;
 static constexpr int BOT_REPLY_W = 300;
-static constexpr int BOT_REPLY_H = 150;
-static constexpr int BOT_STATUS_Y = 182;
-static constexpr int BOT_ACTION_Y = 190;
-static constexpr int BOT_ACTION_H = 10;
-static constexpr int BOT_ACTION_W = 92;
-static constexpr int BOT_ACTION_GAP = 12;
+static constexpr int BOT_REPLY_H = 144;
+static constexpr int BOT_STATUS_Y = 178;
+static constexpr int BOT_ACTION_Y = 192;
+static constexpr int BOT_ACTION_H = 20;
+static constexpr int BOT_ACTION_W = 96;
+static constexpr int BOT_ACTION_GAP = 6;
 static constexpr int BOT_ACTION_SETUP_X = 10;
 static constexpr int BOT_ACTION_RADIO_X = BOT_ACTION_SETUP_X + BOT_ACTION_W + BOT_ACTION_GAP;
 static constexpr int BOT_ACTION_NEW_X = BOT_ACTION_RADIO_X + BOT_ACTION_W + BOT_ACTION_GAP;
+static constexpr int BOT_VIEW_TOGGLE_X = 194;
+static constexpr int BOT_VIEW_TOGGLE_Y = 3;
+static constexpr int BOT_VIEW_TOGGLE_W = 44;
+static constexpr int BOT_VIEW_TOGGLE_H = 18;
 static constexpr int BOT_FOOTER_LABEL_Y = 222;
 
 enum class AppMode : uint8_t {
@@ -88,6 +87,11 @@ enum class BotRecordingMode : uint8_t {
 enum class BotScreen : uint8_t {
     Chat,
     Settings,
+};
+
+enum class BotReplyView : uint8_t {
+    Assistant,
+    User,
 };
 
 enum BotDirtyRegion : uint8_t {
@@ -155,8 +159,6 @@ String stationNames[ns] = {
 
 TFT_eSprite sprite2(&M5.Lcd);
 Audio audio(false, 3, I2S_NUM_1);
-Audio *audioFM = nullptr;
-Adafruit_Si4713 si4713(SI4713_RST);
 Preferences prefs;
 WiFiMulti wifiMulti;
 TaskHandle_t audioTaskHandle = nullptr;
@@ -179,9 +181,6 @@ int settingSel = 0;
 int8_t settingBass = 0;
 int8_t settingTreble = 0;
 bool screenOn = true;
-bool fmPresent = false;
-bool fmMode = false;
-uint16_t fmFreq = 10110;
 bool radioStreamingStarted = false;
 
 unsigned short grays[18];
@@ -190,6 +189,7 @@ AppMode activeMode = AppMode::Bot;
 BotScreen botScreen = BotScreen::Chat;
 String botStatus = "Ready.";
 String botPendingUserMessage;
+String botLastUserMessage;
 bool botRecording = false;
 bool botDrawNeeded = true;
 uint8_t botDirtyRegions = BOT_DIRTY_ALL;
@@ -201,6 +201,9 @@ BotRecordingMode botRecordingMode = BotRecordingMode::Timed;
 String botUserPreviewMessage;
 unsigned long botUserPreviewUntilMs = 0;
 int botReplyScrollOffset = 0;
+unsigned long botAutoScrollPauseUntilMs = 0;
+unsigned long botLastAutoScrollMs = 0;
+BotReplyView botReplyView = BotReplyView::Assistant;
 
 static void markBotDirty(uint8_t regions) {
     botDirtyRegions |= regions;
@@ -292,27 +295,20 @@ static bool buildWavPayload(const uint8_t *pcmData, size_t pcmBytes, uint8_t **b
 static void audioTask(void *param) {
     while (true) {
         audio.loop();
-        if (audioFM) audioFM->loop();
         vTaskDelay(1);
     }
 }
 
 static void stopRadioPlayback() {
     audio.stopSong();
-    if (audioFM) audioFM->stopSong();
     radioStreamingStarted = false;
 }
 
 static void startRadioPlayback() {
     stopRadioPlayback();
     delay(150);
-    Audio &active = (fmMode && audioFM) ? *audioFM : audio;
-    active.setVolume(volume * 2);
-    active.connecttohost(stations[chosen].c_str());
-    if (fmPresent) {
-        si4713.setRDSstation(stationNames[chosen].substring(0, 8).c_str());
-        si4713.setRDSbuffer("Buffering...");
-    }
+    audio.setVolume(volume * 2);
+    audio.connecttohost(stations[chosen].c_str());
     radioStreamingStarted = true;
 }
 
@@ -321,16 +317,7 @@ static void drawRadioDynamic();
 static void drawSettings();
 static void drawBotUi();
 
-static void setAudioMode(bool useFM) {
-    if (!fmPresent) return;
-    fmMode = useFM;
-    if (activeMode == AppMode::Radio) {
-        startRadioPlayback();
-        haptic(80);
-        setupRadioUi();
-        canDraw = true;
-    }
-}
+static void resetBotAutoScroll(unsigned long pauseMs = 1600);
 
 static unsigned long lastStationChange = 0;
 static void changeStation(int newChosen) {
@@ -343,18 +330,11 @@ static void changeStation(int newChosen) {
     canDraw = true;
 }
 
-static void saveFMFreq() {
-    prefs.begin("core2groq", false);
-    prefs.putUShort("fmfreq", fmFreq);
-    prefs.end();
-}
-
 static void settingsIncrement() {
     if (settingSel == 0) {
         volume++;
         if (volume > 10) volume = 0;
         audio.setVolume(volume * 2);
-        if (audioFM) audioFM->setVolume(volume * 2);
     } else if (settingSel == 1) {
         settingBass++;
         if (settingBass > 6) settingBass = -6;
@@ -363,11 +343,6 @@ static void settingsIncrement() {
         settingTreble++;
         if (settingTreble > 6) settingTreble = -6;
         audio.setTone(settingBass, 0, settingTreble);
-    } else if (settingSel == 3 && fmPresent) {
-        fmFreq += FM_FREQ_STEP;
-        if (fmFreq > FM_FREQ_MAX) fmFreq = FM_FREQ_MIN;
-        si4713.tuneFM(fmFreq);
-        saveFMFreq();
     }
     drawSettings();
 }
@@ -435,7 +410,8 @@ static void enterBotMode(bool redraw = true) {
     inSettings = false;
     activeMode = AppMode::Bot;
     botScreen = BotScreen::Chat;
-    botReplyScrollOffset = 0;
+    botReplyView = BotReplyView::Assistant;
+    resetBotAutoScroll();
     setBotStatus(rdHasBotSettingsReady() ? "Use REC / STOP / HOLD." : "Open setup and add Groq key.");
     if (redraw) {
         botDirtyRegions = BOT_DIRTY_ALL;
@@ -454,11 +430,13 @@ static void enterRadioMode(bool redraw = true) {
 static void clearBotChat() {
     rdResetChatHistory();
     botPendingUserMessage = "";
+    botLastUserMessage = "";
     botUserPreviewMessage = "";
     botUserPreviewUntilMs = 0;
-    botReplyScrollOffset = 0;
+    botReplyView = BotReplyView::Assistant;
+    resetBotAutoScroll();
     setBotStatus("New chat started.");
-    markBotDirty(BOT_DIRTY_REPLY | BOT_DIRTY_STATUS);
+    markBotDirty(BOT_DIRTY_HEADER | BOT_DIRTY_REPLY | BOT_DIRTY_STATUS);
 }
 
 static void drawFooterButtons(const char *left, const char *middle, const char *right,
@@ -480,6 +458,19 @@ static String botCurrentReplyText() {
     return "No reply yet. Open setup, add WiFi + Groq key, then use REC or HOLD.";
 }
 
+static String botCurrentPanelTitle() {
+    return botReplyView == BotReplyView::User ? "YOU" : "BOT";
+}
+
+static String botCurrentPanelText() {
+    if (botReplyView == BotReplyView::User) {
+        if (botLastUserMessage.length()) return botLastUserMessage;
+        if (botPendingUserMessage.length()) return botPendingUserMessage;
+        return "No user message yet. Record a question to see your transcript here.";
+    }
+    return botCurrentReplyText();
+}
+
 static int botReplyVisibleLines() {
     return max(1, (BOT_REPLY_H - 16) / 16);
 }
@@ -491,9 +482,15 @@ static int botReplyMaxCharsPerLine() {
 static int botReplyMaxScrollOffset() {
     String lines[80];
     int lineCount = 0;
-    fillWrappedLines(clampText(botCurrentReplyText(), 1400), lines, lineCount, 80,
+    fillWrappedLines(clampText(botCurrentPanelText(), 1400), lines, lineCount, 80,
                      botReplyMaxCharsPerLine());
     return max(0, lineCount - botReplyVisibleLines());
+}
+
+static void resetBotAutoScroll(unsigned long pauseMs) {
+    botReplyScrollOffset = 0;
+    botLastAutoScrollMs = 0;
+    botAutoScrollPauseUntilMs = millis() + pauseMs;
 }
 
 static void cycleBotModel(int delta) {
@@ -520,6 +517,7 @@ static void cycleBotPersonality(int delta) {
 
 static void toggleBotSettingsMenu() {
     botScreen = (botScreen == BotScreen::Settings) ? BotScreen::Chat : BotScreen::Settings;
+    resetBotAutoScroll(botScreen == BotScreen::Settings ? 0 : 1600);
     markBotDirty(BOT_DIRTY_HEADER | BOT_DIRTY_REPLY | BOT_DIRTY_ACTIONS | BOT_DIRTY_STATUS);
 }
 
@@ -528,7 +526,58 @@ static void scrollBotReply(int delta) {
     int next = constrain(botReplyScrollOffset + delta, 0, maxOffset);
     if (next == botReplyScrollOffset) return;
     botReplyScrollOffset = next;
+    botAutoScrollPauseUntilMs = millis() + (rd_scroll_ms * 2UL);
+    botLastAutoScrollMs = millis();
     markBotDirty(BOT_DIRTY_REPLY | BOT_DIRTY_STATUS);
+}
+
+static void cycleBotScrollSpeed() {
+    int count = static_cast<int>(rdScrollSpeedOptionCount());
+    int index = rdCurrentScrollSpeedIndex();
+    index = (index + 1) % count;
+    rdSetScrollSpeedMs(RD_SCROLL_SPEED_OPTIONS[index].ms);
+    setBotStatus(String("Auto scroll: ") + RD_SCROLL_SPEED_OPTIONS[index].label);
+    resetBotAutoScroll();
+    markBotDirty(BOT_DIRTY_REPLY | BOT_DIRTY_STATUS);
+}
+
+static void toggleBotReplyView() {
+    if (botScreen != BotScreen::Chat) return;
+    if (botReplyView == BotReplyView::Assistant) {
+        if (!botLastUserMessage.length() && !botPendingUserMessage.length()) {
+            setBotStatus("No user message yet.");
+            markBotDirty(BOT_DIRTY_STATUS);
+            return;
+        }
+        botReplyView = BotReplyView::User;
+    } else {
+        botReplyView = BotReplyView::Assistant;
+    }
+    resetBotAutoScroll();
+    markBotDirty(BOT_DIRTY_HEADER | BOT_DIRTY_REPLY | BOT_DIRTY_STATUS);
+}
+
+static void pollBotReplyAutoScroll() {
+    if (botScreen != BotScreen::Chat) return;
+
+    int maxOffset = botReplyMaxScrollOffset();
+    if (maxOffset <= 0) {
+        if (botReplyScrollOffset != 0) {
+            botReplyScrollOffset = 0;
+            markBotDirty(BOT_DIRTY_REPLY | BOT_DIRTY_STATUS);
+        }
+        return;
+    }
+    if (millis() < botAutoScrollPauseUntilMs) return;
+    if (botLastAutoScrollMs != 0 && millis() - botLastAutoScrollMs < rd_scroll_ms) return;
+
+    botLastAutoScrollMs = millis();
+    int next = botReplyScrollOffset + 1;
+    if (next > maxOffset) next = 0;
+    if (next != botReplyScrollOffset) {
+        botReplyScrollOffset = next;
+        markBotDirty(BOT_DIRTY_REPLY | BOT_DIRTY_STATUS);
+    }
 }
 
 static void drawBotHeader() {
@@ -538,8 +587,13 @@ static void drawBotHeader() {
     M5.Lcd.drawString("CORE2GROQ", 6, 4, 2);
     M5.Lcd.setTextColor(connected ? TFT_GREEN : TFT_RED, 0x18C3);
     M5.Lcd.drawString(connected ? "WiFi" : "NoWiFi", 132, 4, 2);
-    M5.Lcd.setTextColor(SW_AMBER, 0x18C3);
-    M5.Lcd.drawString(botScreen == BotScreen::Settings ? "SET" : "BOT", 206, 4, 2);
+    M5.Lcd.fillRoundRect(BOT_VIEW_TOGGLE_X, BOT_VIEW_TOGGLE_Y, BOT_VIEW_TOGGLE_W,
+                         BOT_VIEW_TOGGLE_H, 5, 0x1082);
+    M5.Lcd.drawRoundRect(BOT_VIEW_TOGGLE_X, BOT_VIEW_TOGGLE_Y, BOT_VIEW_TOGGLE_W,
+                         BOT_VIEW_TOGGLE_H, 5, TFT_CYAN);
+    M5.Lcd.setTextColor(SW_AMBER, 0x1082);
+    M5.Lcd.drawCentreString(botScreen == BotScreen::Settings ? "SET" : botCurrentPanelTitle(),
+                            BOT_VIEW_TOGGLE_X + (BOT_VIEW_TOGGLE_W / 2), 6, 2);
     M5.Lcd.setTextColor(TFT_WHITE, 0x18C3);
     M5.Lcd.drawRightString(String(voltage, 2) + "V", 314, 4, 2);
 }
@@ -553,17 +607,18 @@ static void drawBotReplyPanel() {
         M5.Lcd.setTextColor(TFT_CYAN, 0x0841);
         M5.Lcd.drawString("SETTINGS", BOT_REPLY_X + 8, BOT_REPLY_Y + 8, 2);
 
-        const int rowY[] = {58, 92, 126, 160};
-        const char *labels[] = {"Setup", "Personality", "Model", "Back"};
+        const int rowY[] = {50, 76, 102, 128, 154};
+        const char *labels[] = {"Setup", "Personality", "Model", "Scroll", "Back"};
         String values[] = {
             "Open AP setup",
             rdCurrentPersonalityLabel(),
             String(rd_groq_model),
+            rdCurrentScrollSpeedLabel(),
             "Return to chat",
         };
-        for (int i = 0; i < 4; i++) {
+        for (int i = 0; i < 5; i++) {
             uint16_t bg = (i == 0) ? 0x2104 : 0x1082;
-            M5.Lcd.fillRoundRect(BOT_REPLY_X + 8, rowY[i], BOT_REPLY_W - 16, 24, 4, bg);
+            M5.Lcd.fillRoundRect(BOT_REPLY_X + 8, rowY[i], BOT_REPLY_W - 16, 22, 4, bg);
             M5.Lcd.setTextColor(TFT_WHITE, bg);
             M5.Lcd.setTextFont(2);
             M5.Lcd.drawString(labels[i], BOT_REPLY_X + 14, rowY[i] + 4, 2);
@@ -576,33 +631,33 @@ static void drawBotReplyPanel() {
 
     String lines[80];
     int lineCount = 0;
-    fillWrappedLines(clampText(botCurrentReplyText(), 1400), lines, lineCount, 80,
+    fillWrappedLines(clampText(botCurrentPanelText(), 1400), lines, lineCount, 80,
                      botReplyMaxCharsPerLine());
     int visibleLines = botReplyVisibleLines();
     int maxOffset = max(0, lineCount - visibleLines);
     botReplyScrollOffset = constrain(botReplyScrollOffset, 0, maxOffset);
-    int start = max(0, lineCount - visibleLines - botReplyScrollOffset);
+    int start = botReplyScrollOffset;
     int end = min(lineCount, start + visibleLines);
 
     M5.Lcd.setTextFont(2);
     M5.Lcd.setTextColor(TFT_GREEN, 0x0841);
-    M5.Lcd.drawString("BOT", BOT_REPLY_X + 8, BOT_REPLY_Y + 8, 2);
+    M5.Lcd.drawString(botCurrentPanelTitle(), BOT_REPLY_X + 8, BOT_REPLY_Y + 8, 2);
+    M5.Lcd.setTextFont(1);
+    M5.Lcd.setTextColor(SW_AMBER, 0x0841);
+    M5.Lcd.drawRightString(rdCurrentScrollSpeedLabel(), BOT_REPLY_X + BOT_REPLY_W - 8,
+                           BOT_REPLY_Y + 10, 1);
 
     int cursorY = BOT_REPLY_Y + 28;
     for (int i = start; i < end; i++) {
+        if (!lines[i].length()) continue;
         M5.Lcd.drawString(lines[i], BOT_REPLY_X + 8, cursorY, 2);
         cursorY += 16;
     }
 
-    M5.Lcd.setTextFont(1);
-    M5.Lcd.setTextColor(SW_AMBER, 0x0841);
     if (maxOffset > 0) {
-        if (botReplyScrollOffset < maxOffset) {
-            M5.Lcd.drawString(">", BOT_REPLY_X + BOT_REPLY_W - 12, BOT_REPLY_Y + BOT_REPLY_H - 12, 1);
-        }
-        if (botReplyScrollOffset > 0) {
-            M5.Lcd.drawString("<", BOT_REPLY_X + 6, BOT_REPLY_Y + BOT_REPLY_H - 12, 1);
-        }
+        String scrollInfo = String(botReplyScrollOffset + 1) + "/" + String(maxOffset + 1);
+        M5.Lcd.drawRightString(scrollInfo, BOT_REPLY_X + BOT_REPLY_W - 8,
+                               BOT_REPLY_Y + BOT_REPLY_H - 12, 1);
     }
 }
 
@@ -615,19 +670,21 @@ static void drawBotStatusLine() {
         statusLine = "YOU: " + clampText(botUserPreviewMessage, 56);
     }
     M5.Lcd.drawString(statusLine, 12, BOT_STATUS_Y + 1, 1);
-    M5.Lcd.drawRightString(String(rd_record_seconds) + "s max", 306, BOT_STATUS_Y + 1, 1);
+    M5.Lcd.drawRightString(String(rd_record_seconds) + "s / " + rdCurrentScrollSpeedLabel(),
+                           306, BOT_STATUS_Y + 1, 1);
 }
 
 static void drawBotActionButtons() {
-    M5.Lcd.fillRect(0, BOT_ACTION_Y, SCREEN_W, BOT_ACTION_H + 2, TFT_BLACK);
+    M5.Lcd.fillRect(0, BOT_ACTION_Y, SCREEN_W, BOT_ACTION_H + 6, TFT_BLACK);
     const int actionXs[] = {BOT_ACTION_SETUP_X, BOT_ACTION_RADIO_X, BOT_ACTION_NEW_X};
     const char *actionLabels[] = {"SET", "RADIO", "NEW"};
     for (int i = 0; i < 3; i++) {
         M5.Lcd.fillRoundRect(actionXs[i], BOT_ACTION_Y, BOT_ACTION_W, BOT_ACTION_H, 4, 0x1082);
         M5.Lcd.drawRoundRect(actionXs[i], BOT_ACTION_Y, BOT_ACTION_W, BOT_ACTION_H, 4, TFT_CYAN);
         M5.Lcd.setTextColor(TFT_CYAN, 0x1082);
-        M5.Lcd.setTextFont(1);
-        M5.Lcd.drawCentreString(actionLabels[i], actionXs[i] + BOT_ACTION_W / 2, BOT_ACTION_Y + 2, 1);
+        M5.Lcd.setTextFont(2);
+        M5.Lcd.drawCentreString(actionLabels[i], actionXs[i] + BOT_ACTION_W / 2,
+                                BOT_ACTION_Y + 4, 2);
     }
 }
 
@@ -671,10 +728,6 @@ static void setupRadioUi() {
     M5.Lcd.setTextFont(2);
     M5.Lcd.setTextColor(SW_AMBER, SW_HDR_BG);
     M5.Lcd.drawString("M5 SHORTWAVE", 6, 4);
-    if (fmPresent) {
-        M5.Lcd.setTextColor(fmMode ? TFT_GREEN : grays[10], SW_HDR_BG);
-        M5.Lcd.drawString("FM", 96, 4);
-    }
 
     const int divs[] = {SW_LINE1, SW_LINE2, SW_LINE3, SW_LINE4, SW_LINE5};
     for (int i = 0; i < 5; i++) {
@@ -786,13 +839,13 @@ static void drawTicker() {
 }
 
 static void drawSettings() {
-    int numRows = fmPresent ? 4 : 3;
-    int rowH = fmPresent ? 42 : 55;
-    int rowY0 = fmPresent ? 36 : 48;
+    int numRows = 3;
+    int rowH = 55;
+    int rowY0 = 48;
 
-    const char *labels[] = {"Volume", "Bass  ", "Treble", "FM MHz"};
-    int mins[] = {0, -6, -6, static_cast<int>(FM_FREQ_MIN)};
-    int maxs[] = {20, 6, 6, static_cast<int>(FM_FREQ_MAX)};
+    const char *labels[] = {"Volume", "Bass  ", "Treble"};
+    int mins[] = {0, -6, -6};
+    int maxs[] = {20, 6, 6};
 
     M5.Lcd.startWrite();
     M5.Lcd.fillRect(0, 0, SCREEN_W, SCREEN_H, TFT_BLACK);
@@ -818,9 +871,6 @@ static void drawSettings() {
         } else if (i == 2) {
             valInt = settingTreble;
             valStr = String(valInt);
-        } else {
-            valInt = fmFreq;
-            valStr = String(fmFreq / 100.0f, 1);
         }
 
         M5.Lcd.fillRect(20, y - 4, 280, rowH - 6, bg);
@@ -829,8 +879,8 @@ static void drawSettings() {
         M5.Lcd.drawString(valStr, 230, y);
 
         int pos = map(valInt, mins[i], maxs[i], 0, 200);
-        int by = y + (fmPresent ? 16 : 20);
-        int bh = fmPresent ? 8 : 10;
+        int by = y + 20;
+        int bh = 10;
         M5.Lcd.drawRect(30, by, 202, bh, sel ? TFT_GREEN : grays[12]);
         M5.Lcd.fillRect(31, by + 1, 200, bh - 2, TFT_BLACK);
         M5.Lcd.fillRect(31, by + 1, pos, bh - 2, sel ? TFT_GREEN : grays[8]);
@@ -919,10 +969,14 @@ static void finishBotRecording() {
     free(wavPayload);
 
     botPendingUserMessage = transcript;
+    botLastUserMessage = transcript;
     botUserPreviewMessage = transcript;
     botUserPreviewUntilMs = millis() + 3500;
+    botReplyView = BotReplyView::User;
+    resetBotAutoScroll(2500);
     setBotStatus("Sending to Groq...");
-    markBotDirty(BOT_DIRTY_STATUS);
+    markBotDirty(BOT_DIRTY_HEADER | BOT_DIRTY_REPLY | BOT_DIRTY_STATUS);
+    drawBotUi();
 
     String reply;
     if (!rdSendChatMessage(transcript, reply, error)) {
@@ -932,9 +986,10 @@ static void finishBotRecording() {
     }
 
     botPendingUserMessage = "";
-    botReplyScrollOffset = 0;
+    botReplyView = BotReplyView::Assistant;
+    resetBotAutoScroll();
     setBotStatus("Reply received.");
-    markBotDirty(BOT_DIRTY_REPLY | BOT_DIRTY_STATUS);
+    markBotDirty(BOT_DIRTY_HEADER | BOT_DIRTY_REPLY | BOT_DIRTY_STATUS);
 }
 
 static void pollBotRecording() {
@@ -975,10 +1030,6 @@ void setup() {
 
     rdLoadSettings();
     rdLoadChatHistory();
-
-    prefs.begin("core2groq", true);
-    fmFreq = prefs.getUShort("fmfreq", 10110);
-    prefs.end();
 
     M5.Lcd.fillScreen(TFT_BLACK);
     M5.Lcd.setTextSize(2);
@@ -1021,33 +1072,10 @@ void setup() {
     wifiMulti.addAP(rd_wifi_ssid, rd_wifi_pass);
     wifiMulti.run();
 
-    Wire.begin(21, 22);
-    pinMode(SI4713_RST, OUTPUT);
-    digitalWrite(SI4713_RST, HIGH);
-    delay(10);
-    digitalWrite(SI4713_RST, LOW);
-    delay(100);
-    digitalWrite(SI4713_RST, HIGH);
-    delay(150);
-
     M5.Lcd.setCursor(2, 50);
     M5.Lcd.setTextSize(1);
     M5.Lcd.setTextColor(TFT_WHITE);
-    if (si4713.begin()) {
-        fmPresent = true;
-        si4713.powerUp();
-        si4713.setTXpower(115);
-        si4713.tuneFM(fmFreq);
-        si4713.beginRDS(0x1234);
-        si4713.setRDSstation("M5 OTR");
-        si4713.setRDSbuffer("Core2Groq Radio");
-        i2s_driver_uninstall(I2S_NUM_0);
-        audioFM = new Audio(true, 3, I2S_NUM_0);
-        audioFM->setVolume(volume * 2);
-        M5.Lcd.println("FM module detected.");
-    } else {
-        M5.Lcd.println("FM module not present (optional).");
-    }
+    M5.Lcd.println("Radio player ready.");
     delay(400);
 
     xTaskCreatePinnedToCore(audioTask, "audioT", 8192, nullptr, 2, &audioTaskHandle, 0);
@@ -1062,6 +1090,8 @@ void setup() {
         botDirtyRegions = BOT_DIRTY_ALL;
         drawBotUi();
     }
+
+    c2ScheduleLcdInit(4000);
 }
 
 void loop() {
@@ -1137,7 +1167,11 @@ void loop() {
         } else if (edgeTouch) {
             lastTouch = millis();
             haptic();
-            if (botTouchInRect(p, BOT_ACTION_SETUP_X, BOT_ACTION_Y, BOT_ACTION_W, BOT_ACTION_H)) {
+            if (botTouchInRect(p, BOT_VIEW_TOGGLE_X, BOT_VIEW_TOGGLE_Y, BOT_VIEW_TOGGLE_W,
+                               BOT_VIEW_TOGGLE_H)) {
+                toggleBotReplyView();
+            } else if (botTouchInRect(p, BOT_ACTION_SETUP_X, BOT_ACTION_Y, BOT_ACTION_W,
+                                      BOT_ACTION_H)) {
                 toggleBotSettingsMenu();
             } else if (botTouchInRect(p, BOT_ACTION_RADIO_X, BOT_ACTION_Y, BOT_ACTION_W,
                                       BOT_ACTION_H)) {
@@ -1149,20 +1183,22 @@ void loop() {
                 clearBotChat();
             } else if (botTouchInRect(p, BOT_REPLY_X, BOT_REPLY_Y, BOT_REPLY_W, BOT_REPLY_H)) {
                 if (botScreen == BotScreen::Settings) {
-                    if (botTouchInRect(p, BOT_REPLY_X + 8, 58, BOT_REPLY_W - 16, 24)) {
+                    if (botTouchInRect(p, BOT_REPLY_X + 8, 50, BOT_REPLY_W - 16, 22)) {
                         openSetupPortal();
-                    } else if (botTouchInRect(p, BOT_REPLY_X + 8, 92, BOT_REPLY_W - 16, 24)) {
+                    } else if (botTouchInRect(p, BOT_REPLY_X + 8, 76, BOT_REPLY_W - 16, 22)) {
                         cycleBotPersonality(1);
-                    } else if (botTouchInRect(p, BOT_REPLY_X + 8, 126, BOT_REPLY_W - 16, 24)) {
+                    } else if (botTouchInRect(p, BOT_REPLY_X + 8, 102, BOT_REPLY_W - 16, 22)) {
                         cycleBotModel(1);
-                    } else if (botTouchInRect(p, BOT_REPLY_X + 8, 160, BOT_REPLY_W - 16, 24)) {
+                    } else if (botTouchInRect(p, BOT_REPLY_X + 8, 128, BOT_REPLY_W - 16, 22)) {
+                        cycleBotScrollSpeed();
+                    } else if (botTouchInRect(p, BOT_REPLY_X + 8, 154, BOT_REPLY_W - 16, 22)) {
                         toggleBotSettingsMenu();
                     }
                 } else {
                     if (p.x < BOT_REPLY_X + (BOT_REPLY_W / 2)) {
-                        scrollBotReply(1);
-                    } else {
                         scrollBotReply(-1);
+                    } else {
+                        scrollBotReply(1);
                     }
                 }
             }
@@ -1175,7 +1211,11 @@ void loop() {
         botPrevTouch = touchNow;
 
         pollBotRecording();
+        pollBotReplyAutoScroll();
         wifiMulti.run();
+        c2EnsureLcdInit();
+        c2SetLcdMessage(botCurrentPanelText());
+        c2UpdateLcd(false, botRecording, botRecordingStartedMs, rd_record_seconds);
         if (botDrawNeeded) {
             lastDraw = millis();
             drawBotUi();
@@ -1194,7 +1234,7 @@ void loop() {
         }
         if (M5.BtnB.wasPressed()) {
             haptic();
-            settingSel = (settingSel + 1) % (fmPresent ? 4 : 3);
+            settingSel = (settingSel + 1) % 3;
             drawSettings();
         }
         if (M5.BtnC.wasPressed()) {
@@ -1208,7 +1248,7 @@ void loop() {
             setupRadioUi();
             canDraw = true;
         } else if (z == 1) {
-            settingSel = (settingSel + 1) % (fmPresent ? 4 : 3);
+            settingSel = (settingSel + 1) % 3;
             drawSettings();
         } else if (z == 2) {
             settingsIncrement();
@@ -1232,18 +1272,14 @@ void loop() {
         drawTicker();
     }
 
-    static bool fmToggleHandled = false;
-    if (M5.BtnA.pressedFor(1000) && !fmToggleHandled && fmPresent) {
-        fmToggleHandled = true;
-        setAudioMode(!fmMode);
-    }
+    c2EnsureLcdInit();
+    c2SetLcdMessage(songPlaying.length() ? songPlaying : stationNames[chosen]);
+    c2UpdateLcd(true, false, 0, rd_record_seconds);
+
     if (M5.BtnA.wasReleased()) {
-        if (!fmToggleHandled) {
-            haptic();
-            inSettings = true;
-            drawSettings();
-        }
-        fmToggleHandled = false;
+        haptic();
+        inSettings = true;
+        drawSettings();
     }
 
     if (M5.BtnB.wasPressed()) {
@@ -1263,7 +1299,6 @@ void loop() {
             haptic();
             volume = (volume >= 10) ? 0 : volume + 1;
             audio.setVolume(volume * 2);
-            if (audioFM) audioFM->setVolume(volume * 2);
             canDraw = true;
         }
         screenToggleHandled = false;
@@ -1283,7 +1318,6 @@ void loop() {
     } else if (z == 2) {
         volume = (volume >= 10) ? 0 : volume + 1;
         audio.setVolume(volume * 2);
-        if (audioFM) audioFM->setVolume(volume * 2);
         canDraw = true;
     }
 
@@ -1313,9 +1347,6 @@ void audio_showstation(const char *info) {
 void audio_showstreamtitle(const char *info) {
     songPlaying = info;
     canDraw = true;
-    if (fmPresent && info && strlen(info) > 0) {
-        si4713.setRDSbuffer(info);
-    }
 }
 
 void audio_bitrate(const char *info) {

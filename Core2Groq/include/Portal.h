@@ -12,6 +12,7 @@ static const char RD_DEFAULT_PERSONALITY[] =
 static const uint8_t RD_DEFAULT_RECORD_SECONDS = 5;
 static const uint8_t RD_MIN_RECORD_SECONDS = 2;
 static const uint8_t RD_MAX_RECORD_SECONDS = 15;
+static const uint16_t RD_DEFAULT_SCROLL_MS = 700;
 
 struct RdModelOption {
     const char *value;
@@ -22,6 +23,11 @@ struct RdPersonalityPreset {
     const char *id;
     const char *label;
     const char *prompt;
+};
+
+struct RdScrollSpeedOption {
+    uint16_t ms;
+    const char *label;
 };
 
 static constexpr RdModelOption RD_MODEL_OPTIONS[] = {
@@ -59,6 +65,13 @@ static constexpr RdPersonalityPreset RD_PERSONALITY_PRESETS[] = {
      "You are a calm, steady, minimal assistant. Keep replies clear, grounded, and uncluttered. Favor simple wording, practical guidance, and a settled tone."},
 };
 
+static constexpr RdScrollSpeedOption RD_SCROLL_SPEED_OPTIONS[] = {
+    {350, "Fast"},
+    {700, "Normal"},
+    {1100, "Slow"},
+    {1500, "Very Slow"},
+};
+
 static char rd_wifi_ssid[64] = "";
 static char rd_wifi_pass[64] = "";
 static char rd_groq_api_key[128] = "";
@@ -66,6 +79,7 @@ static char rd_groq_model[64] = "";
 static char rd_personality_prompt[512] = "";
 static bool rd_boot_mode_radio = false;
 static uint8_t rd_record_seconds = RD_DEFAULT_RECORD_SECONDS;
+static uint16_t rd_scroll_ms = RD_DEFAULT_SCROLL_MS;
 static bool rd_has_settings = false;
 
 static WebServer *portalServer = nullptr;
@@ -106,6 +120,37 @@ static int rdCurrentPersonalityPresetIndex() {
     return -1;
 }
 
+static uint16_t rdClampScrollMs(int value) {
+    uint16_t best = RD_SCROLL_SPEED_OPTIONS[0].ms;
+    uint16_t bestDistance = abs(value - static_cast<int>(best));
+    for (size_t i = 1; i < sizeof(RD_SCROLL_SPEED_OPTIONS) / sizeof(RD_SCROLL_SPEED_OPTIONS[0]); i++) {
+        uint16_t option = RD_SCROLL_SPEED_OPTIONS[i].ms;
+        uint16_t distance = abs(value - static_cast<int>(option));
+        if (distance < bestDistance) {
+            best = option;
+            bestDistance = distance;
+        }
+    }
+    return best;
+}
+
+static size_t rdScrollSpeedOptionCount() {
+    return sizeof(RD_SCROLL_SPEED_OPTIONS) / sizeof(RD_SCROLL_SPEED_OPTIONS[0]);
+}
+
+static int rdCurrentScrollSpeedIndex() {
+    for (size_t i = 0; i < rdScrollSpeedOptionCount(); i++) {
+        if (rd_scroll_ms == RD_SCROLL_SPEED_OPTIONS[i].ms) {
+            return static_cast<int>(i);
+        }
+    }
+    return 1;
+}
+
+static String rdCurrentScrollSpeedLabel() {
+    return RD_SCROLL_SPEED_OPTIONS[rdCurrentScrollSpeedIndex()].label;
+}
+
 static String rdCurrentPersonalityLabel() {
     int index = rdCurrentPersonalityPresetIndex();
     if (index < 0) return "Custom";
@@ -141,6 +186,8 @@ static void rdLoadSettings() {
     rd_boot_mode_radio = prefs.getBool("bootRadio", false);
     rd_record_seconds = rdClampRecordSeconds(
         static_cast<int>(prefs.getUChar("recordSec", RD_DEFAULT_RECORD_SECONDS)));
+    rd_scroll_ms =
+        rdClampScrollMs(static_cast<int>(prefs.getUShort("scrollMs", RD_DEFAULT_SCROLL_MS)));
     prefs.end();
 
     ssid.toCharArray(rd_wifi_ssid, sizeof(rd_wifi_ssid));
@@ -160,7 +207,7 @@ static void rdLoadSettings() {
 
 static void rdSaveSettings(const char *ssid, const char *pass, const char *groqKey,
                            const char *model, const char *personality,
-                           uint8_t recordSeconds, bool bootModeRadio) {
+                           uint8_t recordSeconds, bool bootModeRadio, uint16_t scrollMs) {
     Preferences prefs;
     prefs.begin("core2groq", false);
     prefs.putString("ssid", ssid ? ssid : "");
@@ -171,6 +218,7 @@ static void rdSaveSettings(const char *ssid, const char *pass, const char *groqK
                     personality && personality[0] ? personality : RD_DEFAULT_PERSONALITY);
     prefs.putBool("bootRadio", bootModeRadio);
     prefs.putUChar("recordSec", rdClampRecordSeconds(recordSeconds));
+    prefs.putUShort("scrollMs", rdClampScrollMs(static_cast<int>(scrollMs)));
     prefs.end();
 
     strlcpy(rd_wifi_ssid, ssid ? ssid : "", sizeof(rd_wifi_ssid));
@@ -183,19 +231,25 @@ static void rdSaveSettings(const char *ssid, const char *pass, const char *groqK
             sizeof(rd_personality_prompt));
     rd_record_seconds = rdClampRecordSeconds(recordSeconds);
     rd_boot_mode_radio = bootModeRadio;
+    rd_scroll_ms = rdClampScrollMs(static_cast<int>(scrollMs));
     rd_has_settings = rd_wifi_ssid[0] != '\0';
 }
 
 static void rdSetActiveModel(const char *model) {
     rdSaveSettings(rd_wifi_ssid, rd_wifi_pass, rd_groq_api_key,
                    model && model[0] ? model : RD_DEFAULT_MODEL,
-                   rd_personality_prompt, rd_record_seconds, rd_boot_mode_radio);
+                   rd_personality_prompt, rd_record_seconds, rd_boot_mode_radio, rd_scroll_ms);
 }
 
 static void rdSetActivePersonalityPrompt(const char *prompt) {
     rdSaveSettings(rd_wifi_ssid, rd_wifi_pass, rd_groq_api_key, rd_groq_model,
                    prompt && prompt[0] ? prompt : RD_DEFAULT_PERSONALITY,
-                   rd_record_seconds, rd_boot_mode_radio);
+                   rd_record_seconds, rd_boot_mode_radio, rd_scroll_ms);
+}
+
+static void rdSetScrollSpeedMs(uint16_t scrollMs) {
+    rdSaveSettings(rd_wifi_ssid, rd_wifi_pass, rd_groq_api_key, rd_groq_model,
+                   rd_personality_prompt, rd_record_seconds, rd_boot_mode_radio, scrollMs);
 }
 
 static void rdShowPortalScreen() {
@@ -303,6 +357,21 @@ static void rdHandleRoot() {
     html += String(rd_record_seconds);
     html +=
         "'>"
+        "<label>Reply Auto-Scroll Speed</label>"
+        "<select name='scrollMs'>";
+    for (size_t i = 0; i < rdScrollSpeedOptionCount(); i++) {
+        html += "<option value='";
+        html += String(RD_SCROLL_SPEED_OPTIONS[i].ms);
+        html += "'";
+        if (rd_scroll_ms == RD_SCROLL_SPEED_OPTIONS[i].ms) {
+            html += " selected";
+        }
+        html += ">";
+        html += RD_SCROLL_SPEED_OPTIONS[i].label;
+        html += "</option>";
+    }
+    html +=
+        "</select>"
         "<label>Default Boot Mode</label>"
         "<select name='bootMode'>"
         "<option value='bot'";
@@ -333,6 +402,7 @@ static void rdHandleSave() {
     String personality = portalServer->arg("personality");
     bool bootModeRadio = portalServer->arg("bootMode") == "radio";
     uint8_t recordSec = rdClampRecordSeconds(portalServer->arg("recordSec").toInt());
+    uint16_t scrollMs = rdClampScrollMs(portalServer->arg("scrollMs").toInt());
 
     if (!ssid.length()) {
         portalServer->send(
@@ -343,7 +413,7 @@ static void rdHandleSave() {
     }
 
     rdSaveSettings(ssid.c_str(), pass.c_str(), groqKey.c_str(), model.c_str(),
-                   personality.c_str(), recordSec, bootModeRadio);
+                   personality.c_str(), recordSec, bootModeRadio, scrollMs);
 
     portalServer->send(
         200, "text/html",
