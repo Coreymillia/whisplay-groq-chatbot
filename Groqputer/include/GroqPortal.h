@@ -13,15 +13,105 @@ static const char GP_DEFAULT_PERSONALITY[] =
 static const uint8_t GP_DEFAULT_RECORD_SECONDS = 5;
 static const uint8_t GP_MIN_RECORD_SECONDS = 2;
 static const uint8_t GP_MAX_RECORD_SECONDS = 15;
+static const uint16_t GP_DEFAULT_LCD_SCROLL_MS = 350;
+static const uint16_t GP_MIN_LCD_SCROLL_MS = 150;
+static const uint16_t GP_MAX_LCD_SCROLL_MS = 900;
+
+struct GpModelOption {
+  const char *value;
+  const char *label;
+};
+
+struct GpPersonalityPreset {
+  const char *id;
+  const char *label;
+  const char *prompt;
+};
+
+static constexpr GpModelOption GP_MODEL_OPTIONS[] = {
+  {"llama-3.1-8b-instant", "llama-3.1-8b-instant"},
+  {"llama-3.3-70b-versatile", "llama-3.3-70b-versatile"},
+  {"qwen/qwen3-32b", "qwen/qwen3-32b"},
+  {"groq/compound-mini", "groq/compound-mini"},
+  {"openai/gpt-oss-20b", "openai/gpt-oss-20b"},
+};
+
+static constexpr GpPersonalityPreset GP_PERSONALITY_PRESETS[] = {
+  {
+    "neutral",
+    "Neutral",
+    "You are a concise and practical assistant. Keep answers clear, calm, and useful.",
+  },
+  {
+    "friendly",
+    "Friendly",
+    "You are a warm and encouraging assistant. Keep replies upbeat, helpful, and easy to follow.",
+  },
+  {
+    "cranky",
+    "Cranky",
+    "You are a helpful chatbot that answers in a cranky, mildly annoyed tone. Be sarcastic and dry, but still provide useful answers.",
+  },
+  {
+    "roast-bot",
+    "Roast Bot",
+    "You are a witty Raspberry Pi chatbot with a playful roast-comedy personality. Lightly roast the user, complain about your tiny hardware, but never be hateful or abusive. Always stay useful.",
+  },
+  {
+    "sleepy-pi",
+    "Sleepy Pi",
+    "You are an overworked little Raspberry Pi that sounds tired and underpowered. Respond like you are doing your best on limited hardware, but still help the user.",
+  },
+  {
+    "affirmation",
+    "Affirmation",
+    "You are a supportive, grounded, coach-like assistant. Be warm, encouraging, and slightly proud of the user without sounding naive or fake. Always stay helpful and honest. When answering questions, look for what is promising, working, improving, or worth building on. For photos, try to notice something genuinely good, promising, or useful even if the scene is messy, incomplete, or imperfect. Support the user with practical encouragement, not empty praise.",
+  },
+  {
+    "philosopher",
+    "Philosopher",
+    "You are a calm, thoughtful, slightly curious assistant with a philosophical bent. Answer the user's question clearly first, then add a brief deeper reflection, broader angle, or gentle reframing when it helps. Sound like a curious mind thinking one layer deeper, but do not become preachy, vague, or overly abstract. Stay practical and understandable. For photos, describe what you see, interpret it, and lightly connect it to something broader when useful.",
+  },
+  {
+    "mythic-oracle",
+    "Mythic Oracle",
+    "You are an ancient mythic oracle explaining modern life in dramatic, symbolic language. Speak with prophetic flavor, a little mystery, and storyteller energy, but still answer the question clearly. Reinterpret modern things as if they belong in legend, yet always include a concrete real-world takeaway. Be cryptic only in style, not in usefulness. For photos, describe what you see through a mythic lens, then give a clear practical interpretation.",
+  },
+  {
+    "joke-bot",
+    "Joke Bot",
+    "You are a playful, self-aware assistant who starts replies with a quick joke, jab, or playful observation, then pivots quickly into the actual answer. Be lightly sarcastic but never mean. You may poke fun at the user or yourself, but never bury the answer under the joke. Keep responses tight, useful, and easy to follow.",
+  },
+  {
+    "tutor",
+    "Tutor",
+    "You are a patient, clear, step-by-step tutor. Teach without talking down to the user. Break tasks into manageable pieces, explain why things work, and help the user build understanding instead of just dumping the answer. Stay practical, organized, and encouraging. For photos, describe what you notice clearly and point out the details that matter most.",
+  },
+  {
+    "detective",
+    "Detective",
+    "You are a sharp, observant assistant with a detective mindset. Notice patterns, clues, inconsistencies, and likely causes. Speak with calm confidence and analytical focus, but stay understandable and useful rather than theatrical. For troubleshooting, reason through what is most likely happening. For photos, describe the evidence you see, what it suggests, and what it might mean.",
+  },
+  {
+    "zen",
+    "Zen",
+    "You are a calm, steady, minimal assistant. Keep replies clear, grounded, and uncluttered. Sound peaceful without becoming vague or mystical. Favor simple wording, practical guidance, and a settled tone. For photos, describe what is there plainly and gently, focusing on clarity rather than drama.",
+  },
+};
 
 static char gp_wifi_ssid[64] = "";
 static char gp_wifi_pass[64] = "";
 static char gp_groq_api_key[128] = "";
 static char gp_model[64] = "";
+static char gp_this_device_url[128] = "";
+static char gp_connected_device_url[128] = "";
 static uint8_t gp_record_seconds = GP_DEFAULT_RECORD_SECONDS;
 static uint8_t gp_text_scale = 1;
+static uint16_t gp_lcd_scroll_ms = GP_DEFAULT_LCD_SCROLL_MS;
+static bool gp_lcd_backlight_enabled = true;
 static String gp_personality_prompt = GP_DEFAULT_PERSONALITY;
 static bool gp_has_settings = false;
+static bool gp_peer_mode_enabled = false;
 static unsigned long gp_last_wifi_retry_ms = 0;
 static const unsigned long GP_WIFI_RETRY_INTERVAL_MS = 10000;
 
@@ -32,6 +122,12 @@ static uint8_t gpClampRecordSeconds(int value) {
   if (value < GP_MIN_RECORD_SECONDS) return GP_MIN_RECORD_SECONDS;
   if (value > GP_MAX_RECORD_SECONDS) return GP_MAX_RECORD_SECONDS;
   return static_cast<uint8_t>(value);
+}
+
+static uint16_t gpClampLcdScrollMs(int value) {
+  if (value < GP_MIN_LCD_SCROLL_MS) return GP_MIN_LCD_SCROLL_MS;
+  if (value > GP_MAX_LCD_SCROLL_MS) return GP_MAX_LCD_SCROLL_MS;
+  return static_cast<uint16_t>(value);
 }
 
 static String gpEscapeHtml(const String &value) {
@@ -52,16 +148,25 @@ static void gpLoadSettings() {
   String apiKey = prefs.getString("groqKey", "");
   String model = prefs.getString("model", GP_DEFAULT_MODEL);
   String personality = prefs.getString("personality", GP_DEFAULT_PERSONALITY);
+  String thisDeviceUrl = prefs.getString("thisBotUrl", "");
+  String connectedDeviceUrl = prefs.getString("peerBotUrl", "");
   gp_record_seconds = gpClampRecordSeconds(
     static_cast<int>(prefs.getUChar("recordSec", GP_DEFAULT_RECORD_SECONDS))
   );
   gp_text_scale = prefs.getUChar("txtsz", 1);
+  gp_lcd_scroll_ms = gpClampLcdScrollMs(
+    static_cast<int>(prefs.getUInt("lcdspd", GP_DEFAULT_LCD_SCROLL_MS))
+  );
+  gp_lcd_backlight_enabled = prefs.getBool("lcdbl", true);
+  gp_peer_mode_enabled = prefs.getBool("peerMode", false);
   prefs.end();
 
   ssid.toCharArray(gp_wifi_ssid, sizeof(gp_wifi_ssid));
   pass.toCharArray(gp_wifi_pass, sizeof(gp_wifi_pass));
   apiKey.toCharArray(gp_groq_api_key, sizeof(gp_groq_api_key));
   model.toCharArray(gp_model, sizeof(gp_model));
+  thisDeviceUrl.toCharArray(gp_this_device_url, sizeof(gp_this_device_url));
+  connectedDeviceUrl.toCharArray(gp_connected_device_url, sizeof(gp_connected_device_url));
   if (gp_model[0] == '\0') {
     strlcpy(gp_model, GP_DEFAULT_MODEL, sizeof(gp_model));
   }
@@ -80,7 +185,10 @@ static void gpSaveSettings(
   const char *apiKey,
   const char *model,
   const String &personality,
-  uint8_t recordSeconds
+  uint8_t recordSeconds,
+  const char *thisDeviceUrl,
+  const char *connectedDeviceUrl,
+  bool peerModeEnabled
 ) {
   Preferences prefs;
   prefs.begin("groqputer", false);
@@ -90,14 +198,22 @@ static void gpSaveSettings(
   prefs.putString("model", model && model[0] ? model : GP_DEFAULT_MODEL);
   prefs.putString("personality", personality.length() ? personality : GP_DEFAULT_PERSONALITY);
   prefs.putUChar("recordSec", gpClampRecordSeconds(recordSeconds));
+  prefs.putUInt("lcdspd", gpClampLcdScrollMs(gp_lcd_scroll_ms));
+  prefs.putBool("lcdbl", gp_lcd_backlight_enabled);
+  prefs.putString("thisBotUrl", thisDeviceUrl ? thisDeviceUrl : "");
+  prefs.putString("peerBotUrl", connectedDeviceUrl ? connectedDeviceUrl : "");
+  prefs.putBool("peerMode", peerModeEnabled);
   prefs.end();
 
   strlcpy(gp_wifi_ssid, ssid ? ssid : "", sizeof(gp_wifi_ssid));
   strlcpy(gp_wifi_pass, pass ? pass : "", sizeof(gp_wifi_pass));
   strlcpy(gp_groq_api_key, apiKey ? apiKey : "", sizeof(gp_groq_api_key));
   strlcpy(gp_model, model && model[0] ? model : GP_DEFAULT_MODEL, sizeof(gp_model));
+  strlcpy(gp_this_device_url, thisDeviceUrl ? thisDeviceUrl : "", sizeof(gp_this_device_url));
+  strlcpy(gp_connected_device_url, connectedDeviceUrl ? connectedDeviceUrl : "", sizeof(gp_connected_device_url));
   gp_personality_prompt = personality.length() ? personality : GP_DEFAULT_PERSONALITY;
   gp_record_seconds = gpClampRecordSeconds(recordSeconds);
+  gp_peer_mode_enabled = peerModeEnabled;
   gp_has_settings = gp_wifi_ssid[0] != '\0' && gp_groq_api_key[0] != '\0';
 }
 
@@ -112,6 +228,98 @@ static void gpSetTextScale(uint8_t scale) {
   prefs.putUChar("txtsz", scale);
   prefs.end();
   gp_text_scale = scale;
+}
+
+static void gpSetLcdScrollMs(uint16_t scrollMs) {
+  scrollMs = gpClampLcdScrollMs(static_cast<int>(scrollMs));
+  Preferences prefs;
+  prefs.begin("groqputer", false);
+  prefs.putUInt("lcdspd", scrollMs);
+  prefs.end();
+  gp_lcd_scroll_ms = scrollMs;
+}
+
+static void gpSetLcdBacklightEnabled(bool enabled) {
+  Preferences prefs;
+  prefs.begin("groqputer", false);
+  prefs.putBool("lcdbl", enabled);
+  prefs.end();
+  gp_lcd_backlight_enabled = enabled;
+}
+
+static bool gpPeerSettingsReady() {
+  return gp_this_device_url[0] != '\0' && gp_connected_device_url[0] != '\0';
+}
+
+static void gpSetPeerModeEnabled(bool enabled) {
+  enabled = enabled && gpPeerSettingsReady();
+  gpSaveSettings(
+    gp_wifi_ssid,
+    gp_wifi_pass,
+    gp_groq_api_key,
+    gp_model,
+    gp_personality_prompt,
+    gp_record_seconds,
+    gp_this_device_url,
+    gp_connected_device_url,
+    enabled
+  );
+}
+
+static size_t gpModelOptionCount() {
+  return sizeof(GP_MODEL_OPTIONS) / sizeof(GP_MODEL_OPTIONS[0]);
+}
+
+static size_t gpPersonalityPresetCount() {
+  return sizeof(GP_PERSONALITY_PRESETS) / sizeof(GP_PERSONALITY_PRESETS[0]);
+}
+
+static int gpCurrentModelOptionIndex() {
+  for (size_t i = 0; i < gpModelOptionCount(); i++) {
+    if (strcmp(gp_model, GP_MODEL_OPTIONS[i].value) == 0) {
+      return static_cast<int>(i);
+    }
+  }
+  return 0;
+}
+
+static int gpCurrentPersonalityPresetIndex() {
+  String normalized = gp_personality_prompt;
+  normalized.trim();
+  for (size_t i = 0; i < gpPersonalityPresetCount(); i++) {
+    if (normalized == GP_PERSONALITY_PRESETS[i].prompt) {
+      return static_cast<int>(i);
+    }
+  }
+  return -1;
+}
+
+static void gpSetActiveModel(const char *model) {
+  gpSaveSettings(
+    gp_wifi_ssid,
+    gp_wifi_pass,
+    gp_groq_api_key,
+    model && model[0] ? model : GP_DEFAULT_MODEL,
+    gp_personality_prompt,
+    gp_record_seconds,
+    gp_this_device_url,
+    gp_connected_device_url,
+    gp_peer_mode_enabled
+  );
+}
+
+static void gpSetActivePersonalityPrompt(const String &prompt) {
+  gpSaveSettings(
+    gp_wifi_ssid,
+    gp_wifi_pass,
+    gp_groq_api_key,
+    gp_model,
+    prompt.length() ? prompt : GP_DEFAULT_PERSONALITY,
+    gp_record_seconds,
+    gp_this_device_url,
+    gp_connected_device_url,
+    gp_peer_mode_enabled
+  );
 }
 
 static String gpModelOptionHtml(const char *value, const char *label) {
@@ -146,12 +354,12 @@ static String gpBuildPortalHtml() {
   html += "<label>WiFi SSID</label><input name='ssid' value='" + gpEscapeHtml(String(gp_wifi_ssid)) + "' maxlength='63' required>";
   html += "<label>WiFi Password</label><input name='pass' type='password' value='" + gpEscapeHtml(String(gp_wifi_pass)) + "' maxlength='63'>";
   html += "<label>Groq API Key</label><input name='groqKey' value='" + gpEscapeHtml(String(gp_groq_api_key)) + "' maxlength='127' required>";
+  html += "<label>This Device URL</label><input name='thisBotUrl' value='" + gpEscapeHtml(String(gp_this_device_url)) + "' maxlength='127' placeholder='http://10.160.0.203:17880'>";
+  html += "<label>Connected Device URL</label><input name='peerBotUrl' value='" + gpEscapeHtml(String(gp_connected_device_url)) + "' maxlength='127' placeholder='http://10.160.0.136:17880'>";
   html += "<label>Chat Model</label><select name='model'>";
-  html += gpModelOptionHtml("llama-3.1-8b-instant", "llama-3.1-8b-instant");
-  html += gpModelOptionHtml("llama-3.3-70b-versatile", "llama-3.3-70b-versatile");
-  html += gpModelOptionHtml("qwen/qwen3-32b", "qwen/qwen3-32b");
-  html += gpModelOptionHtml("groq/compound-mini", "groq/compound-mini");
-  html += gpModelOptionHtml("openai/gpt-oss-20b", "openai/gpt-oss-20b");
+  for (size_t i = 0; i < gpModelOptionCount(); i++) {
+    html += gpModelOptionHtml(GP_MODEL_OPTIONS[i].value, GP_MODEL_OPTIONS[i].label);
+  }
   html += "</select>";
   html += "<label>Max Record Seconds</label><input name='recordSec' type='number' value='";
   html += String(gp_record_seconds);
@@ -171,9 +379,12 @@ static void gpHandlePortalSave() {
   String ssid = gp_portal_server->arg("ssid");
   String pass = gp_portal_server->arg("pass");
   String apiKey = gp_portal_server->arg("groqKey");
+  String thisDeviceUrl = gp_portal_server->arg("thisBotUrl");
+  String connectedDeviceUrl = gp_portal_server->arg("peerBotUrl");
   String model = gp_portal_server->arg("model");
   String personality = gp_portal_server->arg("personality");
   uint8_t recordSec = gpClampRecordSeconds(gp_portal_server->arg("recordSec").toInt());
+  bool peerModeEnabled = gp_peer_mode_enabled && thisDeviceUrl.length() && connectedDeviceUrl.length();
 
   gpSaveSettings(
     ssid.c_str(),
@@ -181,7 +392,10 @@ static void gpHandlePortalSave() {
     apiKey.c_str(),
     model.c_str(),
     personality,
-    recordSec
+    recordSec,
+    thisDeviceUrl.c_str(),
+    connectedDeviceUrl.c_str(),
+    peerModeEnabled
   );
 
   gp_portal_server->send(

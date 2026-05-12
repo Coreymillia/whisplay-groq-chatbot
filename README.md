@@ -28,7 +28,7 @@ This project starts from the official PiSugar Whisplay chatbot, but is being tai
 - **Captured still image on HAT display:** working
 - **Companion CYD touchscreen client:** working as a polished multi-mode touch companion with chat, capture, gallery, and settings screens
 - **Companion Cardputer client:** working as an early rough-start build, with text chat confirmed and more settings/UI work planned
-- **Groqputer standalone Cardputer firmware:** early standalone Groq Cardputer build now running in this repo, with more tuning planned before it eventually tries to connect back into the Whisplay ecosystem
+- **Groqputer standalone Cardputer firmware:** standalone Groq Cardputer firmware now running in this repo, with readable split chat views, direct Groq chat/Whisper, optional 16x2 I2C LCD output, on-device bot settings, and early same-LAN Whisplay relay testing
 - **Standalone GroqBotNet Pi Zero node:** working as a separate same-network experiment with browser chat plus Mini PiTFT output
 - **Web simulator/debug UI:** still available at `http://<host-or-pi-ip>:17880`
 
@@ -255,17 +255,73 @@ The first Groqputer target is intentionally narrow:
 
 That means `Groqputer/` is **not** trying to be a full Whisplay port. It is meant to become a **small standalone Groq Cardputer** first, then later explore tighter Whisplay integration once the standalone firmware is stable.
 
+### Current Groqputer firmware highlights
+
+- **Standalone runtime:** the Cardputer can boot from saved Wi-Fi settings, talk directly to Groq, and keep a small local chat history without depending on a Whisplay host.
+- **Readable Cardputer UI:** Groqputer now uses separate incoming and outgoing message views instead of the earlier cramped mixed pane, with larger text and better manual navigation.
+- **Reduced screen flicker:** the Cardputer UI now redraws by region instead of repainting the whole screen for routine updates.
+- **Voice input:** hold **BtnA** to record, then Groq Whisper transcription is sent into either the local Groq path or the configured peer test path.
+- **On-device bot settings:** model and personality can now be changed from the Cardputer itself without reopening the AP.
+- **Whisplay personality parity:** the current Groqputer bot-settings menu includes the same preset personalities used by the Whisplay HAT/browser stack: Neutral, Friendly, Cranky, Roast Bot, Sleepy Pi, Affirmation, Philosopher, Mythic Oracle, Joke Bot, Tutor, Detective, and Zen.
+- **Optional external LCD:** a 16x2 I2C HD44780 LCD with backpack can mirror compact status on line 1 and scroll incoming bot replies on line 2.
+- **Local LCD tuning:** the Cardputer can adjust the LCD marquee speed, remember LCD backlight on/off, and save those preferences in local storage.
+- **Peer-device groundwork:** the setup AP now includes **This Device URL** and **Connected Device URL**, and Groqputer can test a simple one-shot same-LAN relay path against a Whisplay node.
+- **M5Burner-ready image:** `Groqputer/Groqputer_M5Cardputer-MERGED.bin` is now included as a merged bootloader+partition+app firmware image for easier flashing workflows.
+
+### Current Groqputer setup / test notes
+
+- Use the setup AP to save:
+  - Wi-Fi SSID/password
+  - Groq API key
+  - chat model
+  - personality prompt
+  - max record seconds
+  - **This Device URL**
+  - **Connected Device URL**
+- For Whisplay relay testing, the **Connected Device URL** should point at the Whisplay browser base URL, for example:
+  - `http://10.160.0.136:17880`
+- When **connected-device mode** is enabled, Groqputer currently sends text into the peer's normal `/api/input/text` path and reads the reply back from the peer state. That means it should use **the personality currently active on the Whisplay side**.
+- This is currently a **simple relay test path**, not the full dedicated BotNet conversation engine yet. It is meant for practical Cardputer-to-Whisplay bring-up first.
+
 ### Current Groqputer hotkeys
 
 - **Enter** = send the current typed message
 - **Hold BtnA** = record a voice message
 - **Fn+A** = open the setup AP
 - **Fn+M** = switch the main chat window to **incoming** history
-- **Fn+S** = switch the main chat window to **outgoing** history
+- **Fn+O** = switch the main chat window to **outgoing** history
+- **Fn+S** = open or close the **settings** screen
+- **Fn+B** = open or close the **bot settings** screen for model and personality
+- **Fn+C** = toggle the saved connected-device / LAN mode on or off
+- **Fn+1** / **Fn+2** = turn the external LCD backlight off or on
 - **Fn+N** = start a new chat / clear the active conversation
 - **Fn+;** = scroll the current history view one direction
 - **Fn+.** = scroll the current history view the other direction
+- **Fn+,** / **Fn+/** = slow down or speed up the external LCD marquee
 - **Fn++** / **Fn+-** = increase or decrease Cardputer text size
+
+When **Bot Settings** is open:
+
+- **Fn+;** / **Fn+.** = move between **Model** and **Personality**
+- **Fn+,** / **Fn+/** = cycle the selected value and save it immediately
+
+### Current Groqputer external LCD notes
+
+- target module: **16x2 HD44780 LCD with I2C backpack**
+- intended Grove wiring path:
+  - **G** = ground
+  - **5V** = power
+  - **G1** = SDA
+  - **G2** = SCL
+- line 1 shows compact status such as Wi-Fi/record/model info
+- line 2 scrolls the latest **incoming** bot reply only
+
+### Groqputer near-term future work
+
+- add a **daily local message / reply counter** for Groqputer, likely on the LCD top line
+- revisit and fix the broken **Whisplay-side daily request / RPD display**
+- decide how far to take the Cardputer-to-Whisplay **peer / BotNet** path beyond the current relay test mode
+- keep improving the standalone Cardputer UX first, then tighten integration with the Whisplay ecosystem later
 
 ## Why `GroqBotNet/` is also in this repo
 

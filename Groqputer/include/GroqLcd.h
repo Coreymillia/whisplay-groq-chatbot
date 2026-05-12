@@ -59,8 +59,17 @@ static void gpInitLcd() {
   gp_lcd->setCursor(0, 1);
   gp_lcd->print("Booting...      ");
   gp_lcd_ready = true;
+  if (gp_lcd_backlight_enabled) {
+    gp_lcd->backlight();
+  } else {
+    gp_lcd->noBacklight();
+  }
   gp_lcd_last_scroll_ms = millis();
   gp_lcd_last_status_ms = 0;
+}
+
+static bool gpIsLcdReady() {
+  return gp_lcd_ready;
 }
 
 static String gpBuildLcdStatusLine(
@@ -139,6 +148,12 @@ static void gpUpdateLcd(
 ) {
   if (!gp_lcd_ready || !gp_lcd) return;
 
+  if (gp_lcd_backlight_enabled) {
+    gp_lcd->backlight();
+  } else {
+    gp_lcd->noBacklight();
+  }
+
   unsigned long now = millis();
   String nextStatus = gpBuildLcdStatusLine(recordingActive, recordingStartedMs, recordSeconds);
   if (nextStatus != gp_lcd_status_line || now - gp_lcd_last_status_ms >= 1000) {
@@ -150,7 +165,7 @@ static void gpUpdateLcd(
 
   bool advanceScroll = false;
   if (gp_lcd_message_source.length() > GP_LCD_COLS) {
-    if (gp_lcd_last_scroll_ms == 0 || now - gp_lcd_last_scroll_ms >= 350) {
+    if (gp_lcd_last_scroll_ms == 0 || now - gp_lcd_last_scroll_ms >= gp_lcd_scroll_ms) {
       advanceScroll = true;
       gp_lcd_last_scroll_ms = now;
     }

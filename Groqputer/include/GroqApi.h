@@ -13,6 +13,8 @@ static const char GP_GROQ_WHISPER_HOST[] = "api.groq.com";
 static const char GP_GROQ_WHISPER_PATH[] = "/openai/v1/audio/transcriptions";
 static const char GP_GROQ_WHISPER_MODEL[] = "whisper-large-v3-turbo";
 static const size_t GP_MAX_HISTORY_PAIRS = 5;
+static const unsigned long GP_PEER_REPLY_TIMEOUT_MS = 45000;
+static const unsigned long GP_PEER_POLL_INTERVAL_MS = 700;
 
 static String gp_chat_history = "[]";
 static size_t gp_message_pairs = 0;
@@ -37,6 +39,165 @@ static void gpResetChatHistory() {
   gp_chat_history = "[]";
   gp_message_pairs = 0;
   gpPersistChatHistory();
+}
+
+static void gpAppendChatHistoryPair(const String &userMessage, const String &replyMessage) {
+  JsonDocument historyDoc;
+  deserializeJson(historyDoc, gp_chat_history);
+  JsonArray history = historyDoc.to<JsonArray>();
+
+  JsonObject userEntry = history.add<JsonObject>();
+  userEntry["role"] = "user";
+  userEntry["content"] = userMessage;
+
+  JsonObject assistantEntry = history.add<JsonObject>();
+  assistantEntry["role"] = "assistant";
+  assistantEntry["content"] = replyMessage;
+
+  gp_message_pairs += 1;
+  while (gp_message_pairs > GP_MAX_HISTORY_PAIRS && history.size() >= 2) {
+    history.remove(0);
+    history.remove(0);
+    gp_message_pairs -= 1;
+  }
+
+  gp_chat_history = "";
+  serializeJson(history, gp_chat_history);
+  gpPersistChatHistory();
+}
+
+static String gpNormalizePeerUrl(const String &value) {
+  String normalized = value;
+  normalized.trim();
+  while (normalized.endsWith("/")) {
+    normalized.remove(normalized.length() - 1);
+  }
+  return normalized;
+}
+
+static bool gpFetchPeerState(
+  const String &peerBaseUrl,
+  String &statusOut,
+  String &textOut,
+  String &errorOut
+) {
+  statusOut = "";
+  textOut = "";
+  errorOut = "";
+
+  HTTPClient http;
+  if (!http.begin(peerBaseUrl + "/api/state")) {
+    errorOut = "Peer state request failed.";
+    return false;
+  }
+  http.setTimeout(12000);
+  int code = http.GET();
+  String response = http.getString();
+  http.end();
+
+  if (code < 200 || code >= 300) {
+    errorOut = response.length() ? response : String("Peer state HTTP ") + code;
+    return false;
+  }
+
+  JsonDocument doc;
+  if (deserializeJson(doc, response)) {
+    errorOut = "Peer state parse failed.";
+    return false;
+  }
+
+  bool ready = doc["ready"] | false;
+  if (!ready) {
+    errorOut = "Peer is not ready.";
+    return false;
+  }
+
+  statusOut = String(doc["status"] | "");
+  textOut = String(doc["text"] | "");
+  textOut.trim();
+  return true;
+}
+
+static bool gpSendPeerChatMessage(const String &userMessage, String &replyOut, String &errorOut) {
+  replyOut = "";
+  errorOut = "";
+  if (!gp_peer_mode_enabled) {
+    errorOut = "Connected device mode is off.";
+    return false;
+  }
+  if (!gpPeerSettingsReady()) {
+    errorOut = "Connected device URLs are not set.";
+    return false;
+  }
+
+  const String peerBaseUrl = gpNormalizePeerUrl(String(gp_connected_device_url));
+  if (!peerBaseUrl.length()) {
+    errorOut = "Connected device URL is empty.";
+    return false;
+  }
+
+  String initialStatus;
+  String initialText;
+  String stateError;
+  gpFetchPeerState(peerBaseUrl, initialStatus, initialText, stateError);
+
+  HTTPClient http;
+  if (!http.begin(peerBaseUrl + "/api/input/text")) {
+    errorOut = "Connected device request failed.";
+    return false;
+  }
+  http.addHeader("Content-Type", "application/json");
+  http.setTimeout(15000);
+
+  JsonDocument requestDoc;
+  requestDoc["text"] = userMessage;
+  String payload;
+  serializeJson(requestDoc, payload);
+  int code = http.POST(payload);
+  String response = http.getString();
+  http.end();
+
+  if (code < 200 || code >= 300) {
+    errorOut = response.length() ? response : String("Connected device HTTP ") + code;
+    return false;
+  }
+
+  JsonDocument responseDoc;
+  if (!deserializeJson(responseDoc, response) && (responseDoc["ok"] | true) == false) {
+    errorOut = String(responseDoc["error"] | "Connected device rejected the message.");
+    return false;
+  }
+
+  String latestReply;
+  unsigned long deadline = millis() + GP_PEER_REPLY_TIMEOUT_MS;
+  while (millis() < deadline) {
+    delay(GP_PEER_POLL_INTERVAL_MS);
+
+    String status;
+    String text;
+    if (!gpFetchPeerState(peerBaseUrl, status, text, stateError)) {
+      continue;
+    }
+
+    if (text.length() && text != initialText) {
+      latestReply = text;
+    }
+
+    if (latestReply.length() && !status.equalsIgnoreCase("answering")) {
+      replyOut = latestReply;
+      gpAppendChatHistoryPair(userMessage, replyOut);
+      return true;
+    }
+  }
+
+  if (latestReply.length()) {
+    replyOut = latestReply;
+    gpAppendChatHistoryPair(userMessage, replyOut);
+    return true;
+  }
+
+  errorOut = stateError.length() ? stateError : "Connected device timed out.";
+  return false;
 }
 
 static bool gpTranscribeWav(const uint8_t *wavData, size_t wavLength, String &transcriptOut, String &errorOut) {
@@ -191,27 +352,6 @@ static bool gpSendChatMessage(const String &userMessage, String &replyOut, Strin
     return false;
   }
 
-  JsonDocument historyDoc;
-  deserializeJson(historyDoc, gp_chat_history);
-  JsonArray history = historyDoc.to<JsonArray>();
-
-  JsonObject userEntry = history.add<JsonObject>();
-  userEntry["role"] = "user";
-  userEntry["content"] = userMessage;
-
-  JsonObject assistantEntry = history.add<JsonObject>();
-  assistantEntry["role"] = "assistant";
-  assistantEntry["content"] = replyOut;
-
-  gp_message_pairs += 1;
-  while (gp_message_pairs > GP_MAX_HISTORY_PAIRS && history.size() >= 2) {
-    history.remove(0);
-    history.remove(0);
-    gp_message_pairs -= 1;
-  }
-
-  gp_chat_history = "";
-  serializeJson(history, gp_chat_history);
-  gpPersistChatHistory();
+  gpAppendChatHistoryPair(userMessage, replyOut);
   return true;
 }
