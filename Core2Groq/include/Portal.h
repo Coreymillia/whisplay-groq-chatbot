@@ -1,0 +1,401 @@
+#pragma once
+
+#include <Arduino.h>
+#include <DNSServer.h>
+#include <Preferences.h>
+#include <WebServer.h>
+
+static const char RD_AP_SSID[] = "Core2Groq_Setup";
+static const char RD_DEFAULT_MODEL[] = "llama-3.1-8b-instant";
+static const char RD_DEFAULT_PERSONALITY[] =
+    "You are a compact, helpful Groq-powered M5Core2 assistant. Keep replies concise, clear, and friendly.";
+static const uint8_t RD_DEFAULT_RECORD_SECONDS = 5;
+static const uint8_t RD_MIN_RECORD_SECONDS = 2;
+static const uint8_t RD_MAX_RECORD_SECONDS = 15;
+
+struct RdModelOption {
+    const char *value;
+    const char *label;
+};
+
+struct RdPersonalityPreset {
+    const char *id;
+    const char *label;
+    const char *prompt;
+};
+
+static constexpr RdModelOption RD_MODEL_OPTIONS[] = {
+    {"llama-3.1-8b-instant", "llama-3.1-8b-instant"},
+    {"llama-3.3-70b-versatile", "llama-3.3-70b-versatile"},
+    {"qwen/qwen3-32b", "qwen/qwen3-32b"},
+    {"groq/compound-mini", "groq/compound-mini"},
+    {"openai/gpt-oss-20b", "openai/gpt-oss-20b"},
+};
+
+static constexpr RdPersonalityPreset RD_PERSONALITY_PRESETS[] = {
+    {"neutral", "Neutral",
+     "You are a concise and practical assistant. Keep answers clear, calm, and useful."},
+    {"friendly", "Friendly",
+     "You are a warm and encouraging assistant. Keep replies upbeat, helpful, and easy to follow."},
+    {"cranky", "Cranky",
+     "You are a helpful chatbot that answers in a cranky, mildly annoyed tone. Be sarcastic and dry, but still provide useful answers."},
+    {"roast-bot", "Roast Bot",
+     "You are a witty Raspberry Pi chatbot with a playful roast-comedy personality. Lightly roast the user, complain about your tiny hardware, but never be hateful or abusive. Always stay useful."},
+    {"sleepy-pi", "Sleepy Pi",
+     "You are an overworked little Raspberry Pi that sounds tired and underpowered. Respond like you are doing your best on limited hardware, but still help the user."},
+    {"affirmation", "Affirmation",
+     "You are a supportive, grounded, coach-like assistant. Be warm, encouraging, and slightly proud of the user without sounding naive or fake. Always stay helpful and honest. When answering questions, look for what is promising, working, improving, or worth building on."},
+    {"philosopher", "Philosopher",
+     "You are a calm, thoughtful, slightly curious assistant with a philosophical bent. Answer the user's question clearly first, then add a brief deeper reflection, broader angle, or gentle reframing when it helps."},
+    {"mythic-oracle", "Mythic Oracle",
+     "You are an ancient mythic oracle explaining modern life in dramatic, symbolic language. Speak with prophetic flavor, a little mystery, and storyteller energy, but still answer the question clearly."},
+    {"joke-bot", "Joke Bot",
+     "You are a playful, self-aware assistant who starts replies with a quick joke, jab, or playful observation, then pivots quickly into the actual answer. Keep responses tight, useful, and easy to follow."},
+    {"tutor", "Tutor",
+     "You are a patient, clear, step-by-step tutor. Teach without talking down to the user. Break tasks into manageable pieces and help the user build understanding instead of just dumping the answer."},
+    {"detective", "Detective",
+     "You are a sharp, observant assistant with a detective mindset. Notice patterns, clues, inconsistencies, and likely causes. Speak with calm confidence and analytical focus."},
+    {"zen", "Zen",
+     "You are a calm, steady, minimal assistant. Keep replies clear, grounded, and uncluttered. Favor simple wording, practical guidance, and a settled tone."},
+};
+
+static char rd_wifi_ssid[64] = "";
+static char rd_wifi_pass[64] = "";
+static char rd_groq_api_key[128] = "";
+static char rd_groq_model[64] = "";
+static char rd_personality_prompt[512] = "";
+static bool rd_boot_mode_radio = false;
+static uint8_t rd_record_seconds = RD_DEFAULT_RECORD_SECONDS;
+static bool rd_has_settings = false;
+
+static WebServer *portalServer = nullptr;
+static DNSServer *portalDNS = nullptr;
+static bool portalDone = false;
+
+static uint8_t rdClampRecordSeconds(int value) {
+    if (value < RD_MIN_RECORD_SECONDS) return RD_MIN_RECORD_SECONDS;
+    if (value > RD_MAX_RECORD_SECONDS) return RD_MAX_RECORD_SECONDS;
+    return static_cast<uint8_t>(value);
+}
+
+static size_t rdModelOptionCount() {
+    return sizeof(RD_MODEL_OPTIONS) / sizeof(RD_MODEL_OPTIONS[0]);
+}
+
+static size_t rdPersonalityPresetCount() {
+    return sizeof(RD_PERSONALITY_PRESETS) / sizeof(RD_PERSONALITY_PRESETS[0]);
+}
+
+static int rdCurrentModelIndex() {
+    for (size_t i = 0; i < rdModelOptionCount(); i++) {
+        if (strcmp(rd_groq_model, RD_MODEL_OPTIONS[i].value) == 0) {
+            return static_cast<int>(i);
+        }
+    }
+    return 0;
+}
+
+static int rdCurrentPersonalityPresetIndex() {
+    String normalized = rd_personality_prompt;
+    normalized.trim();
+    for (size_t i = 0; i < rdPersonalityPresetCount(); i++) {
+        if (normalized == RD_PERSONALITY_PRESETS[i].prompt) {
+            return static_cast<int>(i);
+        }
+    }
+    return -1;
+}
+
+static String rdCurrentPersonalityLabel() {
+    int index = rdCurrentPersonalityPresetIndex();
+    if (index < 0) return "Custom";
+    return RD_PERSONALITY_PRESETS[index].label;
+}
+
+static bool rdHasBotSettingsReady() {
+    return rd_groq_api_key[0] != '\0';
+}
+
+static bool rdBootsToRadio() {
+    return rd_boot_mode_radio;
+}
+
+static String rdEscapeHtml(const String &value) {
+    String escaped = value;
+    escaped.replace("&", "&amp;");
+    escaped.replace("\"", "&quot;");
+    escaped.replace("'", "&#39;");
+    escaped.replace("<", "&lt;");
+    escaped.replace(">", "&gt;");
+    return escaped;
+}
+
+static void rdLoadSettings() {
+    Preferences prefs;
+    prefs.begin("core2groq", true);
+    String ssid = prefs.getString("ssid", "");
+    String pass = prefs.getString("pass", "");
+    String groqKey = prefs.getString("groqKey", "");
+    String model = prefs.getString("model", RD_DEFAULT_MODEL);
+    String personality = prefs.getString("personality", RD_DEFAULT_PERSONALITY);
+    rd_boot_mode_radio = prefs.getBool("bootRadio", false);
+    rd_record_seconds = rdClampRecordSeconds(
+        static_cast<int>(prefs.getUChar("recordSec", RD_DEFAULT_RECORD_SECONDS)));
+    prefs.end();
+
+    ssid.toCharArray(rd_wifi_ssid, sizeof(rd_wifi_ssid));
+    pass.toCharArray(rd_wifi_pass, sizeof(rd_wifi_pass));
+    groqKey.toCharArray(rd_groq_api_key, sizeof(rd_groq_api_key));
+    model.toCharArray(rd_groq_model, sizeof(rd_groq_model));
+    personality.toCharArray(rd_personality_prompt, sizeof(rd_personality_prompt));
+
+    if (rd_groq_model[0] == '\0') {
+        strlcpy(rd_groq_model, RD_DEFAULT_MODEL, sizeof(rd_groq_model));
+    }
+    if (rd_personality_prompt[0] == '\0') {
+        strlcpy(rd_personality_prompt, RD_DEFAULT_PERSONALITY, sizeof(rd_personality_prompt));
+    }
+    rd_has_settings = rd_wifi_ssid[0] != '\0';
+}
+
+static void rdSaveSettings(const char *ssid, const char *pass, const char *groqKey,
+                           const char *model, const char *personality,
+                           uint8_t recordSeconds, bool bootModeRadio) {
+    Preferences prefs;
+    prefs.begin("core2groq", false);
+    prefs.putString("ssid", ssid ? ssid : "");
+    prefs.putString("pass", pass ? pass : "");
+    prefs.putString("groqKey", groqKey ? groqKey : "");
+    prefs.putString("model", model && model[0] ? model : RD_DEFAULT_MODEL);
+    prefs.putString("personality",
+                    personality && personality[0] ? personality : RD_DEFAULT_PERSONALITY);
+    prefs.putBool("bootRadio", bootModeRadio);
+    prefs.putUChar("recordSec", rdClampRecordSeconds(recordSeconds));
+    prefs.end();
+
+    strlcpy(rd_wifi_ssid, ssid ? ssid : "", sizeof(rd_wifi_ssid));
+    strlcpy(rd_wifi_pass, pass ? pass : "", sizeof(rd_wifi_pass));
+    strlcpy(rd_groq_api_key, groqKey ? groqKey : "", sizeof(rd_groq_api_key));
+    strlcpy(rd_groq_model, model && model[0] ? model : RD_DEFAULT_MODEL,
+            sizeof(rd_groq_model));
+    strlcpy(rd_personality_prompt,
+            personality && personality[0] ? personality : RD_DEFAULT_PERSONALITY,
+            sizeof(rd_personality_prompt));
+    rd_record_seconds = rdClampRecordSeconds(recordSeconds);
+    rd_boot_mode_radio = bootModeRadio;
+    rd_has_settings = rd_wifi_ssid[0] != '\0';
+}
+
+static void rdSetActiveModel(const char *model) {
+    rdSaveSettings(rd_wifi_ssid, rd_wifi_pass, rd_groq_api_key,
+                   model && model[0] ? model : RD_DEFAULT_MODEL,
+                   rd_personality_prompt, rd_record_seconds, rd_boot_mode_radio);
+}
+
+static void rdSetActivePersonalityPrompt(const char *prompt) {
+    rdSaveSettings(rd_wifi_ssid, rd_wifi_pass, rd_groq_api_key, rd_groq_model,
+                   prompt && prompt[0] ? prompt : RD_DEFAULT_PERSONALITY,
+                   rd_record_seconds, rd_boot_mode_radio);
+}
+
+static void rdShowPortalScreen() {
+    M5.Lcd.fillScreen(TFT_BLACK);
+
+    M5.Lcd.setTextColor(TFT_CYAN);
+    M5.Lcd.setTextSize(2);
+    M5.Lcd.setCursor(18, 8);
+    M5.Lcd.print("Core2Groq Setup");
+
+    M5.Lcd.setTextColor(TFT_WHITE);
+    M5.Lcd.setTextSize(1);
+    M5.Lcd.setCursor(34, 34);
+    M5.Lcd.print("Bot + OTR radio for M5Core2");
+
+    M5.Lcd.setTextColor(TFT_YELLOW);
+    M5.Lcd.setCursor(4, 58);
+    M5.Lcd.print("1. Connect your phone/PC to:");
+    M5.Lcd.setTextColor(TFT_GREEN);
+    M5.Lcd.setTextSize(2);
+    M5.Lcd.setCursor(18, 70);
+    M5.Lcd.print(RD_AP_SSID);
+
+    M5.Lcd.setTextColor(TFT_YELLOW);
+    M5.Lcd.setTextSize(1);
+    M5.Lcd.setCursor(4, 98);
+    M5.Lcd.print("2. Open browser to:");
+    M5.Lcd.setTextColor(TFT_GREEN);
+    M5.Lcd.setTextSize(2);
+    M5.Lcd.setCursor(52, 110);
+    M5.Lcd.print("192.168.4.1");
+
+    M5.Lcd.setTextColor(TFT_YELLOW);
+    M5.Lcd.setTextSize(1);
+    M5.Lcd.setCursor(4, 138);
+    M5.Lcd.print("3. Save WiFi, Groq key, and boot mode.");
+
+    if (rd_has_settings) {
+        M5.Lcd.setTextColor(TFT_CYAN);
+        M5.Lcd.setCursor(4, 164);
+        M5.Lcd.print("Saved settings found.");
+        M5.Lcd.setCursor(4, 176);
+        M5.Lcd.print("Tap 'No Changes' to keep them.");
+    }
+}
+
+static void rdHandleRoot() {
+    String html =
+        "<!DOCTYPE html><html><head>"
+        "<meta charset='UTF-8'>"
+        "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+        "<title>Core2Groq Setup</title>"
+        "<style>"
+        "body{background:#0f141b;color:#d6ecff;font-family:Arial,sans-serif;max-width:560px;margin:auto;padding:20px;}"
+        "h1{color:#63f3ff;margin-bottom:6px;}p,small{color:#8fb3c9;}"
+        "label{display:block;margin-top:14px;font-weight:bold;color:#b5ddff;}"
+        "input,select,textarea{width:100%;box-sizing:border-box;padding:10px;border-radius:6px;border:1px solid #35516f;background:#111a24;color:#f2fbff;}"
+        "textarea{min-height:120px;resize:vertical;}"
+        "button{display:block;width:100%;padding:14px;margin-top:16px;border:none;border-radius:8px;background:#1b77ff;color:#fff;font-weight:bold;}"
+        ".secondary{background:#202a35;color:#d6ecff;}"
+        ".hint{font-size:.92em;color:#91a9bd;}"
+        "</style></head><body>"
+        "<h1>Core2Groq Setup</h1>"
+        "<p class='hint'>WiFi is required for radio and bot mode. Groq key is required for bot mode.</p>"
+        "<form method='post' action='/save'>"
+        "<label>WiFi Network (SSID)</label>"
+        "<input type='text' name='ssid' maxlength='63' required value='";
+    html += rdEscapeHtml(String(rd_wifi_ssid));
+    html +=
+        "'>"
+        "<label>WiFi Password</label>"
+        "<input type='password' name='pass' maxlength='63' value='";
+    html += rdEscapeHtml(String(rd_wifi_pass));
+    html +=
+        "'>"
+        "<label>Groq API Key</label>"
+        "<input type='text' name='groqKey' maxlength='127' value='";
+    html += rdEscapeHtml(String(rd_groq_api_key));
+    html +=
+        "' placeholder='Needed for bot mode'>"
+        "<label>Chat Model</label>"
+        "<select name='model'>";
+
+    for (size_t i = 0; i < rdModelOptionCount(); i++) {
+        html += "<option value='";
+        html += RD_MODEL_OPTIONS[i].value;
+        html += "'";
+        if (String(rd_groq_model) == RD_MODEL_OPTIONS[i].value) {
+            html += " selected";
+        }
+        html += ">";
+        html += RD_MODEL_OPTIONS[i].label;
+        html += "</option>";
+    }
+
+    html +=
+        "</select>"
+        "<label>Bot Personality</label>"
+        "<textarea name='personality'>";
+    html += rdEscapeHtml(String(rd_personality_prompt));
+    html +=
+        "</textarea>"
+        "<label>Max Record Seconds</label>"
+        "<input type='number' name='recordSec' min='2' max='15' required value='";
+    html += String(rd_record_seconds);
+    html +=
+        "'>"
+        "<label>Default Boot Mode</label>"
+        "<select name='bootMode'>"
+        "<option value='bot'";
+    if (!rd_boot_mode_radio) html += " selected";
+    html += ">Bot</option><option value='radio'";
+    if (rd_boot_mode_radio) html += " selected";
+    html +=
+        ">Radio</option></select>"
+        "<button type='submit'>Save &amp; Reboot</button>"
+        "</form>";
+
+    if (rd_has_settings) {
+        html +=
+            "<form method='post' action='/nochange'>"
+            "<button class='secondary' type='submit'>No Changes</button>"
+            "</form>";
+    }
+
+    html += "</body></html>";
+    portalServer->send(200, "text/html", html);
+}
+
+static void rdHandleSave() {
+    String ssid = portalServer->arg("ssid");
+    String pass = portalServer->arg("pass");
+    String groqKey = portalServer->arg("groqKey");
+    String model = portalServer->arg("model");
+    String personality = portalServer->arg("personality");
+    bool bootModeRadio = portalServer->arg("bootMode") == "radio";
+    uint8_t recordSec = rdClampRecordSeconds(portalServer->arg("recordSec").toInt());
+
+    if (!ssid.length()) {
+        portalServer->send(
+            400, "text/html",
+            "<html><body style='background:#0f141b;color:#ff7a7a;font-family:Arial;padding:40px'>"
+            "<h2>SSID cannot be empty.</h2><a href='/' style='color:#63f3ff'>Go back</a></body></html>");
+        return;
+    }
+
+    rdSaveSettings(ssid.c_str(), pass.c_str(), groqKey.c_str(), model.c_str(),
+                   personality.c_str(), recordSec, bootModeRadio);
+
+    portalServer->send(
+        200, "text/html",
+        "<html><head><meta charset='UTF-8'></head>"
+        "<body style='background:#0f141b;color:#d6ecff;font-family:Arial;padding:40px'>"
+        "<h2>Saved. Rebooting...</h2></body></html>");
+    delay(1200);
+    ESP.restart();
+}
+
+static void rdHandleNoChange() {
+    portalServer->send(
+        200, "text/html",
+        "<html><head><meta charset='UTF-8'></head>"
+        "<body style='background:#0f141b;color:#d6ecff;font-family:Arial;padding:40px'>"
+        "<h2>Using saved settings.</h2></body></html>");
+    delay(1200);
+    portalDone = true;
+}
+
+static void rdInitPortal() {
+    WiFi.mode(WIFI_AP);
+    WiFi.softAP(RD_AP_SSID, "");
+    delay(500);
+
+    portalDNS = new DNSServer();
+    portalServer = new WebServer(80);
+
+    portalDNS->start(53, "*", WiFi.softAPIP());
+    portalServer->on("/", rdHandleRoot);
+    portalServer->on("/save", HTTP_POST, rdHandleSave);
+    portalServer->on("/nochange", HTTP_POST, rdHandleNoChange);
+    portalServer->onNotFound(rdHandleRoot);
+    portalServer->begin();
+
+    portalDone = false;
+    rdShowPortalScreen();
+}
+
+static void rdRunPortal() {
+    portalDNS->processNextRequest();
+    portalServer->handleClient();
+}
+
+static void rdClosePortal() {
+    portalServer->stop();
+    portalDNS->stop();
+    WiFi.softAPdisconnect(true);
+    WiFi.mode(WIFI_OFF);
+    delay(300);
+    delete portalServer;
+    portalServer = nullptr;
+    delete portalDNS;
+    portalDNS = nullptr;
+}

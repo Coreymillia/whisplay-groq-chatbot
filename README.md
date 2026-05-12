@@ -29,6 +29,7 @@ This project starts from the official PiSugar Whisplay chatbot, but is being tai
 - **Companion CYD touchscreen client:** working as a polished multi-mode touch companion with chat, capture, gallery, and settings screens
 - **Companion Cardputer client:** working as an early rough-start build, with text chat confirmed and more settings/UI work planned
 - **Groqputer standalone Cardputer firmware:** standalone Groq Cardputer firmware now running in this repo, with readable split chat views, direct Groq chat/Whisper, optional 16x2 I2C LCD output, on-device bot settings, and early same-LAN Whisplay relay testing
+- **Core2Groq unified M5Core2 firmware:** early dual-mode Core2 build now running in this repo, combining the existing OTR radio project with a new Groq bot mode, touch-first controls, and a path toward future BotNet connectivity
 - **Standalone GroqBotNet Pi Zero node:** working as a separate same-network experiment with browser chat plus Mini PiTFT output
 - **Web simulator/debug UI:** still available at `http://<host-or-pi-ip>:17880`
 
@@ -322,6 +323,46 @@ When **Bot Settings** is open:
 - revisit and fix the broken **Whisplay-side daily request / RPD display**
 - decide how far to take the Cardputer-to-Whisplay **peer / BotNet** path beyond the current relay test mode
 - keep improving the standalone Cardputer UX first, then tighten integration with the Whisplay ecosystem later
+
+## Why `Core2Groq/` is also in this repo
+
+This repo now also includes `Core2Groq/`, a separate **M5Stack Core2** firmware project that keeps the existing OTR radio work alive while adding a Groq chatbot mode in the same device.
+
+- **Whisplay remains the main project**
+- **Core2Groq is a unified Core2 side-project, not a replacement for Whisplay**
+- **the near-term goal is a solid touch-first Bot + Radio handheld**
+- **the longer-term goal is to let that Core2 device participate in the broader GroqBotNet / Whisplay ecosystem**
+
+Keeping it in this repo makes sense because it is pulling from the same direction as the other sidecar builds:
+
+- Groq-backed standalone chatbot work from `Groqputer/`
+- same-network bot experimentation from `GroqBotNet/`
+- the same larger idea of multiple purpose-built devices around the Whisplay bot
+
+The current Core2Groq target is:
+
+- preserve the working **OTR radio** firmware
+- add a direct **Groq bot mode** with Groq Whisper transcription
+- use the **M5Core2 touchscreen + bottom capacitive buttons** for day-to-day control
+- grow toward a cleaner **BotNet-connected Core2 device** later, after the local bot/radio UX is stable
+
+### Current Core2Groq firmware highlights
+
+- **Unified device concept:** one firmware, two modes: **Bot** and **Radio**
+- **Bot mode:** direct Groq chat, direct Groq Whisper, local chat history, default boot into bot when configured
+- **Radio mode preserved:** the original Core2 OTR internet radio flow still exists, including SI4713 FM support when installed
+- **Recording controls:** bottom capacitive buttons now map to **REC**, **STOP**, and **HOLD**
+- **Reply-first bot UI:** the Core2 bot screen now prioritizes the assistant reply area instead of a permanent outgoing-message panel
+- **Tap scrolling:** left/right taps on the reply panel scroll through reply history
+- **Touch settings entry:** bot mode now has a real **SET** menu instead of only a direct setup shortcut
+- **Shared setup AP:** Wi-Fi, Groq key, model, personality prompt, record length, and default boot mode are all stored from the Core2 setup page
+
+### Current Core2Groq direction
+
+- keep reducing bot-screen redraw flicker and improving readability
+- expand the on-device Core2 settings menu with better personality/model selection
+- keep radio mode stable while bot mode matures
+- eventually connect the Core2 bot into the same broader **BotNet / Whisplay** experiments used elsewhere in this repo
 
 ## Why `GroqBotNet/` is also in this repo
 
