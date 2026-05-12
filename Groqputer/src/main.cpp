@@ -18,12 +18,20 @@ static const uint32_t COLOR_ERROR = 0xF800;
 
 static String inputBuffer;
 static String toastMessage;
-static std::vector<String> incomingLog;
-static std::vector<String> outgoingLog;
 static uint8_t dirtyRegions = 0xFF;
 static unsigned long toastUntilMs = 0;
-static int incomingLogScrollOffset = 0;
-static int outgoingLogScrollOffset = 0;
+
+struct ChatTurnPage {
+  String userText;
+  String replyText;
+};
+
+static std::vector<ChatTurnPage> chatTurnPages;
+static int activeTurnIndex = -1;
+static int activeReplyScrollOffset = 0;
+static unsigned long replyAutoScrollPauseUntilMs = 0;
+static unsigned long lastReplyAutoScrollMs = 0;
+static bool replyAutoScrollComplete = false;
 
 static bool recordingActive = false;
 static int16_t *recordingSamples = nullptr;
@@ -33,9 +41,10 @@ static unsigned long recordingStartedMs = 0;
 
 static constexpr size_t SAMPLE_RATE = 16000;
 static constexpr size_t RECORD_CHUNK_SAMPLES = 240;
-static constexpr size_t MAX_LOG_ENTRIES = 48;
-static constexpr size_t MAX_DISPLAY_CHARS = 700;
-static constexpr int LOG_SCROLL_STEP = 3;
+static constexpr size_t MAX_DISPLAY_CHARS = 1400;
+static constexpr int TURN_SCROLL_STEP = 2;
+static constexpr unsigned long TURN_AUTO_SCROLL_INTERVAL_MS = 1200;
+static constexpr unsigned long TURN_AUTO_SCROLL_PAUSE_MS = 2600;
 static constexpr int HEADER_HEIGHT = 18;
 static constexpr int FOOTER_HEIGHT = 14;
 static constexpr int CONTENT_MARGIN = 6;
@@ -52,11 +61,19 @@ enum class ScreenMode : uint8_t {
   Chat,
   Settings,
   BotSettings,
+  Hotkeys,
+  CustomPersonality,
 };
 
 enum class BotSettingField : uint8_t {
   Model,
   Personality,
+};
+
+enum class CustomPersonalityStage : uint8_t {
+  Prompt,
+  Name,
+  Confirm,
 };
 
 enum RenderRegion : uint8_t {
@@ -71,13 +88,50 @@ enum RenderRegion : uint8_t {
 static ChatPane activePane = ChatPane::Incoming;
 static ScreenMode activeScreen = ScreenMode::Chat;
 static BotSettingField activeBotSettingField = BotSettingField::Model;
+static CustomPersonalityStage activeCustomPersonalityStage = CustomPersonalityStage::Prompt;
 static bool usingExternalPower = true;
+static String customPersonalityPromptBuffer;
+static String customPersonalityNameBuffer;
 
 static void markDirty(uint8_t regions) {
   dirtyRegions |= regions;
 }
 
 static String modelShortLabel();
+static void resetReplyScroll(unsigned long pauseMs = TURN_AUTO_SCROLL_PAUSE_MS);
+static void fillWrappedLines(const String &sourceText, String *lines, int &lineCount, int maxLines, int maxChars);
+
+static int32_t currentBatteryLevel() {
+  int32_t level = M5.Power.getBatteryLevel();
+  if (level < 0 || level > 100) return -1;
+  return level;
+}
+
+static int16_t currentBatteryMilliVolts() {
+  int16_t mv = M5.Power.getBatteryVoltage();
+  return mv > 0 ? mv : 0;
+}
+
+static String batteryStatusLabel() {
+  int32_t level = currentBatteryLevel();
+  if (level >= 0) {
+    return String(level) + "%";
+  }
+
+  int16_t mv = currentBatteryMilliVolts();
+  if (mv > 0) {
+    return String(mv / 1000.0f, 1) + "V";
+  }
+  return "--";
+}
+
+static uint32_t batteryStatusColor() {
+  int32_t level = currentBatteryLevel();
+  if (level < 0) return COLOR_DIM;
+  if (level <= 15) return COLOR_ERROR;
+  if (level <= 35) return COLOR_WARN;
+  return COLOR_OK;
+}
 
 static bool isExternalPowerPresent() {
   int16_t vbusVoltage = M5.Power.getVBUSVoltage();
@@ -128,6 +182,10 @@ static int scaledLineHeight() {
   return (8 * messageTextScale()) + 2;
 }
 
+static unsigned long currentReaderAutoScrollIntervalMs() {
+  return max<unsigned long>(200, gp_lcd_scroll_ms);
+}
+
 static void setToast(const String &message, uint16_t durationMs = 2200) {
   toastMessage = message;
   toastUntilMs = millis() + durationMs;
@@ -140,7 +198,7 @@ static String clampLogText(const String &value) {
 }
 
 static const char *currentPaneLabel() {
-  return activePane == ChatPane::Incoming ? "INCOMING" : "OUTGOING";
+  return activePane == ChatPane::Incoming ? "CHAT" : "DRAFT";
 }
 
 static String gpCurrentPersonalityLabel() {
@@ -148,7 +206,7 @@ static String gpCurrentPersonalityLabel() {
   if (personalityIndex < 0) {
     return "Custom";
   }
-  return GP_PERSONALITY_PRESETS[personalityIndex].label;
+  return gpPersonalityPresetLabelAt(static_cast<size_t>(personalityIndex));
 }
 
 static void drawSettingsView(int x, int y, int w, int h) {
@@ -239,37 +297,133 @@ static void drawBotSettingsView(int x, int y, int w, int h) {
   M5Cardputer.Display.print("Fn+B close  saves live");
 }
 
-static void appendLogEntry(const String &prefix, const String &text) {
-  String normalized = text;
-  normalized.trim();
-  if (!normalized.length()) return;
+static void drawHotkeysView(int x, int y, int w, int h) {
+  const int lineHeight = 11;
+  int cursorY = y;
 
-  bool incoming = prefix == "BOT " || prefix == "SYS ";
-  std::vector<String> &targetLog = incoming ? incomingLog : outgoingLog;
-  int &targetScrollOffset = incoming ? incomingLogScrollOffset : outgoingLogScrollOffset;
+  M5Cardputer.Display.setTextColor(COLOR_OK, COLOR_PANEL);
+  M5Cardputer.Display.setCursor(x, cursorY);
+  M5Cardputer.Display.print("HOTKEYS");
+  cursorY += lineHeight + 1;
 
-  targetLog.push_back(prefix + clampLogText(normalized));
-  while (targetLog.size() > MAX_LOG_ENTRIES) {
-    targetLog.erase(targetLog.begin());
+  M5Cardputer.Display.setTextColor(COLOR_TEXT, COLOR_PANEL);
+  const char *lines[] = {
+    "Fn+H close sheet",
+    "Fn+M bot  Fn+O you",
+    "Fn+,/ turns",
+    "Fn+;. read up/down",
+    "Fn+[/] scroll speed",
+    "Fn+V custom bot",
+    "Fn+S settings",
+    "Fn+B bot settings",
+    "Fn+C linked device",
+    "Fn+N new  Fn+R clear",
+    "Fn+A setup portal",
+  };
+
+  for (const char *line : lines) {
+    if (cursorY > y + h - 22) break;
+    M5Cardputer.Display.setCursor(x, cursorY);
+    M5Cardputer.Display.print(line);
+    cursorY += lineHeight;
   }
-  targetScrollOffset = 0;
-  markDirty(DIRTY_CONTENT);
-  if (incoming) {
-    activePane = ChatPane::Incoming;
-  } else {
-    activePane = ChatPane::Outgoing;
-  }
-  if (prefix == "BOT ") {
-    gpSetLcdIncomingMessage(normalized);
-  }
+
+  M5Cardputer.Display.setTextColor(COLOR_DIM, COLOR_PANEL);
+  M5Cardputer.Display.setCursor(x, y + h - 10);
+  M5Cardputer.Display.print("Enter sends only in draft");
 }
 
-static void restoreLogsFromPersistedChat() {
-  incomingLog.clear();
-  outgoingLog.clear();
-  incomingLogScrollOffset = 0;
-  outgoingLogScrollOffset = 0;
+static String customPersonalityStageLabel() {
+  switch (activeCustomPersonalityStage) {
+    case CustomPersonalityStage::Prompt:
+      return "STEP 1/3 PROMPT";
+    case CustomPersonalityStage::Name:
+      return "STEP 2/3 NAME";
+    case CustomPersonalityStage::Confirm:
+      return "STEP 3/3 CONFIRM";
+  }
+  return "";
+}
 
+static void drawCustomPersonalityView(int x, int y, int w, int h) {
+  M5Cardputer.Display.setTextColor(COLOR_OK, COLOR_PANEL);
+  M5Cardputer.Display.setCursor(x, y);
+  M5Cardputer.Display.print("CUSTOM BOT");
+  M5Cardputer.Display.setTextColor(COLOR_DIM, COLOR_PANEL);
+  M5Cardputer.Display.setCursor(x + 62, y);
+  M5Cardputer.Display.print(customPersonalityStageLabel());
+  M5Cardputer.Display.drawFastHLine(x, y + 10, w, COLOR_DIM);
+
+  const int bodyY = y + 16;
+  const int bodyH = max(1, h - 18);
+  if (activeCustomPersonalityStage == CustomPersonalityStage::Confirm) {
+    M5Cardputer.Display.setTextColor(COLOR_TEXT, COLOR_PANEL);
+    M5Cardputer.Display.setCursor(x, bodyY);
+    M5Cardputer.Display.print("Name:");
+    M5Cardputer.Display.setTextColor(COLOR_WARN, COLOR_PANEL);
+    M5Cardputer.Display.setCursor(x + 32, bodyY);
+    M5Cardputer.Display.print(customPersonalityNameBuffer.length() ? customPersonalityNameBuffer : "(none)");
+
+    M5Cardputer.Display.setTextColor(COLOR_TEXT, COLOR_PANEL);
+    M5Cardputer.Display.setCursor(x, bodyY + 14);
+    M5Cardputer.Display.print("Prompt:");
+
+    const int maxChars = max(8, (w / 6) - 1);
+    String lines[10];
+    int lineCount = 0;
+    fillWrappedLines(customPersonalityPromptBuffer.length() ? customPersonalityPromptBuffer : "—", lines, lineCount, 10, maxChars);
+    int cursorY = bodyY + 26;
+    M5Cardputer.Display.setTextColor(COLOR_DIM, COLOR_PANEL);
+    for (int i = 0; i < min(lineCount, 5); i++) {
+      M5Cardputer.Display.setCursor(x, cursorY);
+      M5Cardputer.Display.print(lines[i]);
+      cursorY += 10;
+    }
+
+    M5Cardputer.Display.setTextColor(COLOR_OK, COLOR_PANEL);
+    M5Cardputer.Display.setCursor(x, y + h - 30);
+    M5Cardputer.Display.print("Y save   T test");
+    M5Cardputer.Display.setTextColor(COLOR_WARN, COLOR_PANEL);
+    M5Cardputer.Display.setCursor(x, y + h - 18);
+    M5Cardputer.Display.print("N cancel");
+    return;
+  }
+
+  String editorText = activeCustomPersonalityStage == CustomPersonalityStage::Prompt
+    ? customPersonalityPromptBuffer
+    : customPersonalityNameBuffer;
+  String helperText = activeCustomPersonalityStage == CustomPersonalityStage::Prompt
+    ? "Type what the bot should be, then Enter."
+    : "Type the bot name, then Enter.";
+
+  M5Cardputer.Display.setTextColor(COLOR_DIM, COLOR_PANEL);
+  M5Cardputer.Display.setCursor(x, bodyY);
+  M5Cardputer.Display.print(helperText);
+
+  const int textY = bodyY + 12;
+  const int textH = max(1, bodyH - 14);
+  const int maxChars = max(8, (w / scaledCharWidth()) - 1);
+  const int visibleLines = max(1, textH / scaledLineHeight());
+  String lines[160];
+  int lineCount = 0;
+  fillWrappedLines(editorText.length() ? editorText : "_", lines, lineCount, 160, maxChars);
+  int startLine = max(0, lineCount - visibleLines);
+
+  M5Cardputer.Display.setTextColor(COLOR_TEXT, COLOR_PANEL);
+  M5Cardputer.Display.setTextSize(messageTextScale());
+  int cursorY = textY;
+  for (int i = startLine; i < min(lineCount, startLine + visibleLines); i++) {
+    M5Cardputer.Display.setCursor(x, cursorY);
+    M5Cardputer.Display.print(lines[i]);
+    cursorY += scaledLineHeight();
+  }
+  M5Cardputer.Display.setTextSize(1);
+}
+
+static void rebuildTurnPagesFromPersistedChat() {
+  int previousTurnIndex = activeTurnIndex;
+  chatTurnPages.clear();
+  activeTurnIndex = -1;
   if (!gp_chat_history.length()) {
     return;
   }
@@ -283,16 +437,34 @@ static void restoreLogsFromPersistedChat() {
     return;
   }
 
+  String pendingUserText;
   for (JsonVariant value : history) {
     String role = String(value["role"] | "");
-    String content = String(value["content"] | "");
+    String content = clampLogText(String(value["content"] | ""));
+    content.trim();
     if (!content.length()) continue;
-    if (role == "assistant") {
-      appendLogEntry("BOT ", content);
-    } else if (role == "user") {
-      appendLogEntry("YOU ", content);
+    if (role == "user") {
+      pendingUserText = content;
+    } else if (role == "assistant") {
+      ChatTurnPage turnPage;
+      turnPage.userText = pendingUserText.length() ? pendingUserText : "No user message recorded.";
+      turnPage.replyText = content;
+      chatTurnPages.push_back(turnPage);
+      pendingUserText = "";
     }
   }
+
+  if (chatTurnPages.empty()) {
+    activeTurnIndex = -1;
+    return;
+  }
+
+  if (previousTurnIndex < 0 || previousTurnIndex >= static_cast<int>(chatTurnPages.size())) {
+    activeTurnIndex = static_cast<int>(chatTurnPages.size()) - 1;
+  } else {
+    activeTurnIndex = previousTurnIndex;
+  }
+  resetReplyScroll();
 }
 
 static void fillWrappedLines(const String &sourceText, String *lines, int &lineCount, int maxLines, int maxChars) {
@@ -327,56 +499,157 @@ static void fillWrappedLines(const String &sourceText, String *lines, int &lineC
   }
 }
 
-static void buildConversationLines(const std::vector<String> &entries, String *lines, int &lineCount, int maxLines, int maxChars) {
-  lineCount = 0;
-  if (entries.empty()) {
-    if (activePane == ChatPane::Incoming) {
-      fillWrappedLines("No incoming replies yet.", lines, lineCount, maxLines, maxChars);
-    } else {
-      fillWrappedLines("No outgoing messages yet.", lines, lineCount, maxLines, maxChars);
-    }
+static String currentTurnIndicator() {
+  if (chatTurnPages.empty()) return "0/0";
+  int current = constrain(activeTurnIndex, 0, static_cast<int>(chatTurnPages.size()) - 1);
+  return String(current + 1) + "/" + String(chatTurnPages.size());
+}
+
+static void resetReplyScroll(unsigned long pauseMs) {
+  activeReplyScrollOffset = 0;
+  lastReplyAutoScrollMs = 0;
+  replyAutoScrollComplete = false;
+  replyAutoScrollPauseUntilMs = millis() + pauseMs;
+}
+
+static int currentReplyMaxScrollOffset(int width, int height) {
+  if (chatTurnPages.empty() || activeTurnIndex < 0 || activeTurnIndex >= static_cast<int>(chatTurnPages.size())) {
+    return 0;
+  }
+  const ChatTurnPage &turnPage = chatTurnPages[activeTurnIndex];
+  const int bodyHeight = max(1, height - 18);
+  const int maxChars = max(8, (width / scaledCharWidth()) - 1);
+  const int visibleReplyLines = max(1, bodyHeight / scaledLineHeight());
+  String replyLines[160];
+  int replyLineCount = 0;
+  fillWrappedLines(turnPage.replyText.length() ? turnPage.replyText : "—", replyLines, replyLineCount, 160, maxChars);
+  return max(0, replyLineCount - visibleReplyLines);
+}
+
+static void scrollCurrentReply(int delta, int width, int height) {
+  int maxOffset = currentReplyMaxScrollOffset(width, height);
+  if (maxOffset <= 0) {
+    setToast("Reply fits on one page.");
+    return;
+  }
+  int next = constrain(activeReplyScrollOffset + delta, 0, maxOffset);
+  if (next == activeReplyScrollOffset) {
+    setToast(delta < 0 ? "Top of reply." : "End of reply.");
+    return;
+  }
+  activeReplyScrollOffset = next;
+  replyAutoScrollComplete = next >= maxOffset;
+  replyAutoScrollPauseUntilMs = millis() + TURN_AUTO_SCROLL_PAUSE_MS;
+  lastReplyAutoScrollMs = millis();
+  markDirty(DIRTY_CONTENT | DIRTY_FOOTER);
+}
+
+static void pollReplyAutoScroll() {
+  if (activePane != ChatPane::Incoming || activeScreen != ScreenMode::Chat) return;
+  if (replyAutoScrollComplete) return;
+  if (replyAutoScrollPauseUntilMs > millis()) return;
+  const int contentW = M5Cardputer.Display.width() - (CONTENT_MARGIN * 2) - 12;
+  const int contentH = M5Cardputer.Display.height() - HEADER_HEIGHT - FOOTER_HEIGHT - (CONTENT_MARGIN * 2) - 28;
+  int maxOffset = currentReplyMaxScrollOffset(contentW, contentH);
+  if (maxOffset <= 0) return;
+  if (lastReplyAutoScrollMs != 0 && millis() - lastReplyAutoScrollMs < currentReaderAutoScrollIntervalMs()) {
     return;
   }
 
-  for (size_t i = 0; i < entries.size() && lineCount < maxLines; i++) {
-    int wrappedCount = 0;
-    fillWrappedLines(entries[i], lines + lineCount, wrappedCount, maxLines - lineCount, maxChars);
-    lineCount += wrappedCount;
-    if (lineCount < maxLines && i + 1 < entries.size()) {
-      lines[lineCount++] = "";
+  if (activeReplyScrollOffset >= maxOffset) {
+    replyAutoScrollComplete = true;
+    lastReplyAutoScrollMs = 0;
+    return;
+  }
+  activeReplyScrollOffset += 1;
+  if (activeReplyScrollOffset >= maxOffset) {
+    activeReplyScrollOffset = maxOffset;
+    replyAutoScrollComplete = true;
+  }
+  lastReplyAutoScrollMs = millis();
+  markDirty(DIRTY_CONTENT | DIRTY_FOOTER);
+}
+
+static const ChatTurnPage *activeTurnPage() {
+  if (chatTurnPages.empty() || activeTurnIndex < 0 || activeTurnIndex >= static_cast<int>(chatTurnPages.size())) {
+    return nullptr;
+  }
+  return &chatTurnPages[activeTurnIndex];
+}
+
+static String currentReaderTitle() {
+  if (activePane == ChatPane::Incoming) {
+    return "BOT";
+  }
+  return inputBuffer.length() ? "DRAFT" : "YOU";
+}
+
+static String currentReaderText() {
+  const ChatTurnPage *turnPage = activeTurnPage();
+  if (activePane == ChatPane::Incoming) {
+    if (turnPage) {
+      return turnPage->replyText.length() ? turnPage->replyText : String("Reply was empty.");
     }
+    return "Send or record a message to create the first bot reply.";
   }
+
+  if (inputBuffer.length()) {
+    return inputBuffer;
+  }
+  if (turnPage) {
+    return turnPage->userText.length() ? turnPage->userText : String("No user message recorded.");
+  }
+  return "Type a message or hold BtnA to record.";
 }
 
-static const std::vector<String> &activeHistoryLog() {
-  return activePane == ChatPane::Incoming ? incomingLog : outgoingLog;
-}
-
-static int &activeHistoryScrollOffset() {
-  return activePane == ChatPane::Incoming ? incomingLogScrollOffset : outgoingLogScrollOffset;
-}
-
-static void drawConversationLog(int x, int y, int w, int h) {
-  const int maxChars = max(8, (w / scaledCharWidth()) - 1);
-  const int visibleLines = max(1, h / scaledLineHeight());
-  String lines[180];
-  int lineCount = 0;
-  const std::vector<String> &activeLog = activeHistoryLog();
-  int &activeScrollOffset = activeHistoryScrollOffset();
-  if (activePane == ChatPane::Outgoing && inputBuffer.length() > 0) {
-    fillWrappedLines(inputBuffer, lines, lineCount, 180, maxChars);
+static String currentReaderHint() {
+  String hint = "Turn ";
+  hint += currentTurnIndicator();
+  if (activePane == ChatPane::Incoming) {
+    hint += "  Fn+O YOU";
   } else {
-    buildConversationLines(activeLog, lines, lineCount, 180, maxChars);
+    hint += "  Fn+M BOT";
   }
+  return hint;
+}
 
-  int maxOffset = max(0, lineCount - visibleLines);
-  activeScrollOffset = constrain(activeScrollOffset, 0, maxOffset);
-  int startLine = max(0, lineCount - visibleLines - activeScrollOffset);
+static void drawReaderView(int x, int y, int w, int h) {
+  String title = currentReaderTitle();
+  String text = currentReaderText();
+  const bool incomingView = activePane == ChatPane::Incoming;
+  const bool composingDraft = !incomingView && inputBuffer.length() > 0;
+  const uint32_t titleColor = incomingView ? COLOR_OK : COLOR_ACCENT;
+  const int headerY = y;
+  const int bodyY = y + 14;
+  const int bodyH = max(1, h - 14);
+  const int maxChars = max(8, (w / scaledCharWidth()) - 1);
+  const int visibleLines = max(1, bodyH / scaledLineHeight());
+  String lines[160];
+  int lineCount = 0;
+  fillWrappedLines(text.length() ? text : "—", lines, lineCount, 160, maxChars);
+
+  int startLine = 0;
+  int maxOffset = 0;
+  if (incomingView) {
+    maxOffset = max(0, lineCount - visibleLines);
+    activeReplyScrollOffset = constrain(activeReplyScrollOffset, 0, maxOffset);
+    startLine = activeReplyScrollOffset;
+  } else if (composingDraft) {
+    startLine = max(0, lineCount - visibleLines);
+  }
   int endLine = min(lineCount, startLine + visibleLines);
+
+  M5Cardputer.Display.setTextColor(titleColor, COLOR_PANEL);
+  M5Cardputer.Display.setCursor(x, headerY + 2);
+  M5Cardputer.Display.print(title);
+  M5Cardputer.Display.setTextColor(COLOR_DIM, COLOR_PANEL);
+  M5Cardputer.Display.setCursor(x + 34, headerY + 2);
+  M5Cardputer.Display.print(currentReaderHint());
+  M5Cardputer.Display.drawFastHLine(x, y + 12, w, COLOR_DIM);
 
   M5Cardputer.Display.setTextColor(COLOR_TEXT, COLOR_PANEL);
   M5Cardputer.Display.setTextSize(messageTextScale());
-  int cursorY = y;
+  int cursorY = bodyY;
   for (int i = startLine; i < endLine; i++) {
     M5Cardputer.Display.setCursor(x, cursorY);
     M5Cardputer.Display.print(lines[i]);
@@ -384,17 +657,49 @@ static void drawConversationLog(int x, int y, int w, int h) {
   }
   M5Cardputer.Display.setTextSize(1);
 
-  if (maxOffset > 0) {
+  if (incomingView && maxOffset > 0) {
     M5Cardputer.Display.setTextColor(COLOR_DIM, COLOR_PANEL);
-    if (activeScrollOffset < maxOffset) {
-      M5Cardputer.Display.setCursor(x + w - 10, y + 2);
-      M5Cardputer.Display.print("^");
-    }
-    if (activeScrollOffset > 0) {
-      M5Cardputer.Display.setCursor(x + w - 10, y + h - 10);
-      M5Cardputer.Display.print("v");
-    }
+    M5Cardputer.Display.setCursor(x + w - 42, y + h - 10);
+    M5Cardputer.Display.print(String(activeReplyScrollOffset + 1) + "/" + String(maxOffset + 1));
+  } else if (composingDraft && startLine > 0) {
+    M5Cardputer.Display.setTextColor(COLOR_DIM, COLOR_PANEL);
+    M5Cardputer.Display.setCursor(x + w - 16, y + h - 10);
+    M5Cardputer.Display.print("v");
+  } else if (!incomingView && lineCount > visibleLines) {
+    M5Cardputer.Display.setTextColor(COLOR_DIM, COLOR_PANEL);
+    M5Cardputer.Display.setCursor(x + w - 16, y + h - 10);
+    M5Cardputer.Display.print("...");
   }
+}
+
+static void jumpToLatestTurn() {
+  activeTurnIndex = chatTurnPages.empty() ? -1 : static_cast<int>(chatTurnPages.size()) - 1;
+  activePane = ChatPane::Incoming;
+  resetReplyScroll();
+}
+
+static void navigateTurnPages(int delta) {
+  if (chatTurnPages.empty()) {
+    setToast("No reply pages yet.");
+    return;
+  }
+  if (delta == 0) return;
+
+  int current = activeTurnIndex;
+  if (current < 0 || current >= static_cast<int>(chatTurnPages.size())) {
+    current = static_cast<int>(chatTurnPages.size()) - 1;
+  }
+  int next = constrain(current + delta, 0, static_cast<int>(chatTurnPages.size()) - 1);
+  if (next == current) {
+    setToast(delta < 0 ? "Oldest page." : "Newest page.");
+    return;
+  }
+
+  activeTurnIndex = next;
+  activePane = ChatPane::Incoming;
+  activeScreen = ScreenMode::Chat;
+  resetReplyScroll();
+  markDirty(DIRTY_CONTENT | DIRTY_FOOTER);
 }
 
 static void drawHeader(int screenW) {
@@ -404,15 +709,19 @@ static void drawHeader(int screenW) {
   M5Cardputer.Display.print("Groqputer");
 
   M5Cardputer.Display.setTextColor(WiFi.status() == WL_CONNECTED ? COLOR_OK : COLOR_ERROR, COLOR_BG);
-  M5Cardputer.Display.setCursor(94, 8);
+  M5Cardputer.Display.setCursor(72, 8);
   M5Cardputer.Display.print(WiFi.status() == WL_CONNECTED ? "WiFi" : "NoWiFi");
 
+  M5Cardputer.Display.setTextColor(batteryStatusColor(), COLOR_BG);
+  M5Cardputer.Display.setCursor(112, 8);
+  M5Cardputer.Display.print(batteryStatusLabel());
+
   M5Cardputer.Display.setTextColor(COLOR_WARN, COLOR_BG);
-  M5Cardputer.Display.setCursor(138, 8);
+  M5Cardputer.Display.setCursor(152, 8);
   M5Cardputer.Display.print(String(gp_record_seconds) + "s");
 
   M5Cardputer.Display.setTextColor(COLOR_DIM, COLOR_BG);
-  M5Cardputer.Display.setCursor(172, 8);
+  M5Cardputer.Display.setCursor(176, 8);
   M5Cardputer.Display.print(modelShortLabel());
   M5Cardputer.Display.drawFastHLine(0, HEADER_HEIGHT, screenW, COLOR_DIM);
 }
@@ -431,27 +740,14 @@ static void drawContentPanel(int screenW, int screenH) {
   } else if (activeScreen == ScreenMode::BotSettings) {
     drawBotSettingsView(contentX + 6, contentY + 8, contentW - 12, contentH - 12);
     return;
+  } else if (activeScreen == ScreenMode::Hotkeys) {
+    drawHotkeysView(contentX + 6, contentY + 8, contentW - 12, contentH - 12);
+    return;
+  } else if (activeScreen == ScreenMode::CustomPersonality) {
+    drawCustomPersonalityView(contentX + 6, contentY + 8, contentW - 12, contentH - 12);
+    return;
   }
-
-  M5Cardputer.Display.setTextColor(activePane == ChatPane::Incoming ? COLOR_OK : COLOR_ACCENT, COLOR_PANEL);
-  M5Cardputer.Display.setCursor(contentX + 6, contentY + 8);
-  M5Cardputer.Display.print(currentPaneLabel());
-  M5Cardputer.Display.setTextColor(COLOR_DIM, COLOR_PANEL);
-  M5Cardputer.Display.setCursor(contentX + 106, contentY + 8);
-  if (activePane == ChatPane::Incoming) {
-    M5Cardputer.Display.print("Fn+O OUT");
-  } else if (inputBuffer.length()) {
-    M5Cardputer.Display.print("Typing...");
-  } else {
-    M5Cardputer.Display.print("Fn+M IN");
-  }
-
-  drawConversationLog(
-    contentX + 6,
-    contentY + 22,
-    contentW - 12,
-    contentH - 28
-  );
+  drawReaderView(contentX + 6, contentY + 8, contentW - 12, contentH - 12);
 }
 
 static void drawFooter(int screenW, int screenH) {
@@ -469,8 +765,20 @@ static void drawFooter(int screenW, int screenH) {
     M5Cardputer.Display.print("Fn+S CLOSE  Fn+C NET");
   } else if (activeScreen == ScreenMode::BotSettings) {
     M5Cardputer.Display.print("Fn+B BOT  Fn+;/. NAV");
+  } else if (activeScreen == ScreenMode::Hotkeys) {
+    M5Cardputer.Display.print("Fn+H CLOSE Fn+M BOT");
+  } else if (activeScreen == ScreenMode::CustomPersonality) {
+    if (activeCustomPersonalityStage == CustomPersonalityStage::Confirm) {
+      M5Cardputer.Display.print("Y SAVE  T TEST  N CANCEL");
+    } else {
+      M5Cardputer.Display.print("Enter next  Del erase  Fn+V close");
+    }
   } else {
-    M5Cardputer.Display.print("Fn+B BOT Fn+C NET Fn+S");
+    if (activePane == ChatPane::Incoming) {
+      M5Cardputer.Display.print("Fn+;. read  Fn+,/ turn");
+    } else {
+      M5Cardputer.Display.print("Enter send  Fn+M BOT");
+    }
   }
 }
 
@@ -489,8 +797,8 @@ static void drawToast(int screenW, int screenH) {
 
 static String modelShortLabel() {
   String model = gp_model[0] ? gp_model : GP_DEFAULT_MODEL;
-  if (model.length() <= 16) return model;
-  return model.substring(0, 16);
+  if (model.length() <= 8) return model;
+  return model.substring(0, 8);
 }
 
 static void renderUi() {
@@ -543,10 +851,6 @@ static void submitCurrentInput() {
     return;
   }
 
-  appendLogEntry("YOU ", text);
-  inputBuffer = "";
-  markDirty(DIRTY_CONTENT);
-
   String reply;
   String error;
   setToast(gp_peer_mode_enabled ? "Sending to peer..." : "Sending to Groq...", 1200);
@@ -558,7 +862,11 @@ static void submitCurrentInput() {
     setToast(error.length() ? error : (gp_peer_mode_enabled ? "Peer request failed." : "Groq request failed."), 3000);
     return;
   }
-  appendLogEntry("BOT ", reply);
+  inputBuffer = "";
+  gpSetLcdIncomingMessage(reply);
+  rebuildTurnPagesFromPersistedChat();
+  jumpToLatestTurn();
+  markDirty(DIRTY_CONTENT | DIRTY_FOOTER);
   setToast(gp_peer_mode_enabled ? "Peer reply received." : "Reply received.");
 }
 
@@ -629,7 +937,6 @@ static void finishRecording() {
   }
   free(wavPayload);
 
-  appendLogEntry("MIC ", transcript);
   setToast(gp_peer_mode_enabled ? "Sending to peer..." : "Sending to Groq...", 1200);
   renderUi();
 
@@ -641,7 +948,10 @@ static void finishRecording() {
     setToast(error.length() ? error : (gp_peer_mode_enabled ? "Peer request failed." : "Groq request failed."), 3000);
     return;
   }
-  appendLogEntry("BOT ", reply);
+  gpSetLcdIncomingMessage(reply);
+  rebuildTurnPagesFromPersistedChat();
+  jumpToLatestTurn();
+  markDirty(DIRTY_CONTENT | DIRTY_FOOTER);
   setToast(gp_peer_mode_enabled ? "Peer reply received." : "Reply received.");
 }
 
@@ -664,24 +974,6 @@ static void pollRecording() {
   }
 }
 
-static void scrollLog(int deltaLines) {
-  String lines[180];
-  int lineCount = 0;
-  const std::vector<String> &activeLog =
-    activePane == ChatPane::Incoming ? incomingLog : outgoingLog;
-  int &activeScrollOffset =
-    activePane == ChatPane::Incoming ? incomingLogScrollOffset : outgoingLogScrollOffset;
-  if (activePane == ChatPane::Outgoing && inputBuffer.length() > 0) {
-    fillWrappedLines(inputBuffer, lines, lineCount, 180, max(8, ((M5Cardputer.Display.width() - 24) / scaledCharWidth()) - 1));
-  } else {
-    buildConversationLines(activeLog, lines, lineCount, 180, max(8, ((M5Cardputer.Display.width() - 24) / scaledCharWidth()) - 1));
-  }
-  const int visibleLines = max(1, (M5Cardputer.Display.height() - HEADER_HEIGHT - FOOTER_HEIGHT - 34) / scaledLineHeight());
-  int maxOffset = max(0, lineCount - visibleLines);
-  activeScrollOffset = constrain(activeScrollOffset + deltaLines, 0, maxOffset);
-  markDirty(DIRTY_CONTENT);
-}
-
 static void adjustTextScale(int delta) {
   uint8_t previous = gp_text_scale;
   int next = static_cast<int>(gp_text_scale) + delta;
@@ -700,11 +992,11 @@ static void adjustLcdScrollSpeed(int deltaMs) {
   int next = static_cast<int>(gp_lcd_scroll_ms) + deltaMs;
   gpSetLcdScrollMs(static_cast<uint16_t>(next));
   if (gp_lcd_scroll_ms == previous) {
-    setToast(deltaMs > 0 ? "LCD already slowest." : "LCD already fastest.");
+    setToast(deltaMs > 0 ? "Scroll already slowest." : "Scroll already fastest.");
     return;
   }
-  markDirty(DIRTY_CONTENT);
-  setToast("LCD scroll " + String(gp_lcd_scroll_ms) + "ms");
+  markDirty(DIRTY_CONTENT | DIRTY_FOOTER);
+  setToast("Scroll " + String(gp_lcd_scroll_ms) + "ms");
 }
 
 static void setLcdBacklightEnabled(bool enabled) {
@@ -743,9 +1035,9 @@ static void cycleBotSettingValue(int delta) {
   } else {
     index = (index + delta + count) % count;
   }
-  gpSetActivePersonalityPrompt(GP_PERSONALITY_PRESETS[index].prompt);
+  gpSetActivePersonalityPrompt(gpPersonalityPresetPromptAt(static_cast<size_t>(index)));
   markDirty(DIRTY_CONTENT);
-  setToast(String("Persona: ") + GP_PERSONALITY_PRESETS[index].label);
+  setToast(String("Persona: ") + gpPersonalityPresetLabelAt(static_cast<size_t>(index)));
 }
 
 static void togglePeerMode() {
@@ -766,14 +1058,222 @@ static void togglePeerMode() {
   setToast("Connected device on.");
 }
 
+static bool isRepeatableFnKey(char c) {
+  return c == ';' || c == '.' || c == ',' || c == '/' || c == '[' || c == '{' || c == ']' || c == '}';
+}
+
+static void openCustomPersonalityEditor() {
+  activeScreen = ScreenMode::CustomPersonality;
+  activeCustomPersonalityStage = CustomPersonalityStage::Prompt;
+  customPersonalityPromptBuffer = "";
+  customPersonalityNameBuffer = "";
+  markDirty(DIRTY_CONTENT | DIRTY_FOOTER);
+}
+
+static void closeCustomPersonalityEditor() {
+  activeScreen = ScreenMode::Chat;
+  activeCustomPersonalityStage = CustomPersonalityStage::Prompt;
+  markDirty(DIRTY_CONTENT | DIRTY_FOOTER);
+}
+
+static void commitCustomPersonalitySave() {
+  String error;
+  if (!gpSaveCustomPersonalityPreset(customPersonalityNameBuffer, customPersonalityPromptBuffer, error)) {
+    setToast(error.length() ? error : "Custom bot save failed.", 3000);
+    return;
+  }
+  gpSetActivePersonalityPrompt(customPersonalityPromptBuffer);
+  closeCustomPersonalityEditor();
+  setToast(String("Saved bot: ") + customPersonalityNameBuffer, 2800);
+}
+
+static void testCustomPersonalityPrompt() {
+  String prompt = customPersonalityPromptBuffer;
+  prompt.trim();
+  if (!prompt.length()) {
+    setToast("Enter a custom prompt first.");
+    return;
+  }
+  gpSetRuntimePersonalityPrompt(prompt);
+  closeCustomPersonalityEditor();
+  markDirty(DIRTY_CONTENT | DIRTY_FOOTER);
+  setToast("Testing custom bot.");
+}
+
+static void handleCustomPersonalityInput(const Keyboard_Class::KeysState &status) {
+  if (activeCustomPersonalityStage == CustomPersonalityStage::Confirm) {
+    for (auto c : status.word) {
+      if (c == 'y' || c == 'Y') {
+        commitCustomPersonalitySave();
+        return;
+      }
+      if (c == 't' || c == 'T') {
+        testCustomPersonalityPrompt();
+        return;
+      }
+      if (c == 'n' || c == 'N') {
+        closeCustomPersonalityEditor();
+        setToast("Custom bot canceled.");
+        return;
+      }
+    }
+    return;
+  }
+
+  String *buffer = activeCustomPersonalityStage == CustomPersonalityStage::Prompt
+    ? &customPersonalityPromptBuffer
+    : &customPersonalityNameBuffer;
+
+  bool changedBuffer = false;
+  for (auto c : status.word) {
+    if (c >= 32 && c <= 126) {
+      *buffer += c;
+      changedBuffer = true;
+    }
+  }
+  if (status.del && buffer->length() > 0) {
+    buffer->remove(buffer->length() - 1);
+    changedBuffer = true;
+  }
+  if (status.enter) {
+    String value = *buffer;
+    value.trim();
+    if (!value.length()) {
+      setToast(activeCustomPersonalityStage == CustomPersonalityStage::Prompt ? "Enter a prompt first." : "Enter a bot name first.");
+      return;
+    }
+    if (activeCustomPersonalityStage == CustomPersonalityStage::Prompt) {
+      activeCustomPersonalityStage = CustomPersonalityStage::Name;
+    } else {
+      activeCustomPersonalityStage = CustomPersonalityStage::Confirm;
+    }
+    markDirty(DIRTY_CONTENT | DIRTY_FOOTER);
+    return;
+  }
+  if (changedBuffer) {
+    markDirty(DIRTY_CONTENT);
+  }
+}
+
+static bool handleRepeatableFnAction(char c) {
+  if (c == ';') {
+    if (activeScreen == ScreenMode::BotSettings) {
+      cycleBotSettingField(-1);
+    } else if (activeScreen == ScreenMode::Chat) {
+      scrollCurrentReply(-TURN_SCROLL_STEP,
+                         M5Cardputer.Display.width() - (CONTENT_MARGIN * 2) - 12,
+                         M5Cardputer.Display.height() - HEADER_HEIGHT - FOOTER_HEIGHT - (CONTENT_MARGIN * 2) - 28);
+    } else {
+      return false;
+    }
+    return true;
+  }
+
+  if (c == '.') {
+    if (activeScreen == ScreenMode::BotSettings) {
+      cycleBotSettingField(1);
+    } else if (activeScreen == ScreenMode::Chat) {
+      scrollCurrentReply(TURN_SCROLL_STEP,
+                         M5Cardputer.Display.width() - (CONTENT_MARGIN * 2) - 12,
+                         M5Cardputer.Display.height() - HEADER_HEIGHT - FOOTER_HEIGHT - (CONTENT_MARGIN * 2) - 28);
+    } else {
+      return false;
+    }
+    return true;
+  }
+
+  if (c == ',') {
+    if (activeScreen == ScreenMode::BotSettings) {
+      cycleBotSettingValue(-1);
+    } else if (activeScreen == ScreenMode::Chat) {
+      navigateTurnPages(-1);
+    } else {
+      return false;
+    }
+    return true;
+  }
+
+  if (c == '/') {
+    if (activeScreen == ScreenMode::BotSettings) {
+      cycleBotSettingValue(1);
+    } else if (activeScreen == ScreenMode::Chat) {
+      navigateTurnPages(1);
+    } else {
+      return false;
+    }
+    return true;
+  }
+
+  if (c == '[' || c == '{') {
+    adjustLcdScrollSpeed(50);
+    return true;
+  }
+
+  if (c == ']' || c == '}') {
+    adjustLcdScrollSpeed(-50);
+    return true;
+  }
+
+  return false;
+}
+
 static void handleKeyboard() {
-  if (!M5Cardputer.Keyboard.isChange()) return;
-  if (!M5Cardputer.Keyboard.isPressed()) return;
+  static bool fnComboConsumed = false;
+  static char heldFnRepeatKey = 0;
+  static unsigned long heldFnRepeatAfterMs = 0;
+  bool changed = M5Cardputer.Keyboard.isChange();
+  bool pressed = M5Cardputer.Keyboard.isPressed();
+
+  if (!pressed) {
+    fnComboConsumed = false;
+    heldFnRepeatKey = 0;
+    heldFnRepeatAfterMs = 0;
+    if (!changed) return;
+    return;
+  }
 
   Keyboard_Class::KeysState status = M5Cardputer.Keyboard.keysState();
   if (status.fn) {
+    char repeatableKey = 0;
+    for (auto c : status.word) {
+      if (isRepeatableFnKey(c)) {
+        repeatableKey = c;
+        break;
+      }
+    }
+
+    bool fnOnly = status.word.empty() && !status.enter && !status.del && !status.space && !status.tab;
+    if (fnOnly) {
+      fnComboConsumed = false;
+      heldFnRepeatKey = 0;
+      heldFnRepeatAfterMs = 0;
+      return;
+    }
+
+    if (repeatableKey != 0) {
+      bool shouldRepeat = false;
+      if (changed || heldFnRepeatKey != repeatableKey) {
+        shouldRepeat = true;
+        heldFnRepeatAfterMs = millis() + 260;
+      } else if (millis() >= heldFnRepeatAfterMs) {
+        shouldRepeat = true;
+        heldFnRepeatAfterMs = millis() + 95;
+      }
+
+      heldFnRepeatKey = repeatableKey;
+      if (shouldRepeat && handleRepeatableFnAction(repeatableKey)) {
+        return;
+      }
+    } else {
+      heldFnRepeatKey = 0;
+      heldFnRepeatAfterMs = 0;
+    }
+
+    if (!changed) return;
+    if (fnComboConsumed) return;
     bool handledFn = false;
     for (auto c : status.word) {
+      if (isRepeatableFnKey(c)) continue;
       if (c == 'a' || c == 'A') {
         handledFn = true;
         M5Cardputer.Display.fillScreen(COLOR_BG);
@@ -790,7 +1290,7 @@ static void handleKeyboard() {
         markDirty(DIRTY_ALL);
       } else if (c == 'm' || c == 'M') {
         activeScreen = ScreenMode::Chat;
-        activePane = ChatPane::Incoming;
+        jumpToLatestTurn();
         markDirty(DIRTY_CONTENT | DIRTY_FOOTER);
         handledFn = true;
       } else if (c == 'o' || c == 'O') {
@@ -807,6 +1307,18 @@ static void handleKeyboard() {
         activeBotSettingField = BotSettingField::Model;
         markDirty(DIRTY_CONTENT | DIRTY_FOOTER);
         handledFn = true;
+      } else if (c == 'h' || c == 'H') {
+        activeScreen = activeScreen == ScreenMode::Hotkeys ? ScreenMode::Chat : ScreenMode::Hotkeys;
+        markDirty(DIRTY_CONTENT | DIRTY_FOOTER);
+        handledFn = true;
+      } else if (c == 'v' || c == 'V') {
+        if (activeScreen == ScreenMode::CustomPersonality) {
+          closeCustomPersonalityEditor();
+          setToast("Custom bot canceled.");
+        } else {
+          openCustomPersonalityEditor();
+        }
+        handledFn = true;
       } else if (c == 'c' || c == 'C') {
         togglePeerMode();
         handledFn = true;
@@ -818,56 +1330,24 @@ static void handleKeyboard() {
         handledFn = true;
       } else if (c == 'n' || c == 'N') {
         gpResetChatHistory();
-        incomingLog.clear();
-        outgoingLog.clear();
-        incomingLogScrollOffset = 0;
-        outgoingLogScrollOffset = 0;
+        chatTurnPages.clear();
+        activeTurnIndex = -1;
         inputBuffer = "";
         gpSetLcdIncomingMessage("New chat started.");
-        activePane = ChatPane::Incoming;
+        jumpToLatestTurn();
         activeScreen = ScreenMode::Chat;
         markDirty(DIRTY_CONTENT | DIRTY_FOOTER);
         setToast("New chat started.");
         handledFn = true;
       } else if (c == 'r' || c == 'R') {
         gpResetChatHistory();
-        incomingLog.clear();
-        outgoingLog.clear();
-        incomingLogScrollOffset = 0;
-        outgoingLogScrollOffset = 0;
+        chatTurnPages.clear();
+        activeTurnIndex = -1;
         inputBuffer = "";
-        activePane = ChatPane::Incoming;
+        jumpToLatestTurn();
         activeScreen = ScreenMode::Chat;
         markDirty(DIRTY_CONTENT | DIRTY_FOOTER);
         setToast("Chat history cleared.");
-        handledFn = true;
-      } else if (c == ';') {
-        if (activeScreen == ScreenMode::BotSettings) {
-          cycleBotSettingField(-1);
-        } else if (activeScreen == ScreenMode::Chat) {
-          scrollLog(LOG_SCROLL_STEP);
-        }
-        handledFn = true;
-      } else if (c == '.') {
-        if (activeScreen == ScreenMode::BotSettings) {
-          cycleBotSettingField(1);
-        } else if (activeScreen == ScreenMode::Chat) {
-          scrollLog(-LOG_SCROLL_STEP);
-        }
-        handledFn = true;
-      } else if (c == ',') {
-        if (activeScreen == ScreenMode::BotSettings) {
-          cycleBotSettingValue(-1);
-        } else {
-          adjustLcdScrollSpeed(50);
-        }
-        handledFn = true;
-      } else if (c == '/') {
-        if (activeScreen == ScreenMode::BotSettings) {
-          cycleBotSettingValue(1);
-        } else {
-          adjustLcdScrollSpeed(-50);
-        }
         handledFn = true;
       } else if (c == '+' || c == '=') {
         adjustTextScale(1);
@@ -877,12 +1357,27 @@ static void handleKeyboard() {
         handledFn = true;
       }
     }
-    if (handledFn) return;
+    if (handledFn) {
+      fnComboConsumed = true;
+      return;
+    }
+  } else {
+    fnComboConsumed = false;
+    heldFnRepeatKey = 0;
+    heldFnRepeatAfterMs = 0;
   }
 
-  if (activeScreen == ScreenMode::Settings || activeScreen == ScreenMode::BotSettings) {
-    activeScreen = ScreenMode::Chat;
-    markDirty(DIRTY_CONTENT | DIRTY_FOOTER);
+  if (!changed) return;
+
+  if (activeScreen == ScreenMode::Settings ||
+      activeScreen == ScreenMode::BotSettings ||
+      activeScreen == ScreenMode::Hotkeys) {
+    return;
+  }
+
+  if (activeScreen == ScreenMode::CustomPersonality) {
+    handleCustomPersonalityInput(status);
+    return;
   }
 
   for (auto c : status.word) {
@@ -952,10 +1447,12 @@ void setup() {
 
   gpConnect(false);
   gpLoadChatHistory();
-  restoreLogsFromPersistedChat();
+  rebuildTurnPagesFromPersistedChat();
   if (gp_has_settings) {
-    if (incomingLog.empty() && outgoingLog.empty()) {
-      appendLogEntry("SYS ", "Groqputer ready.");
+    if (chatTurnPages.empty()) {
+      setToast("Groqputer ready.");
+    } else {
+      jumpToLatestTurn();
     }
   } else {
     gpSetLcdIncomingMessage("Run setup AP to add WiFi and Groq key.");
@@ -968,6 +1465,8 @@ void loop() {
   static wl_status_t lastWifiStatus = WL_IDLE_STATUS;
   static int lastRecordingTenths = -1;
   static unsigned long lastPowerCheckMs = 0;
+  static int32_t lastBatteryLevel = -999;
+  static int16_t lastBatteryMilliVolts = -999;
 
   M5Cardputer.update();
   handleKeyboard();
@@ -976,12 +1475,21 @@ void loop() {
     startRecording();
   }
   pollRecording();
+  pollReplyAutoScroll();
 
   gpEnsureWifiConnected();
 
   if (millis() - lastPowerCheckMs >= 1500) {
     lastPowerCheckMs = millis();
     applyDisplayBrightness();
+
+    int32_t batteryLevel = currentBatteryLevel();
+    int16_t batteryMilliVolts = currentBatteryMilliVolts();
+    if (batteryLevel != lastBatteryLevel || batteryMilliVolts != lastBatteryMilliVolts) {
+      lastBatteryLevel = batteryLevel;
+      lastBatteryMilliVolts = batteryMilliVolts;
+      markDirty(DIRTY_HEADER);
+    }
   }
 
   wl_status_t wifiStatus = WiFi.status();

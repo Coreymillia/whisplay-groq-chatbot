@@ -28,7 +28,7 @@ This project starts from the official PiSugar Whisplay chatbot, but is being tai
 - **Captured still image on HAT display:** working
 - **Companion CYD touchscreen client:** working as a polished multi-mode touch companion with chat, capture, gallery, and settings screens
 - **Companion Cardputer client:** working as an early rough-start build, with text chat confirmed and more settings/UI work planned
-- **Groqputer standalone Cardputer firmware:** standalone Groq Cardputer firmware now running in this repo, with readable split chat views, direct Groq chat/Whisper, optional 16x2 I2C LCD output, on-device bot settings, and early same-LAN Whisplay relay testing
+- **Groqputer standalone Cardputer firmware:** standalone Groq Cardputer firmware now running in this repo, with a full-screen incoming/outgoing reader, battery in the header, direct Groq chat/Whisper, saved custom personalities from the AP or Cardputer, optional 16x2 I2C LCD output, on-device bot settings, and early same-LAN Whisplay relay testing
 - **Core2Groq unified M5Core2 firmware:** early dual-mode Core2 build now running in this repo, combining the existing OTR radio project with a new Groq bot mode, touch-first controls, and a path toward future BotNet connectivity
 - **Standalone GroqBotNet Pi Zero node:** working as a separate same-network experiment with browser chat plus Mini PiTFT output
 - **Web simulator/debug UI:** still available at `http://<host-or-pi-ip>:17880`
@@ -259,11 +259,13 @@ That means `Groqputer/` is **not** trying to be a full Whisplay port. It is mean
 ### Current Groqputer firmware highlights
 
 - **Standalone runtime:** the Cardputer can boot from saved Wi-Fi settings, talk directly to Groq, and keep a small local chat history without depending on a Whisplay host.
-- **Readable Cardputer UI:** Groqputer now uses separate incoming and outgoing message views instead of the earlier cramped mixed pane, with larger text and better manual navigation.
+- **Readable Cardputer UI:** Groqputer now uses a full-screen reader with separate incoming and outgoing views, larger text, better manual navigation, and outgoing draft auto-follow while typing.
 - **Reduced screen flicker:** the Cardputer UI now redraws by region instead of repainting the whole screen for routine updates.
 - **Voice input:** hold **BtnA** to record, then Groq Whisper transcription is sent into either the local Groq path or the configured peer test path.
 - **On-device bot settings:** model and personality can now be changed from the Cardputer itself without reopening the AP.
-- **Whisplay personality parity:** the current Groqputer bot-settings menu includes the same preset personalities used by the Whisplay HAT/browser stack: Neutral, Friendly, Cranky, Roast Bot, Sleepy Pi, Affirmation, Philosopher, Mythic Oracle, Joke Bot, Tutor, Detective, and Zen.
+- **Saved custom personalities:** custom named bots can now be saved from the setup AP or directly on-device with **Fn+V**, tested without saving, and deleted from the AP.
+- **Header status:** the top bar now keeps Wi-Fi, battery, record length, and model visible while reading chat.
+- **Whisplay personality parity:** the current Groqputer bot-settings menu includes the same base personality family used by the broader project, with Groqputer-specific built-ins such as **Roast Puter** and **Sleepy Puter**.
 - **Optional external LCD:** a 16x2 I2C HD44780 LCD with backpack can mirror compact status on line 1 and scroll incoming bot replies on line 2.
 - **Local LCD tuning:** the Cardputer can adjust the LCD marquee speed, remember LCD backlight on/off, and save those preferences in local storage.
 - **Peer-device groundwork:** the setup AP now includes **This Device URL** and **Connected Device URL**, and Groqputer can test a simple one-shot same-LAN relay path against a Whisplay node.
@@ -289,22 +291,30 @@ That means `Groqputer/` is **not** trying to be a full Whisplay port. It is mean
 - **Enter** = send the current typed message
 - **Hold BtnA** = record a voice message
 - **Fn+A** = open the setup AP
+- **Fn+H** = open or close the hotkey sheet
 - **Fn+M** = switch the main chat window to **incoming** history
 - **Fn+O** = switch the main chat window to **outgoing** history
 - **Fn+S** = open or close the **settings** screen
 - **Fn+B** = open or close the **bot settings** screen for model and personality
+- **Fn+V** = open or close the staged **custom personality** flow
 - **Fn+C** = toggle the saved connected-device / LAN mode on or off
 - **Fn+1** / **Fn+2** = turn the external LCD backlight off or on
 - **Fn+N** = start a new chat / clear the active conversation
-- **Fn+;** = scroll the current history view one direction
-- **Fn+.** = scroll the current history view the other direction
-- **Fn+,** / **Fn+/** = slow down or speed up the external LCD marquee
+- **Fn+;** / **Fn+.** = scroll the current reply view up or down
+- **Fn+,** / **Fn+/** = move to the previous or next saved turn
+- **Fn+[** / **Fn+]** = slow down or speed up the shared LCD / Cardputer auto-scroll speed
 - **Fn++** / **Fn+-** = increase or decrease Cardputer text size
 
 When **Bot Settings** is open:
 
 - **Fn+;** / **Fn+.** = move between **Model** and **Personality**
 - **Fn+,** / **Fn+/** = cycle the selected value and save it immediately
+
+When **Fn+V custom personality** is open:
+
+- type the personality prompt, then press **Enter**
+- type the bot name, then press **Enter**
+- press **Y** to save, **T** to test without saving, or **N** to cancel
 
 ### Current Groqputer external LCD notes
 

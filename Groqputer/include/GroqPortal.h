@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Arduino.h>
+#include <ArduinoJson.h>
 #include <DNSServer.h>
 #include <Preferences.h>
 #include <WebServer.h>
@@ -54,13 +55,13 @@ static constexpr GpPersonalityPreset GP_PERSONALITY_PRESETS[] = {
   },
   {
     "roast-bot",
-    "Roast Bot",
-    "You are a witty Raspberry Pi chatbot with a playful roast-comedy personality. Lightly roast the user, complain about your tiny hardware, but never be hateful or abusive. Always stay useful.",
+    "Roast Puter",
+    "You are a witty Groqputer assistant with a playful roast-comedy personality. Lightly roast the user, complain about your tiny keyboard and pocket-size hardware, but never be hateful or abusive. Always stay useful.",
   },
   {
     "sleepy-pi",
-    "Sleepy Pi",
-    "You are an overworked little Raspberry Pi that sounds tired and underpowered. Respond like you are doing your best on limited hardware, but still help the user.",
+    "Sleepy Puter",
+    "You are an overworked little Groqputer that sounds tired and underpowered. Respond like you are doing your best on limited handheld hardware, but still help the user.",
   },
   {
     "affirmation",
@@ -99,6 +100,13 @@ static constexpr GpPersonalityPreset GP_PERSONALITY_PRESETS[] = {
   },
 };
 
+static constexpr size_t GP_MAX_CUSTOM_PERSONALITY_PRESETS = 8;
+
+struct GpCustomPersonalityPreset {
+  String name;
+  String prompt;
+};
+
 static char gp_wifi_ssid[64] = "";
 static char gp_wifi_pass[64] = "";
 static char gp_groq_api_key[128] = "";
@@ -114,6 +122,9 @@ static bool gp_has_settings = false;
 static bool gp_peer_mode_enabled = false;
 static unsigned long gp_last_wifi_retry_ms = 0;
 static const unsigned long GP_WIFI_RETRY_INTERVAL_MS = 10000;
+static GpCustomPersonalityPreset gp_custom_personality_presets[GP_MAX_CUSTOM_PERSONALITY_PRESETS];
+static size_t gp_custom_personality_preset_count = 0;
+static String gp_portal_notice = "";
 
 static WebServer *gp_portal_server = nullptr;
 static DNSServer *gp_portal_dns = nullptr;
@@ -138,6 +149,152 @@ static String gpEscapeHtml(const String &value) {
   escaped.replace("<", "&lt;");
   escaped.replace(">", "&gt;");
   return escaped;
+}
+
+static void gpClearCustomPersonalityPresets() {
+  for (size_t i = 0; i < GP_MAX_CUSTOM_PERSONALITY_PRESETS; i++) {
+    gp_custom_personality_presets[i].name = "";
+    gp_custom_personality_presets[i].prompt = "";
+  }
+  gp_custom_personality_preset_count = 0;
+}
+
+static void gpLoadCustomPersonalityPresets() {
+  gpClearCustomPersonalityPresets();
+
+  Preferences prefs;
+  prefs.begin("groqputer", true);
+  String customPresetsJson = prefs.getString("customPresets", "[]");
+  prefs.end();
+
+  JsonDocument doc;
+  if (deserializeJson(doc, customPresetsJson)) {
+    return;
+  }
+  JsonArray presets = doc.as<JsonArray>();
+  if (presets.isNull()) return;
+
+  for (JsonVariant value : presets) {
+    if (gp_custom_personality_preset_count >= GP_MAX_CUSTOM_PERSONALITY_PRESETS) break;
+    String name = String(value["name"] | "");
+    String prompt = String(value["prompt"] | "");
+    name.trim();
+    prompt.trim();
+    if (!name.length() || !prompt.length()) continue;
+    gp_custom_personality_presets[gp_custom_personality_preset_count].name = name;
+    gp_custom_personality_presets[gp_custom_personality_preset_count].prompt = prompt;
+    gp_custom_personality_preset_count += 1;
+  }
+}
+
+static void gpPersistCustomPersonalityPresets() {
+  JsonDocument doc;
+  JsonArray presets = doc.to<JsonArray>();
+  for (size_t i = 0; i < gp_custom_personality_preset_count; i++) {
+    JsonObject entry = presets.add<JsonObject>();
+    entry["name"] = gp_custom_personality_presets[i].name;
+    entry["prompt"] = gp_custom_personality_presets[i].prompt;
+  }
+
+  String serialized;
+  serializeJson(presets, serialized);
+
+  Preferences prefs;
+  prefs.begin("groqputer", false);
+  prefs.putString("customPresets", serialized);
+  prefs.end();
+}
+
+static int gpFindCustomPersonalityPresetIndexByName(const String &name) {
+  String normalized = name;
+  normalized.trim();
+  for (size_t i = 0; i < gp_custom_personality_preset_count; i++) {
+    if (gp_custom_personality_presets[i].name.equalsIgnoreCase(normalized)) {
+      return static_cast<int>(i);
+    }
+  }
+  return -1;
+}
+
+static bool gpSaveCustomPersonalityPreset(const String &name, const String &prompt, String &errorOut) {
+  errorOut = "";
+  String normalizedName = name;
+  String normalizedPrompt = prompt;
+  normalizedName.trim();
+  normalizedPrompt.trim();
+  if (!normalizedName.length()) {
+    errorOut = "Custom bot name is required.";
+    return false;
+  }
+  if (!normalizedPrompt.length()) {
+    errorOut = "Custom bot prompt is required.";
+    return false;
+  }
+
+  int existingIndex = gpFindCustomPersonalityPresetIndexByName(normalizedName);
+  if (existingIndex >= 0) {
+    gp_custom_personality_presets[existingIndex].name = normalizedName;
+    gp_custom_personality_presets[existingIndex].prompt = normalizedPrompt;
+    gpPersistCustomPersonalityPresets();
+    return true;
+  }
+
+  if (gp_custom_personality_preset_count >= GP_MAX_CUSTOM_PERSONALITY_PRESETS) {
+    errorOut = "Custom bot storage is full.";
+    return false;
+  }
+
+  gp_custom_personality_presets[gp_custom_personality_preset_count].name = normalizedName;
+  gp_custom_personality_presets[gp_custom_personality_preset_count].prompt = normalizedPrompt;
+  gp_custom_personality_preset_count += 1;
+  gpPersistCustomPersonalityPresets();
+  return true;
+}
+
+static bool gpDeleteCustomPersonalityPreset(const String &name, String &errorOut) {
+  errorOut = "";
+  int index = gpFindCustomPersonalityPresetIndexByName(name);
+  if (index < 0) {
+    errorOut = "Custom bot not found.";
+    return false;
+  }
+
+  for (size_t i = static_cast<size_t>(index); i + 1 < gp_custom_personality_preset_count; i++) {
+    gp_custom_personality_presets[i] = gp_custom_personality_presets[i + 1];
+  }
+  if (gp_custom_personality_preset_count > 0) {
+    gp_custom_personality_preset_count -= 1;
+    gp_custom_personality_presets[gp_custom_personality_preset_count].name = "";
+    gp_custom_personality_presets[gp_custom_personality_preset_count].prompt = "";
+  }
+  gpPersistCustomPersonalityPresets();
+  return true;
+}
+
+static size_t gpPersonalityPresetCount() {
+  return (sizeof(GP_PERSONALITY_PRESETS) / sizeof(GP_PERSONALITY_PRESETS[0])) + gp_custom_personality_preset_count;
+}
+
+static bool gpPersonalityPresetIsCustom(size_t index) {
+  return index >= (sizeof(GP_PERSONALITY_PRESETS) / sizeof(GP_PERSONALITY_PRESETS[0]));
+}
+
+static String gpPersonalityPresetLabelAt(size_t index) {
+  if (!gpPersonalityPresetIsCustom(index)) {
+    return GP_PERSONALITY_PRESETS[index].label;
+  }
+  size_t customIndex = index - (sizeof(GP_PERSONALITY_PRESETS) / sizeof(GP_PERSONALITY_PRESETS[0]));
+  if (customIndex >= gp_custom_personality_preset_count) return "Custom";
+  return gp_custom_personality_presets[customIndex].name;
+}
+
+static String gpPersonalityPresetPromptAt(size_t index) {
+  if (!gpPersonalityPresetIsCustom(index)) {
+    return GP_PERSONALITY_PRESETS[index].prompt;
+  }
+  size_t customIndex = index - (sizeof(GP_PERSONALITY_PRESETS) / sizeof(GP_PERSONALITY_PRESETS[0]));
+  if (customIndex >= gp_custom_personality_preset_count) return GP_DEFAULT_PERSONALITY;
+  return gp_custom_personality_presets[customIndex].prompt;
 }
 
 static void gpLoadSettings() {
@@ -176,6 +333,7 @@ static void gpLoadSettings() {
   } else if (gp_text_scale > 3) {
     gp_text_scale = 3;
   }
+  gpLoadCustomPersonalityPresets();
   gp_has_settings = gp_wifi_ssid[0] != '\0' && gp_groq_api_key[0] != '\0';
 }
 
@@ -270,10 +428,6 @@ static size_t gpModelOptionCount() {
   return sizeof(GP_MODEL_OPTIONS) / sizeof(GP_MODEL_OPTIONS[0]);
 }
 
-static size_t gpPersonalityPresetCount() {
-  return sizeof(GP_PERSONALITY_PRESETS) / sizeof(GP_PERSONALITY_PRESETS[0]);
-}
-
 static int gpCurrentModelOptionIndex() {
   for (size_t i = 0; i < gpModelOptionCount(); i++) {
     if (strcmp(gp_model, GP_MODEL_OPTIONS[i].value) == 0) {
@@ -287,7 +441,7 @@ static int gpCurrentPersonalityPresetIndex() {
   String normalized = gp_personality_prompt;
   normalized.trim();
   for (size_t i = 0; i < gpPersonalityPresetCount(); i++) {
-    if (normalized == GP_PERSONALITY_PRESETS[i].prompt) {
+    if (normalized == gpPersonalityPresetPromptAt(i)) {
       return static_cast<int>(i);
     }
   }
@@ -322,6 +476,10 @@ static void gpSetActivePersonalityPrompt(const String &prompt) {
   );
 }
 
+static void gpSetRuntimePersonalityPrompt(const String &prompt) {
+  gp_personality_prompt = prompt.length() ? prompt : GP_DEFAULT_PERSONALITY;
+}
+
 static String gpModelOptionHtml(const char *value, const char *label) {
   String html = "<option value='";
   html += value;
@@ -337,7 +495,7 @@ static String gpModelOptionHtml(const char *value, const char *label) {
 
 static String gpBuildPortalHtml() {
   String html;
-  html.reserve(3500);
+  html.reserve(6500);
   html += "<!DOCTYPE html><html><head>";
   html += "<meta charset='UTF-8'><meta name='viewport' content='width=device-width,initial-scale=1'>";
   html += "<title>Groqputer Setup</title><style>";
@@ -346,10 +504,17 @@ static String gpBuildPortalHtml() {
   html += "input,select,textarea{width:100%;box-sizing:border-box;padding:10px;border-radius:6px;border:1px solid #35516f;background:#111a24;color:#f2fbff;}";
   html += "textarea{min-height:120px;resize:vertical;}";
   html += "button{width:100%;padding:14px;margin-top:18px;border:none;border-radius:8px;background:#1b77ff;color:#fff;font-weight:bold;}";
-  html += ".hint{font-size:.95em;color:#9ab4c9;}";
+  html += ".hint{font-size:.95em;color:#9ab4c9;}.notice{margin:16px 0;padding:12px;border-radius:8px;background:#143050;color:#d7ecff;}";
+  html += ".danger{background:#b54040;}.card{margin-top:12px;padding:12px;border:1px solid #35516f;border-radius:8px;background:#111a24;}";
+  html += ".card h3{margin:0 0 8px 0;color:#66f0ff;}.card p{margin:0 0 8px 0;white-space:pre-wrap;}.mini{margin-top:10px;padding:10px;}";
   html += "</style></head><body>";
   html += "<h1>Groqputer Setup</h1>";
   html += "<p class='hint'>Join this AP, save Wi-Fi + Groq settings, then the Cardputer will reboot into standalone chat mode.</p>";
+  if (gp_portal_notice.length()) {
+    html += "<div class='notice'>";
+    html += gpEscapeHtml(gp_portal_notice);
+    html += "</div>";
+  }
   html += "<form method='post' action='/save'>";
   html += "<label>WiFi SSID</label><input name='ssid' value='" + gpEscapeHtml(String(gp_wifi_ssid)) + "' maxlength='63' required>";
   html += "<label>WiFi Password</label><input name='pass' type='password' value='" + gpEscapeHtml(String(gp_wifi_pass)) + "' maxlength='63'>";
@@ -367,12 +532,63 @@ static String gpBuildPortalHtml() {
   html += "<label>Personality Prompt</label><textarea name='personality' required>";
   html += gpEscapeHtml(gp_personality_prompt);
   html += "</textarea>";
-  html += "<button type='submit'>Save & Reboot</button></form></body></html>";
+  html += "<label>Save Current Prompt As Custom Bot</label><input name='customName' maxlength='40' placeholder='My favorite bot'>";
+  html += "<button type='submit' formaction='/custom-save' formmethod='post'>Save Custom Bot</button>";
+  html += "<button type='submit'>Save & Reboot</button></form>";
+
+  html += "<div class='card'><h3>Active persona</h3><p>";
+  html += gpEscapeHtml(gpCurrentPersonalityPresetIndex() >= 0 ? gpPersonalityPresetLabelAt(gpCurrentPersonalityPresetIndex()) : String("Unsaved custom prompt"));
+  html += "</p><p class='hint'>Custom bots can be saved here or from Fn+V on the Cardputer. Delete stays AP-only.</p></div>";
+
+  html += "<div class='card'><h3>Saved custom bots</h3>";
+  if (gp_custom_personality_preset_count == 0) {
+    html += "<p class='hint'>No saved custom bots yet.</p>";
+  } else {
+    for (size_t i = 0; i < gp_custom_personality_preset_count; i++) {
+      html += "<div class='card'><h3>";
+      html += gpEscapeHtml(gp_custom_personality_presets[i].name);
+      html += "</h3><p>";
+      html += gpEscapeHtml(gp_custom_personality_presets[i].prompt);
+      html += "</p><form method='post' action='/custom-delete'>";
+      html += "<input type='hidden' name='customName' value='";
+      html += gpEscapeHtml(gp_custom_personality_presets[i].name);
+      html += "'>";
+      html += "<button class='danger mini' type='submit'>Delete Custom Bot</button></form></div>";
+    }
+  }
+  html += "</div></body></html>";
   return html;
 }
 
 static void gpHandlePortalRoot() {
   gp_portal_server->send(200, "text/html", gpBuildPortalHtml());
+}
+
+static void gpHandlePortalCustomSave() {
+  String personality = gp_portal_server->arg("personality");
+  String customName = gp_portal_server->arg("customName");
+  if (personality.length()) {
+    gpSetRuntimePersonalityPrompt(personality);
+  }
+
+  String error;
+  if (gpSaveCustomPersonalityPreset(customName, personality, error)) {
+    gp_portal_notice = "Saved custom bot \"" + customName + "\".";
+  } else {
+    gp_portal_notice = error.length() ? error : "Custom bot save failed.";
+  }
+  gpHandlePortalRoot();
+}
+
+static void gpHandlePortalCustomDelete() {
+  String customName = gp_portal_server->arg("customName");
+  String error;
+  if (gpDeleteCustomPersonalityPreset(customName, error)) {
+    gp_portal_notice = "Deleted custom bot \"" + customName + "\".";
+  } else {
+    gp_portal_notice = error.length() ? error : "Custom bot delete failed.";
+  }
+  gpHandlePortalRoot();
 }
 
 static void gpHandlePortalSave() {
@@ -397,6 +613,7 @@ static void gpHandlePortalSave() {
     connectedDeviceUrl.c_str(),
     peerModeEnabled
   );
+  gp_portal_notice = "";
 
   gp_portal_server->send(
     200,
@@ -423,6 +640,8 @@ static void gpRunPortal() {
   gp_portal_dns->start(53, "*", WiFi.softAPIP());
   gp_portal_server->on("/", gpHandlePortalRoot);
   gp_portal_server->on("/save", HTTP_POST, gpHandlePortalSave);
+  gp_portal_server->on("/custom-save", HTTP_POST, gpHandlePortalCustomSave);
+  gp_portal_server->on("/custom-delete", HTTP_POST, gpHandlePortalCustomDelete);
   gp_portal_server->onNotFound(gpHandlePortalRoot);
   gp_portal_server->begin();
 
