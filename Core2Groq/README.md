@@ -8,15 +8,9 @@ Original concept: **[winRadio by Volos Projects](https://github.com/VolosR/Waves
 
 ---
 
-## Photos
+## Demo
 
-### Earlier prototype — Core2 + CJMCU-4713 SI4713 FM modulator
-![M5Core2Radio with SI4713 FM module](IMG_20260330_112507.jpg)
-*Earlier prototype photo from the FM-transmitter phase of the project.*
-
-### Earlier prototype broadcast test
-![FM broadcast received on Raddy radio](IMG_20260330_112658.jpg)
-*Historical test image from when the project also included FM re-broadcast hardware.*
+![Core2Groq demo](YouCut_20260512_122958855%20(1).gif)
 
 ---
 

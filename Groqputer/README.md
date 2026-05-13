@@ -21,6 +21,10 @@ Groqputer started as a pivot from the larger Whisplay project so the Cardputer c
 
 The long-term hope is still to let Groqputer connect back into the Whisplay ecosystem more cleanly, but the first goal is a dependable standalone Cardputer chatbot.
 
+## Demo
+
+![Groqputer demo](YouCut_20260511_194736911.gif)
+
 ## Current status
 
 Working now:
@@ -52,6 +56,18 @@ This folder includes a merged firmware image for easier flashing:
 - **`Groqputer_M5Cardputer-MERGED.bin`**
 
 This image includes the bootloader, partitions, boot app, and main firmware in one file.
+
+After flashing the merged image, the Cardputer may show a **blank screen for a short while during boot**. Give it roughly **up to a minute** before assuming the flash failed.
+
+### Maintainer note for future M5Burner builds
+
+When regenerating `Groqputer_M5Cardputer-MERGED.bin`, use the same flash settings that PlatformIO uses for the working board upload:
+
+- `flash_mode dio`
+- `flash_freq 80m`
+- `flash_size 8MB`
+
+Using the wrong flash mode can produce a merged image that flashes successfully but boot-loops at ROM startup instead of reaching the app.
 
 ## Setup
 
@@ -88,6 +104,8 @@ After that, Groqputer can use direct Groq chat and direct Groq Whisper transcrip
 If Groqputer is not configured yet, it does **not** mean the firmware is broken.
 
 On first boot it should now show setup instructions on the Cardputer screen and wait in the AP setup flow until Wi-Fi and the Groq key are saved.
+
+If the screen stays blank immediately after flashing, wait a bit before retrying. The merged image can take a little time to come up on the first boot.
 
 For Whisplay relay testing, the connected device URL should be the Whisplay browser base URL, for example:
 
