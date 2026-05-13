@@ -114,6 +114,7 @@ static char gp_groq_api_key[128] = "";
 static char gp_model[64] = "";
 static char gp_this_device_url[128] = "";
 static char gp_connected_device_url[128] = "";
+static char gp_camera_base_url[128] = "";
 static char gp_weather_latitude[24] = "";
 static char gp_weather_longitude[24] = "";
 static uint8_t gp_record_seconds = GP_DEFAULT_RECORD_SECONDS;
@@ -364,6 +365,7 @@ static void gpLoadSettings() {
   String personality = prefs.getString("personality", GP_DEFAULT_PERSONALITY);
   String thisDeviceUrl = prefs.getString("thisBotUrl", "");
   String connectedDeviceUrl = prefs.getString("peerBotUrl", "");
+  String cameraBaseUrl = prefs.getString("cameraUrl", "");
   String weatherLatitude = prefs.getString("weatherLat", "");
   String weatherLongitude = prefs.getString("weatherLon", "");
   gp_record_seconds = gpClampRecordSeconds(
@@ -383,6 +385,7 @@ static void gpLoadSettings() {
   model.toCharArray(gp_model, sizeof(gp_model));
   thisDeviceUrl.toCharArray(gp_this_device_url, sizeof(gp_this_device_url));
   connectedDeviceUrl.toCharArray(gp_connected_device_url, sizeof(gp_connected_device_url));
+  cameraBaseUrl.toCharArray(gp_camera_base_url, sizeof(gp_camera_base_url));
   gpParseCoordinateValue(weatherLatitude, -90.0, 90.0, gp_weather_latitude, sizeof(gp_weather_latitude));
   gpParseCoordinateValue(weatherLongitude, -180.0, 180.0, gp_weather_longitude, sizeof(gp_weather_longitude));
   if (gp_model[0] == '\0') {
@@ -407,6 +410,7 @@ static void gpSaveSettings(
   uint8_t recordSeconds,
   const char *thisDeviceUrl,
   const char *connectedDeviceUrl,
+  const char *cameraBaseUrl,
   const char *weatherLatitude,
   const char *weatherLongitude,
   bool peerModeEnabled
@@ -423,6 +427,7 @@ static void gpSaveSettings(
   prefs.putBool("lcdbl", gp_lcd_backlight_enabled);
   prefs.putString("thisBotUrl", thisDeviceUrl ? thisDeviceUrl : "");
   prefs.putString("peerBotUrl", connectedDeviceUrl ? connectedDeviceUrl : "");
+  prefs.putString("cameraUrl", cameraBaseUrl ? cameraBaseUrl : "");
   prefs.putString("weatherLat", weatherLatitude ? weatherLatitude : "");
   prefs.putString("weatherLon", weatherLongitude ? weatherLongitude : "");
   prefs.putBool("peerMode", peerModeEnabled);
@@ -434,6 +439,7 @@ static void gpSaveSettings(
   strlcpy(gp_model, model && model[0] ? model : GP_DEFAULT_MODEL, sizeof(gp_model));
   strlcpy(gp_this_device_url, thisDeviceUrl ? thisDeviceUrl : "", sizeof(gp_this_device_url));
   strlcpy(gp_connected_device_url, connectedDeviceUrl ? connectedDeviceUrl : "", sizeof(gp_connected_device_url));
+  strlcpy(gp_camera_base_url, cameraBaseUrl ? cameraBaseUrl : "", sizeof(gp_camera_base_url));
   strlcpy(gp_weather_latitude, weatherLatitude ? weatherLatitude : "", sizeof(gp_weather_latitude));
   strlcpy(gp_weather_longitude, weatherLongitude ? weatherLongitude : "", sizeof(gp_weather_longitude));
   gp_personality_prompt = personality.length() ? personality : GP_DEFAULT_PERSONALITY;
@@ -487,6 +493,7 @@ static void gpSetPeerModeEnabled(bool enabled) {
     gp_record_seconds,
     gp_this_device_url,
     gp_connected_device_url,
+    gp_camera_base_url,
     gp_weather_latitude,
     gp_weather_longitude,
     enabled
@@ -527,6 +534,7 @@ static void gpSetActiveModel(const char *model) {
     gp_record_seconds,
     gp_this_device_url,
     gp_connected_device_url,
+    gp_camera_base_url,
     gp_weather_latitude,
     gp_weather_longitude,
     gp_peer_mode_enabled
@@ -543,6 +551,7 @@ static void gpSetActivePersonalityPrompt(const String &prompt) {
     gp_record_seconds,
     gp_this_device_url,
     gp_connected_device_url,
+    gp_camera_base_url,
     gp_weather_latitude,
     gp_weather_longitude,
     gp_peer_mode_enabled
@@ -594,6 +603,7 @@ static String gpBuildPortalHtml() {
   html += "<label>Groq API Key</label><input name='groqKey' value='" + gpEscapeHtml(String(gp_groq_api_key)) + "' maxlength='127' required>";
   html += "<label>This Device URL</label><input name='thisBotUrl' value='" + gpEscapeHtml(String(gp_this_device_url)) + "' maxlength='127' placeholder='http://10.160.0.203:17880'>";
   html += "<label>Connected Device URL</label><input name='peerBotUrl' value='" + gpEscapeHtml(String(gp_connected_device_url)) + "' maxlength='127' placeholder='http://10.160.0.136:17880'>";
+  html += "<label>ESP32-CAM URL</label><input name='cameraUrl' value='" + gpEscapeHtml(String(gp_camera_base_url)) + "' maxlength='127' placeholder='http://10.160.0.178'>";
   html += "<label>Weather Latitude</label><input name='weatherLat' value='" + gpEscapeHtml(String(gp_weather_latitude)) + "' maxlength='23' placeholder='40.7128'>";
   html += "<label>Weather Longitude</label><input name='weatherLon' value='" + gpEscapeHtml(String(gp_weather_longitude)) + "' maxlength='23' placeholder='-74.0060'>";
   html += "<label>Chat Model</label><select name='model'>";
@@ -672,6 +682,7 @@ static void gpHandlePortalSave() {
   String apiKey = gp_portal_server->arg("groqKey");
   String thisDeviceUrl = gp_portal_server->arg("thisBotUrl");
   String connectedDeviceUrl = gp_portal_server->arg("peerBotUrl");
+  String cameraBaseUrl = gp_portal_server->arg("cameraUrl");
   String weatherLatitude = gp_portal_server->arg("weatherLat");
   String weatherLongitude = gp_portal_server->arg("weatherLon");
   String model = gp_portal_server->arg("model");
@@ -712,6 +723,7 @@ static void gpHandlePortalSave() {
     recordSec,
     thisDeviceUrl.c_str(),
     connectedDeviceUrl.c_str(),
+    cameraBaseUrl.c_str(),
     normalizedWeatherLatitude,
     normalizedWeatherLongitude,
     peerModeEnabled

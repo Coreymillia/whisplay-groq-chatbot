@@ -1,6 +1,9 @@
 #include <Arduino.h>
 #include <M5Cardputer.h>
+#include <SD.h>
+#include <SPI.h>
 #include <WiFi.h>
+#include <algorithm>
 #include <vector>
 
 #include "GroqApi.h"
@@ -27,7 +30,10 @@ struct ChatTurnPage {
 };
 
 static std::vector<ChatTurnPage> chatTurnPages;
+static std::vector<String> cameraPhotoPaths;
 static int activeTurnIndex = -1;
+static int activePhotoIndex = -1;
+static uint8_t activePhotoRotationQuarterTurns = 0;
 static int activeReplyScrollOffset = 0;
 static unsigned long replyAutoScrollPauseUntilMs = 0;
 static unsigned long lastReplyAutoScrollMs = 0;
@@ -51,6 +57,11 @@ static constexpr int CONTENT_MARGIN = 6;
 static constexpr int TOAST_HEIGHT = 20;
 static constexpr uint8_t TFT_BRIGHTNESS_USB = 128;
 static constexpr uint8_t TFT_BRIGHTNESS_BATTERY = 48;
+static constexpr int SD_SPI_SCK_PIN = 40;
+static constexpr int SD_SPI_MISO_PIN = 39;
+static constexpr int SD_SPI_MOSI_PIN = 14;
+static constexpr int SD_SPI_CS_PIN = 12;
+static constexpr size_t CAMERA_DOWNLOAD_CHUNK = 1024;
 
 enum class ChatPane : uint8_t {
   Incoming,
@@ -63,6 +74,7 @@ enum class ScreenMode : uint8_t {
   BotSettings,
   Hotkeys,
   CustomPersonality,
+  PhotoViewer,
 };
 
 enum class BotSettingField : uint8_t {
@@ -92,6 +104,8 @@ static CustomPersonalityStage activeCustomPersonalityStage = CustomPersonalitySt
 static bool usingExternalPower = true;
 static String customPersonalityPromptBuffer;
 static String customPersonalityNameBuffer;
+static bool sdCardInitAttempted = false;
+static bool sdCardReady = false;
 
 static void markDirty(uint8_t regions) {
   dirtyRegions |= regions;
@@ -102,6 +116,8 @@ static void resetReplyScroll(unsigned long pauseMs = TURN_AUTO_SCROLL_PAUSE_MS);
 static void fillWrappedLines(const String &sourceText, String *lines, int &lineCount, int maxLines, int maxChars);
 static bool submitMessageForReply(const String &text, bool clearInputOnSuccess);
 static void recordConversationTurn(const String &userText, const String &replyText);
+static bool captureEsp32CamPhoto(String &savedPathOut, String &errorOut);
+static bool openPhotoViewer(const String &preferredPath, String &errorOut);
 
 static int32_t currentBatteryLevel() {
   int32_t level = M5.Power.getBatteryLevel();
@@ -194,6 +210,416 @@ static void setToast(const String &message, uint16_t durationMs = 2200) {
   markDirty(DIRTY_CONTENT | DIRTY_FOOTER | DIRTY_TOAST);
 }
 
+static String normalizeBaseUrl(const String &value) {
+  String normalized = value;
+  normalized.trim();
+  while (normalized.endsWith("/")) {
+    normalized.remove(normalized.length() - 1);
+  }
+  return normalized;
+}
+
+static bool ensureSdCardReady(String &errorOut) {
+  errorOut = "";
+  if (sdCardReady) {
+    return true;
+  }
+  if (!sdCardInitAttempted) {
+    SPI.begin(SD_SPI_SCK_PIN, SD_SPI_MISO_PIN, SD_SPI_MOSI_PIN, SD_SPI_CS_PIN);
+    sdCardReady = SD.begin(SD_SPI_CS_PIN, SPI, 25000000);
+    sdCardInitAttempted = true;
+  }
+  if (!sdCardReady) {
+    errorOut = "SD card is not ready.";
+    return false;
+  }
+  if (SD.cardType() == CARD_NONE) {
+    errorOut = "No SD card attached.";
+    sdCardReady = false;
+    return false;
+  }
+  if (!SD.exists("/camera")) {
+    SD.mkdir("/camera");
+  }
+  return true;
+}
+
+static bool captureEsp32CamPhoto(String &savedPathOut, String &errorOut) {
+  savedPathOut = "";
+  errorOut = "";
+
+  String cameraBaseUrl = normalizeBaseUrl(String(gp_camera_base_url));
+  if (!cameraBaseUrl.length()) {
+    errorOut = "Add ESP32-CAM URL in setup first.";
+    return false;
+  }
+  if (!gpEnsureWifiConnected()) {
+    errorOut = "WiFi is not connected.";
+    return false;
+  }
+
+  HTTPClient statusHttp;
+  if (!statusHttp.begin(cameraBaseUrl + "/status")) {
+    errorOut = "Camera status request failed.";
+    return false;
+  }
+  statusHttp.setTimeout(10000);
+  int statusCode = statusHttp.GET();
+  String statusBody = statusHttp.getString();
+  statusHttp.end();
+  if (statusCode < 200 || statusCode >= 300) {
+    errorOut = statusBody.length() ? statusBody : String("Camera status HTTP ") + statusCode;
+    return false;
+  }
+
+  String sdError;
+  if (!ensureSdCardReady(sdError)) {
+    errorOut = sdError;
+    return false;
+  }
+
+  String filePath = "/camera/capture-" + String(millis()) + ".jpg";
+  File file = SD.open(filePath, FILE_WRITE);
+  if (!file) {
+    errorOut = "Could not open SD file for photo.";
+    return false;
+  }
+
+  HTTPClient imageHttp;
+  if (!imageHttp.begin(cameraBaseUrl + "/latest.jpg")) {
+    file.close();
+    SD.remove(filePath);
+    errorOut = "Camera image request failed.";
+    return false;
+  }
+  imageHttp.setTimeout(15000);
+  int imageCode = imageHttp.GET();
+  if (imageCode < 200 || imageCode >= 300) {
+    String body = imageHttp.getString();
+    imageHttp.end();
+    file.close();
+    SD.remove(filePath);
+    errorOut = body.length() ? body : String("Camera image HTTP ") + imageCode;
+    return false;
+  }
+
+  WiFiClient *stream = imageHttp.getStreamPtr();
+  int remaining = imageHttp.getSize();
+  uint8_t buffer[CAMERA_DOWNLOAD_CHUNK];
+  size_t totalWritten = 0;
+  unsigned long idleDeadline = millis() + 15000;
+  while (imageHttp.connected() && (remaining > 0 || remaining == -1)) {
+    size_t available = stream->available();
+    if (available == 0) {
+      if (millis() > idleDeadline) {
+        break;
+      }
+      delay(1);
+      continue;
+    }
+
+    size_t toRead = min(available, sizeof(buffer));
+    int bytesRead = stream->readBytes(buffer, toRead);
+    if (bytesRead <= 0) {
+      break;
+    }
+    size_t written = file.write(buffer, bytesRead);
+    totalWritten += written;
+    idleDeadline = millis() + 15000;
+    if (remaining > 0) {
+      remaining -= bytesRead;
+    }
+  }
+
+  imageHttp.end();
+  file.close();
+
+  if (totalWritten < 512) {
+    SD.remove(filePath);
+    errorOut = "Camera photo download was too small.";
+    return false;
+  }
+
+  savedPathOut = filePath;
+  return true;
+}
+
+static bool isJpegPath(const String &path) {
+  String lowered = path;
+  lowered.toLowerCase();
+  return lowered.endsWith(".jpg") || lowered.endsWith(".jpeg");
+}
+
+static bool refreshCameraPhotoList(String &errorOut) {
+  errorOut = "";
+  cameraPhotoPaths.clear();
+  activePhotoIndex = -1;
+
+  String sdError;
+  if (!ensureSdCardReady(sdError)) {
+    errorOut = sdError;
+    return false;
+  }
+
+  File directory = SD.open("/camera");
+  if (!directory || !directory.isDirectory()) {
+    errorOut = "Camera folder is missing.";
+    return false;
+  }
+
+  while (true) {
+    File entry = directory.openNextFile();
+    if (!entry) {
+      break;
+    }
+    if (!entry.isDirectory()) {
+      String path = String(entry.name());
+      if (!path.startsWith("/")) {
+        path = String("/camera/") + path;
+      }
+      if (isJpegPath(path)) {
+        cameraPhotoPaths.push_back(path);
+      }
+    }
+    entry.close();
+  }
+  directory.close();
+
+  if (cameraPhotoPaths.empty()) {
+    errorOut = "No saved photos on SD.";
+    return false;
+  }
+
+  std::sort(cameraPhotoPaths.begin(), cameraPhotoPaths.end(), [](const String &left, const String &right) {
+    return left.compareTo(right) < 0;
+  });
+  return true;
+}
+
+static bool openPhotoViewer(const String &preferredPath, String &errorOut) {
+  if (!refreshCameraPhotoList(errorOut)) {
+    return false;
+  }
+
+  activePhotoIndex = static_cast<int>(cameraPhotoPaths.size()) - 1;
+  activePhotoRotationQuarterTurns = 0;
+  if (preferredPath.length()) {
+    for (size_t i = 0; i < cameraPhotoPaths.size(); i++) {
+      if (cameraPhotoPaths[i] == preferredPath) {
+        activePhotoIndex = static_cast<int>(i);
+        break;
+      }
+    }
+  }
+
+  activeScreen = ScreenMode::PhotoViewer;
+  markDirty(DIRTY_CONTENT | DIRTY_FOOTER);
+  return true;
+}
+
+static void navigatePhotoViewer(int delta) {
+  if (activeScreen != ScreenMode::PhotoViewer) {
+    return;
+  }
+  if (cameraPhotoPaths.empty() || activePhotoIndex < 0) {
+    setToast("No saved photos on SD.");
+    return;
+  }
+
+  int next = constrain(activePhotoIndex + delta, 0, static_cast<int>(cameraPhotoPaths.size()) - 1);
+  if (next == activePhotoIndex) {
+    setToast(delta < 0 ? "Oldest photo." : "Newest photo.");
+    return;
+  }
+
+  activePhotoIndex = next;
+  markDirty(DIRTY_CONTENT | DIRTY_FOOTER);
+}
+
+static String activePhotoFilename() {
+  if (activePhotoIndex < 0 || activePhotoIndex >= static_cast<int>(cameraPhotoPaths.size())) {
+    return "";
+  }
+  String path = cameraPhotoPaths[activePhotoIndex];
+  int slashPos = path.lastIndexOf('/');
+  return slashPos >= 0 ? path.substring(slashPos + 1) : path;
+}
+
+static bool readFileByte(File &file, uint8_t &value) {
+  int next = file.read();
+  if (next < 0) {
+    return false;
+  }
+  value = static_cast<uint8_t>(next);
+  return true;
+}
+
+static bool readFileBigEndian16(File &file, uint16_t &value) {
+  uint8_t high = 0;
+  uint8_t low = 0;
+  if (!readFileByte(file, high) || !readFileByte(file, low)) {
+    return false;
+  }
+  value = static_cast<uint16_t>((high << 8) | low);
+  return true;
+}
+
+static bool readJpegDimensions(File &file, int &widthOut, int &heightOut) {
+  widthOut = 0;
+  heightOut = 0;
+  if (!file.seek(0)) {
+    return false;
+  }
+
+  uint8_t first = 0;
+  uint8_t second = 0;
+  if (!readFileByte(file, first) || !readFileByte(file, second) || first != 0xFF || second != 0xD8) {
+    return false;
+  }
+
+  while (file.available()) {
+    uint8_t markerPrefix = 0;
+    if (!readFileByte(file, markerPrefix)) {
+      return false;
+    }
+    if (markerPrefix != 0xFF) {
+      continue;
+    }
+
+    uint8_t marker = 0;
+    do {
+      if (!readFileByte(file, marker)) {
+        return false;
+      }
+    } while (marker == 0xFF);
+
+    if (marker == 0xD8 || marker == 0xD9 || marker == 0x01 || (marker >= 0xD0 && marker <= 0xD7)) {
+      continue;
+    }
+
+    uint16_t segmentLength = 0;
+    if (!readFileBigEndian16(file, segmentLength) || segmentLength < 2) {
+      return false;
+    }
+
+    const bool isStartOfFrame =
+      marker == 0xC0 || marker == 0xC1 || marker == 0xC2 || marker == 0xC3 ||
+      marker == 0xC5 || marker == 0xC6 || marker == 0xC7 ||
+      marker == 0xC9 || marker == 0xCA || marker == 0xCB ||
+      marker == 0xCD || marker == 0xCE || marker == 0xCF;
+    if (isStartOfFrame) {
+      uint8_t precision = 0;
+      uint16_t height = 0;
+      uint16_t width = 0;
+      if (!readFileByte(file, precision) ||
+          !readFileBigEndian16(file, height) ||
+          !readFileBigEndian16(file, width)) {
+        return false;
+      }
+      (void)precision;
+      widthOut = static_cast<int>(width);
+      heightOut = static_cast<int>(height);
+      return widthOut > 0 && heightOut > 0;
+    }
+
+    size_t currentPos = file.position();
+    if (!file.seek(currentPos + segmentLength - 2)) {
+      return false;
+    }
+  }
+
+  return false;
+}
+
+static void computePhotoFillParams(int sourceWidth, int sourceHeight, int targetWidth, int targetHeight,
+                                   float &scaleOut, int &offsetXOut, int &offsetYOut) {
+  float widthScale = static_cast<float>(targetWidth) / static_cast<float>(sourceWidth);
+  float heightScale = static_cast<float>(targetHeight) / static_cast<float>(sourceHeight);
+  scaleOut = max(widthScale, heightScale);
+  int scaledWidth = static_cast<int>(ceilf(static_cast<float>(sourceWidth) * scaleOut));
+  int scaledHeight = static_cast<int>(ceilf(static_cast<float>(sourceHeight) * scaleOut));
+  offsetXOut = max(0, (scaledWidth - targetWidth) / 2);
+  offsetYOut = max(0, (scaledHeight - targetHeight) / 2);
+}
+
+static void drawPhotoViewer(int x, int y, int w, int h) {
+  if (activePhotoIndex < 0 || activePhotoIndex >= static_cast<int>(cameraPhotoPaths.size())) {
+    M5Cardputer.Display.setTextColor(COLOR_ERROR, COLOR_PANEL);
+    M5Cardputer.Display.setCursor(x, y + 18);
+    M5Cardputer.Display.print("No photo selected.");
+    return;
+  }
+
+  M5Cardputer.Display.fillRect(x, y, w, h, COLOR_BG);
+  bool drawn = false;
+  File photoFile = SD.open(cameraPhotoPaths[activePhotoIndex].c_str(), FILE_READ);
+  if (photoFile) {
+    int sourceWidth = 0;
+    int sourceHeight = 0;
+    if (readJpegDimensions(photoFile, sourceWidth, sourceHeight) && photoFile.seek(0)) {
+      int spriteWidth = w;
+      int spriteHeight = h;
+      if (activePhotoRotationQuarterTurns % 2 == 1) {
+        spriteWidth = h;
+        spriteHeight = w;
+      }
+
+      M5Canvas photoCanvas(&M5Cardputer.Display);
+      photoCanvas.setColorDepth(16);
+      if (photoCanvas.createSprite(spriteWidth, spriteHeight)) {
+        photoCanvas.fillSprite(COLOR_BG);
+        float scale = 1.0f;
+        int offsetX = 0;
+        int offsetY = 0;
+        computePhotoFillParams(sourceWidth, sourceHeight, spriteWidth, spriteHeight, scale, offsetX, offsetY);
+        drawn = photoCanvas.drawJpg(
+          &photoFile,
+          0,
+          0,
+          spriteWidth,
+          spriteHeight,
+          offsetX,
+          offsetY,
+          scale,
+          scale,
+          top_left
+        );
+
+        if (drawn) {
+          if (activePhotoRotationQuarterTurns == 0) {
+            photoCanvas.pushSprite(x, y);
+          } else {
+            photoCanvas.setPivot((photoCanvas.width() / 2.0f) - 0.5f, (photoCanvas.height() / 2.0f) - 0.5f);
+            photoCanvas.pushRotateZoom(
+              &M5Cardputer.Display,
+              x + (w / 2.0f),
+              y + (h / 2.0f),
+              activePhotoRotationQuarterTurns * 90.0f,
+              1.0f,
+              1.0f
+            );
+          }
+        }
+        photoCanvas.deleteSprite();
+      }
+    }
+    photoFile.close();
+  }
+
+  if (!drawn) {
+    M5Cardputer.Display.setTextColor(COLOR_ERROR, COLOR_BG);
+    M5Cardputer.Display.setCursor(x + 8, y + 10);
+    M5Cardputer.Display.print("Photo decode failed.");
+    return;
+  }
+
+  M5Cardputer.Display.fillRect(x + 4, y + 4, 56, 10, COLOR_BG);
+  M5Cardputer.Display.setTextColor(COLOR_DIM, COLOR_BG);
+  M5Cardputer.Display.setCursor(x + 6, y + 12);
+  M5Cardputer.Display.print(String(activePhotoIndex + 1) + "/" + String(cameraPhotoPaths.size()) +
+                            " R" + String(activePhotoRotationQuarterTurns * 90));
+}
+
 static String clampLogText(const String &value) {
   if (value.length() <= MAX_DISPLAY_CHARS) return value;
   return value.substring(value.length() - MAX_DISPLAY_CHARS);
@@ -242,6 +668,10 @@ static void drawSettingsView(int x, int y, int w, int h) {
 
   M5Cardputer.Display.setCursor(x, cursorY);
   M5Cardputer.Display.print(String("Weather ") + (gpWeatherCoordinatesReady() ? "ready" : "missing"));
+  cursorY += lineHeight;
+
+  M5Cardputer.Display.setCursor(x, cursorY);
+  M5Cardputer.Display.print(String("Camera ") + (String(gp_camera_base_url).length() ? "ready" : "missing"));
   cursorY += lineHeight;
 
   M5Cardputer.Display.setCursor(x, cursorY);
@@ -319,10 +749,13 @@ static void drawHotkeysView(int x, int y, int w, int h) {
     "Fn+,/ turns",
     "Fn+;. read up/down",
     "Fn+[/] scroll speed",
+    "Fn+T photo rotate",
     "Fn+V custom bot",
     "Fn+S settings",
     "Fn+B bot settings",
     "Fn+P weather",
+    "Fn+G capture",
+    "Fn+I photos",
     "Fn+C linked device",
     "Fn+N new  Fn+R clear",
     "Fn+A setup portal",
@@ -753,6 +1186,9 @@ static void drawContentPanel(int screenW, int screenH) {
   } else if (activeScreen == ScreenMode::CustomPersonality) {
     drawCustomPersonalityView(contentX + 6, contentY + 8, contentW - 12, contentH - 12);
     return;
+  } else if (activeScreen == ScreenMode::PhotoViewer) {
+    drawPhotoViewer(contentX + 6, contentY + 8, contentW - 12, contentH - 12);
+    return;
   }
   drawReaderView(contentX + 6, contentY + 8, contentW - 12, contentH - 12);
 }
@@ -780,6 +1216,8 @@ static void drawFooter(int screenW, int screenH) {
     } else {
       M5Cardputer.Display.print("Enter next  Del erase  Fn+V close");
     }
+  } else if (activeScreen == ScreenMode::PhotoViewer) {
+    M5Cardputer.Display.print("Fn+I CLOSE Fn+,/ PHOTOS Fn+T ROT");
   } else {
     if (activePane == ChatPane::Incoming) {
       M5Cardputer.Display.print("Fn+;. read  Fn+,/ turn");
@@ -901,6 +1339,10 @@ static bool shouldRouteToWeather(const String &value) {
     normalized == "weather alerts" ||
     normalized == "any alerts" ||
     normalized == "are there any alerts" ||
+    normalized == "wheres the weather" ||
+    normalized == "where s the weather" ||
+    normalized == "hows the weather" ||
+    normalized == "how s the weather" ||
     normalized == "is it going to snow" ||
     normalized == "is snow coming" ||
     normalized == "snow forecast" ||
@@ -908,6 +1350,22 @@ static bool shouldRouteToWeather(const String &value) {
     normalized.startsWith("what is the weather") ||
     normalized.startsWith("what is the forecast") ||
     normalized.startsWith("what s the forecast");
+}
+
+static bool shouldCapturePhoto(const String &value) {
+  String normalized = normalizeIntentText(value);
+  if (!normalized.length()) {
+    return false;
+  }
+  return
+    normalized == "take photo" ||
+    normalized == "take a photo" ||
+    normalized == "take picture" ||
+    normalized == "take a picture" ||
+    normalized == "capture photo" ||
+    normalized == "capture image" ||
+    normalized == "capture picture" ||
+    normalized == "snapshot";
 }
 
 static bool submitMessageForReply(const String &text, bool clearInputOnSuccess) {
@@ -926,7 +1384,28 @@ static bool submitMessageForReply(const String &text, bool clearInputOnSuccess) 
   String error;
   bool usedWeatherRoute = false;
 
-  if (shouldRouteToWeather(message)) {
+  if (shouldCapturePhoto(message)) {
+    String savedPath;
+    setToast("Checking camera...", 1200);
+    renderUi();
+    if (!captureEsp32CamPhoto(savedPath, error)) {
+      setToast(error.length() ? error : "Camera capture failed.", 3000);
+      return false;
+    }
+    if (clearInputOnSuccess) {
+      inputBuffer = "";
+    }
+    if (!openPhotoViewer(savedPath, error)) {
+      activePane = ChatPane::Incoming;
+      gpSetLcdIncomingMessage("Photo saved to SD");
+      markDirty(DIRTY_CONTENT | DIRTY_FOOTER);
+      setToast(error.length() ? error : "Photo saved to SD.", 3200);
+      return true;
+    }
+    setToast("Photo saved: " + savedPath, 3200);
+    return true;
+  } else if (shouldRouteToWeather(message)) {
+    gpSetLcdLastPrompt(message);
     usedWeatherRoute = true;
     if (!gpWeatherCoordinatesReady()) {
       setToast("Add weather lat/lon in setup.", 3000);
@@ -948,6 +1427,7 @@ static bool submitMessageForReply(const String &text, bool clearInputOnSuccess) 
       return false;
     }
   } else {
+    gpSetLcdLastPrompt(message);
     setToast(gp_peer_mode_enabled ? "Sending to peer..." : "Sending to Groq...", 1200);
     renderUi();
     bool ok = gp_peer_mode_enabled
@@ -1274,6 +1754,8 @@ static bool handleRepeatableFnAction(char c) {
   if (c == ',') {
     if (activeScreen == ScreenMode::BotSettings) {
       cycleBotSettingValue(-1);
+    } else if (activeScreen == ScreenMode::PhotoViewer) {
+      navigatePhotoViewer(-1);
     } else if (activeScreen == ScreenMode::Chat) {
       navigateTurnPages(-1);
     } else {
@@ -1285,6 +1767,8 @@ static bool handleRepeatableFnAction(char c) {
   if (c == '/') {
     if (activeScreen == ScreenMode::BotSettings) {
       cycleBotSettingValue(1);
+    } else if (activeScreen == ScreenMode::PhotoViewer) {
+      navigatePhotoViewer(1);
     } else if (activeScreen == ScreenMode::Chat) {
       navigateTurnPages(1);
     } else {
@@ -1411,6 +1895,37 @@ static void handleKeyboard() {
       } else if (c == 'c' || c == 'C') {
         togglePeerMode();
         handledFn = true;
+      } else if (c == 'g' || c == 'G') {
+        String savedPath;
+        String error;
+        setToast("Checking camera...", 1200);
+        renderUi();
+        if (!captureEsp32CamPhoto(savedPath, error)) {
+          setToast(error.length() ? error : "Camera capture failed.", 3000);
+        } else {
+          if (!openPhotoViewer(savedPath, error)) {
+            gpSetLcdIncomingMessage("Photo saved to SD");
+            markDirty(DIRTY_CONTENT | DIRTY_FOOTER);
+          }
+          setToast("Photo saved: " + savedPath, 3200);
+        }
+        handledFn = true;
+      } else if (c == 'i' || c == 'I') {
+        String error;
+        if (activeScreen == ScreenMode::PhotoViewer) {
+          activeScreen = ScreenMode::Chat;
+          markDirty(DIRTY_CONTENT | DIRTY_FOOTER);
+        } else if (!openPhotoViewer("", error)) {
+          setToast(error.length() ? error : "No saved photos on SD.", 2800);
+        }
+        handledFn = true;
+      } else if (c == 't' || c == 'T') {
+        if (activeScreen == ScreenMode::PhotoViewer) {
+          activePhotoRotationQuarterTurns = (activePhotoRotationQuarterTurns + 1) % 4;
+          markDirty(DIRTY_CONTENT | DIRTY_FOOTER);
+          setToast("Photo rotate " + String(activePhotoRotationQuarterTurns * 90) + " deg", 2200);
+        }
+        handledFn = true;
       } else if (c == 'p' || c == 'P') {
         submitMessageForReply("What's the weather?", false);
         handledFn = true;
@@ -1463,7 +1978,8 @@ static void handleKeyboard() {
 
   if (activeScreen == ScreenMode::Settings ||
       activeScreen == ScreenMode::BotSettings ||
-      activeScreen == ScreenMode::Hotkeys) {
+      activeScreen == ScreenMode::Hotkeys ||
+      activeScreen == ScreenMode::PhotoViewer) {
     return;
   }
 

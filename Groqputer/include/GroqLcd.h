@@ -15,9 +15,12 @@ static constexpr uint8_t GP_LCD_SCL_PIN = 2;
 static LiquidCrystal_I2C *gp_lcd = nullptr;
 static bool gp_lcd_ready = false;
 static String gp_lcd_status_line = "";
+static String gp_lcd_header_source = "";
 static String gp_lcd_message_source = "";
+static unsigned long gp_lcd_last_header_scroll_ms = 0;
 static unsigned long gp_lcd_last_scroll_ms = 0;
 static unsigned long gp_lcd_last_status_ms = 0;
+static size_t gp_lcd_header_scroll_offset = 0;
 static size_t gp_lcd_scroll_offset = 0;
 
 static String gpPadOrTrimLcd(const String &value) {
@@ -65,11 +68,28 @@ static void gpInitLcd() {
     gp_lcd->noBacklight();
   }
   gp_lcd_last_scroll_ms = millis();
+  gp_lcd_last_header_scroll_ms = millis();
   gp_lcd_last_status_ms = 0;
 }
 
 static bool gpIsLcdReady() {
   return gp_lcd_ready;
+}
+
+static String gpCurrentModelTag() {
+  String model = gp_model[0] ? gp_model : GP_DEFAULT_MODEL;
+  if (model.startsWith("llama-3.1")) {
+    return "L31";
+  } else if (model.startsWith("llama-3.3")) {
+    return "L33";
+  } else if (model.startsWith("qwen/")) {
+    return "QWN";
+  } else if (model.startsWith("groq/")) {
+    return "CMP";
+  } else if (model.startsWith("openai/")) {
+    return "GPT";
+  }
+  return "BOT";
 }
 
 static String gpBuildLcdStatusLine(
@@ -88,25 +108,45 @@ static String gpBuildLcdStatusLine(
     line += String(recordSeconds);
     line += "s";
   } else if (WiFi.status() == WL_CONNECTED) {
-    line = "WiFi OK ";
-    String model = gp_model[0] ? gp_model : GP_DEFAULT_MODEL;
-    if (model.startsWith("llama-3.1")) {
-      line += "L31";
-    } else if (model.startsWith("llama-3.3")) {
-      line += "L33";
-    } else if (model.startsWith("qwen/")) {
-      line += "QWN";
-    } else if (model.startsWith("groq/")) {
-      line += "CMP";
-    } else if (model.startsWith("openai/")) {
-      line += "GPT";
-    } else {
-      line += "BOT";
+    String prefix = gpCurrentModelTag() + " ";
+    int availableCols = GP_LCD_COLS - prefix.length();
+    if (availableCols <= 0) {
+      return gpPadOrTrimLcd(prefix);
     }
+
+    String source = gp_lcd_header_source.length()
+      ? gp_lcd_header_source
+      : String("Ready for chat");
+    if (source.length() <= static_cast<size_t>(availableCols)) {
+      line = prefix + source;
+      return gpPadOrTrimLcd(line);
+    }
+
+    String marquee = source + "   ";
+    if (gp_lcd_header_scroll_offset >= marquee.length()) {
+      gp_lcd_header_scroll_offset = 0;
+    }
+    String doubled = marquee + marquee;
+    line = prefix + doubled.substring(gp_lcd_header_scroll_offset, gp_lcd_header_scroll_offset + availableCols);
   } else {
     line = "No WiFi Setup";
   }
   return gpPadOrTrimLcd(line);
+}
+
+static void gpSetLcdLastPrompt(const String &message) {
+  String normalized = message;
+  normalized.replace("\r", " ");
+  normalized.replace("\n", " ");
+  normalized.trim();
+  if (!normalized.length()) {
+    normalized = "Ready for chat";
+  }
+  if (normalized != gp_lcd_header_source) {
+    gp_lcd_header_source = normalized;
+    gp_lcd_header_scroll_offset = 0;
+    gp_lcd_last_header_scroll_ms = 0;
+  }
 }
 
 static void gpSetLcdIncomingMessage(const String &message) {
@@ -164,11 +204,27 @@ static void gpUpdateLcd(
   }
 
   bool advanceScroll = false;
+  bool advanceHeaderScroll = false;
+  int headerTextCols = GP_LCD_COLS - (gpCurrentModelTag().length() + 1);
+  if (headerTextCols < 1) {
+    headerTextCols = 1;
+  }
+  if (!recordingActive &&
+      WiFi.status() == WL_CONNECTED &&
+      gp_lcd_header_source.length() > static_cast<size_t>(headerTextCols)) {
+    if (gp_lcd_last_header_scroll_ms == 0 || now - gp_lcd_last_header_scroll_ms >= gp_lcd_scroll_ms) {
+      advanceHeaderScroll = true;
+      gp_lcd_last_header_scroll_ms = now;
+    }
+  }
   if (gp_lcd_message_source.length() > GP_LCD_COLS) {
     if (gp_lcd_last_scroll_ms == 0 || now - gp_lcd_last_scroll_ms >= gp_lcd_scroll_ms) {
       advanceScroll = true;
       gp_lcd_last_scroll_ms = now;
     }
+  }
+  if (advanceHeaderScroll) {
+    gp_lcd_header_scroll_offset += 1;
   }
   if (advanceScroll) {
     gp_lcd_scroll_offset += 1;

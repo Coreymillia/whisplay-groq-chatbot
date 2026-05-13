@@ -43,6 +43,8 @@ Working now:
 - hotkey help screen
 - setup AP with saved Wi-Fi and Groq settings
 - optional 16x2 I2C LCD output
+- NWS weather routed through the active persona
+- ESP32-CAM capture with on-device photo browser
 - merged M5Burner-ready firmware image
 
 Current experimental feature:
@@ -84,6 +86,7 @@ Using the wrong flash mode can produce a merged image that flashes successfully 
    - Groq API key
    - chat model
    - personality prompt
+   - optional ESP32-CAM URL for remote photo capture
    - optional weather latitude / longitude for NWS forecast + alerts
    - optional custom bot saves from that current prompt
    - max record seconds
@@ -126,6 +129,9 @@ http://10.160.0.136:17880
 - **Fn+B** = bot settings
 - **Fn+V** = custom personality flow
 - **Fn+P** = ask for the weather
+- **Fn+G** = capture photo from ESP32-CAM to SD
+- **Fn+I** = open saved photo browser
+- **Fn+T** = rotate current photo in the browser
 - **Fn+C** = connected-device / LAN mode on or off
 - **Fn+N** = new chat
 - **Fn+;** / **Fn+.** = read up / down
@@ -139,10 +145,46 @@ http://10.160.0.136:17880
 Set **Weather Latitude** and **Weather Longitude** in the setup AP, then ask:
 
 - **"What's the weather?"**
+- **"Where's the weather?"**
 - **"weather forecast"**
 - **"weather alerts"**
 
 Groqputer fetches NOAA/NWS forecast + alerts for the saved coordinates, then replies in the style of the currently active persona instead of dumping raw utility text.
+
+### ESP32-CAM capture
+
+Set **ESP32-CAM URL** in the setup AP, for example:
+
+```text
+http://10.160.0.178
+```
+
+Then either:
+
+- press **Fn+G**
+- or type **"take photo"** / **"capture image"**
+
+Groqputer polls the remote camera, downloads the latest JPEG, saves it to the SD card under `/camera/`, and opens the newest photo inside the Cardputer content window.
+
+Use **Fn+I** to reopen the photo browser later, **Fn+,** and **Fn+/** to move backward and forward through saved captures, and **Fn+T** to rotate the current image in 90-degree steps.
+
+### Optional 16x2 LCD companion
+
+If the external I2C LCD is connected, Groqputer uses it like this:
+
+- **Top row**: active model tag plus the last submitted prompt scrolling across the remaining space
+- **Bottom row**: current incoming bot reply, scrolling when needed
+
+Model tags are compact 3-character labels such as:
+
+- **L31** = llama-3.1 family
+- **L33** = llama-3.3 family
+- **QWN** = qwen family
+- **CMP** = groq compound family
+- **GPT** = openai family
+- **BOT** = fallback for anything else
+
+Special states still override the top row when needed, such as recording and no-WiFi/setup mode.
 
 ### Bot settings controls
 
