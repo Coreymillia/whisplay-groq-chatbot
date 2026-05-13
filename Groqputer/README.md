@@ -84,6 +84,7 @@ Using the wrong flash mode can produce a merged image that flashes successfully 
    - Groq API key
    - chat model
    - personality prompt
+   - optional weather latitude / longitude for NWS forecast + alerts
    - optional custom bot saves from that current prompt
    - max record seconds
    - optional **This Device URL**
@@ -124,6 +125,7 @@ http://10.160.0.136:17880
 - **Fn+S** = settings screen
 - **Fn+B** = bot settings
 - **Fn+V** = custom personality flow
+- **Fn+P** = ask for the weather
 - **Fn+C** = connected-device / LAN mode on or off
 - **Fn+N** = new chat
 - **Fn+;** / **Fn+.** = read up / down
@@ -131,6 +133,16 @@ http://10.160.0.136:17880
 - **Fn+[** / **Fn+]** = slower / faster shared scroll speed
 - **Fn+1** / **Fn+2** = LCD backlight off / on
 - **Fn++** / **Fn+-** = Cardputer text size up / down
+
+### Weather
+
+Set **Weather Latitude** and **Weather Longitude** in the setup AP, then ask:
+
+- **"What's the weather?"**
+- **"weather forecast"**
+- **"weather alerts"**
+
+Groqputer fetches NOAA/NWS forecast + alerts for the saved coordinates, then replies in the style of the currently active persona instead of dumping raw utility text.
 
 ### Bot settings controls
 

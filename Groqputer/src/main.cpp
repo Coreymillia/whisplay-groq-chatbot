@@ -100,6 +100,8 @@ static void markDirty(uint8_t regions) {
 static String modelShortLabel();
 static void resetReplyScroll(unsigned long pauseMs = TURN_AUTO_SCROLL_PAUSE_MS);
 static void fillWrappedLines(const String &sourceText, String *lines, int &lineCount, int maxLines, int maxChars);
+static bool submitMessageForReply(const String &text, bool clearInputOnSuccess);
+static void recordConversationTurn(const String &userText, const String &replyText);
 
 static int32_t currentBatteryLevel() {
   int32_t level = M5.Power.getBatteryLevel();
@@ -239,6 +241,10 @@ static void drawSettingsView(int x, int y, int w, int h) {
   cursorY += lineHeight;
 
   M5Cardputer.Display.setCursor(x, cursorY);
+  M5Cardputer.Display.print(String("Weather ") + (gpWeatherCoordinatesReady() ? "ready" : "missing"));
+  cursorY += lineHeight;
+
+  M5Cardputer.Display.setCursor(x, cursorY);
   M5Cardputer.Display.print(String("Net ") + (gp_peer_mode_enabled ? "ON" : "OFF"));
   cursorY += lineHeight;
 
@@ -316,6 +322,7 @@ static void drawHotkeysView(int x, int y, int w, int h) {
     "Fn+V custom bot",
     "Fn+S settings",
     "Fn+B bot settings",
+    "Fn+P weather",
     "Fn+C linked device",
     "Fn+N new  Fn+R clear",
     "Fn+A setup portal",
@@ -822,52 +829,149 @@ static void renderUi() {
   dirtyRegions = DIRTY_NONE;
 }
 
-static bool buildWavPayload(const int16_t *samples, size_t sampleCount, uint8_t **bufferOut, size_t *lengthOut) {
-  if (!samples || !bufferOut || !lengthOut || sampleCount == 0) return false;
+static void recordConversationTurn(const String &userText, const String &replyText) {
+  String normalizedUser = clampLogText(userText);
+  String normalizedReply = clampLogText(replyText);
+  normalizedUser.trim();
+  normalizedReply.trim();
+  if (!normalizedReply.length()) {
+    return;
+  }
+
+  gpAppendChatHistoryPair(normalizedUser, normalizedReply);
+
+  ChatTurnPage turnPage;
+  turnPage.userText = normalizedUser.length() ? normalizedUser : "No user message recorded.";
+  turnPage.replyText = normalizedReply;
+  chatTurnPages.push_back(turnPage);
+  while (chatTurnPages.size() > GP_MAX_HISTORY_PAIRS) {
+    chatTurnPages.erase(chatTurnPages.begin());
+  }
+}
+
+static bool buildWavPayload(int16_t **samplesInOut, size_t sampleCount, uint8_t **bufferOut, size_t *lengthOut) {
+  if (!samplesInOut || !*samplesInOut || !bufferOut || !lengthOut || sampleCount == 0) return false;
   size_t pcmBytes = sampleCount * sizeof(int16_t);
   size_t totalBytes = sizeof(WavHeader) + pcmBytes;
-  uint8_t *payload = static_cast<uint8_t *>(malloc(totalBytes));
+  uint8_t *payload = static_cast<uint8_t *>(realloc(*samplesInOut, totalBytes));
   if (!payload) return false;
+
+  memmove(payload + sizeof(WavHeader), payload, pcmBytes);
 
   WavHeader header;
   header.fileSize = 36 + pcmBytes;
   header.dataSize = pcmBytes;
   memcpy(payload, &header, sizeof(WavHeader));
-  memcpy(payload + sizeof(WavHeader), samples, pcmBytes);
+  *samplesInOut = nullptr;
   *bufferOut = payload;
   *lengthOut = totalBytes;
   return true;
 }
 
-static void submitCurrentInput() {
-  String text = inputBuffer;
-  text.trim();
-  if (!text.length()) {
+static String normalizeIntentText(const String &value) {
+  String normalized;
+  normalized.reserve(value.length());
+  bool previousWasSpace = false;
+  for (size_t i = 0; i < value.length(); i++) {
+    char c = static_cast<char>(tolower(static_cast<unsigned char>(value.charAt(i))));
+    if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) {
+      normalized += c;
+      previousWasSpace = false;
+      continue;
+    }
+    if (!previousWasSpace && normalized.length()) {
+      normalized += ' ';
+      previousWasSpace = true;
+    }
+  }
+  normalized.trim();
+  return normalized;
+}
+
+static bool shouldRouteToWeather(const String &value) {
+  String normalized = normalizeIntentText(value);
+  if (!normalized.length()) {
+    return false;
+  }
+  return
+    normalized == "weather" ||
+    normalized == "forecast" ||
+    normalized == "alerts" ||
+    normalized == "weather forecast" ||
+    normalized == "weather alerts" ||
+    normalized == "any alerts" ||
+    normalized == "are there any alerts" ||
+    normalized == "is it going to snow" ||
+    normalized == "is snow coming" ||
+    normalized == "snow forecast" ||
+    normalized.startsWith("what s the weather") ||
+    normalized.startsWith("what is the weather") ||
+    normalized.startsWith("what is the forecast") ||
+    normalized.startsWith("what s the forecast");
+}
+
+static bool submitMessageForReply(const String &text, bool clearInputOnSuccess) {
+  String message = text;
+  message.trim();
+  if (!message.length()) {
     setToast("Type a message first.");
-    return;
+    return false;
   }
   if (!gpEnsureWifiConnected()) {
     setToast("WiFi is not connected.");
-    return;
+    return false;
   }
 
   String reply;
   String error;
-  setToast(gp_peer_mode_enabled ? "Sending to peer..." : "Sending to Groq...", 1200);
-  renderUi();
-  bool ok = gp_peer_mode_enabled
-    ? gpSendPeerChatMessage(text, reply, error)
-    : gpSendChatMessage(text, reply, error);
-  if (!ok) {
-    setToast(error.length() ? error : (gp_peer_mode_enabled ? "Peer request failed." : "Groq request failed."), 3000);
-    return;
+  bool usedWeatherRoute = false;
+
+  if (shouldRouteToWeather(message)) {
+    usedWeatherRoute = true;
+    if (!gpWeatherCoordinatesReady()) {
+      setToast("Add weather lat/lon in setup.", 3000);
+      return false;
+    }
+    setToast("Checking NWS...", 1500);
+    renderUi();
+
+    String weatherSummary;
+    if (!gpFetchWeatherSummary(weatherSummary, error)) {
+      setToast(error.length() ? error : "Weather fetch failed.", 3000);
+      return false;
+    }
+
+    setToast("Asking Groq...", 1200);
+    renderUi();
+    if (!gpSendWeatherChatMessage(message, weatherSummary, reply, error)) {
+      setToast(error.length() ? error : "Groq weather request failed.", 3000);
+      return false;
+    }
+  } else {
+    setToast(gp_peer_mode_enabled ? "Sending to peer..." : "Sending to Groq...", 1200);
+    renderUi();
+    bool ok = gp_peer_mode_enabled
+      ? gpSendPeerChatMessage(message, reply, error)
+      : gpSendChatMessage(message, reply, error);
+    if (!ok) {
+      setToast(error.length() ? error : (gp_peer_mode_enabled ? "Peer request failed." : "Groq request failed."), 3000);
+      return false;
+    }
   }
-  inputBuffer = "";
+
+  if (clearInputOnSuccess) {
+    inputBuffer = "";
+  }
   gpSetLcdIncomingMessage(reply);
-  rebuildTurnPagesFromPersistedChat();
+  recordConversationTurn(message, reply);
   jumpToLatestTurn();
   markDirty(DIRTY_CONTENT | DIRTY_FOOTER);
-  setToast(gp_peer_mode_enabled ? "Peer reply received." : "Reply received.");
+  setToast(usedWeatherRoute ? "Weather reply received." : (gp_peer_mode_enabled ? "Peer reply received." : "Reply received."));
+  return true;
+}
+
+static void submitCurrentInput() {
+  submitMessageForReply(inputBuffer, true);
 }
 
 static void startRecording() {
@@ -917,7 +1021,7 @@ static void finishRecording() {
 
   uint8_t *wavPayload = nullptr;
   size_t wavLength = 0;
-  if (!buildWavPayload(recordingSamples, recordingCapturedSamples, &wavPayload, &wavLength)) {
+  if (!buildWavPayload(&recordingSamples, recordingCapturedSamples, &wavPayload, &wavLength)) {
     free(recordingSamples);
     recordingSamples = nullptr;
     setToast("WAV build failed.");
@@ -937,22 +1041,7 @@ static void finishRecording() {
   }
   free(wavPayload);
 
-  setToast(gp_peer_mode_enabled ? "Sending to peer..." : "Sending to Groq...", 1200);
-  renderUi();
-
-  String reply;
-  bool ok = gp_peer_mode_enabled
-    ? gpSendPeerChatMessage(transcript, reply, error)
-    : gpSendChatMessage(transcript, reply, error);
-  if (!ok) {
-    setToast(error.length() ? error : (gp_peer_mode_enabled ? "Peer request failed." : "Groq request failed."), 3000);
-    return;
-  }
-  gpSetLcdIncomingMessage(reply);
-  rebuildTurnPagesFromPersistedChat();
-  jumpToLatestTurn();
-  markDirty(DIRTY_CONTENT | DIRTY_FOOTER);
-  setToast(gp_peer_mode_enabled ? "Peer reply received." : "Reply received.");
+  submitMessageForReply(transcript, false);
 }
 
 static void pollRecording() {
@@ -1321,6 +1410,9 @@ static void handleKeyboard() {
         handledFn = true;
       } else if (c == 'c' || c == 'C') {
         togglePeerMode();
+        handledFn = true;
+      } else if (c == 'p' || c == 'P') {
+        submitMessageForReply("What's the weather?", false);
         handledFn = true;
       } else if (c == '1') {
         setLcdBacklightEnabled(false);

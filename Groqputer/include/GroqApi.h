@@ -12,12 +12,16 @@ static const char GP_GROQ_CHAT_URL[] = "https://api.groq.com/openai/v1/chat/comp
 static const char GP_GROQ_WHISPER_HOST[] = "api.groq.com";
 static const char GP_GROQ_WHISPER_PATH[] = "/openai/v1/audio/transcriptions";
 static const char GP_GROQ_WHISPER_MODEL[] = "whisper-large-v3-turbo";
-static const size_t GP_MAX_HISTORY_PAIRS = 5;
+static const size_t GP_MAX_HISTORY_PAIRS = 12;
 static const unsigned long GP_PEER_REPLY_TIMEOUT_MS = 45000;
 static const unsigned long GP_PEER_POLL_INTERVAL_MS = 700;
+static const unsigned long GP_WEATHER_CACHE_MS = 10UL * 60UL * 1000UL;
 
 static String gp_chat_history = "[]";
 static size_t gp_message_pairs = 0;
+static String gp_cached_weather_key = "";
+static String gp_cached_weather_summary = "";
+static unsigned long gp_cached_weather_at_ms = 0;
 
 static void gpLoadChatHistory() {
   Preferences prefs;
@@ -44,7 +48,10 @@ static void gpResetChatHistory() {
 static void gpAppendChatHistoryPair(const String &userMessage, const String &replyMessage) {
   JsonDocument historyDoc;
   deserializeJson(historyDoc, gp_chat_history);
-  JsonArray history = historyDoc.to<JsonArray>();
+  JsonArray history = historyDoc.as<JsonArray>();
+  if (history.isNull()) {
+    history = historyDoc.to<JsonArray>();
+  }
 
   JsonObject userEntry = history.add<JsonObject>();
   userEntry["role"] = "user";
@@ -279,6 +286,298 @@ static bool gpTranscribeWav(const uint8_t *wavData, size_t wavLength, String &tr
     errorOut = groqError.length() ? groqError : "Message not heard.";
     return false;
   }
+  return true;
+}
+
+static String gpCompactWhitespace(const String &value) {
+  String output;
+  output.reserve(value.length());
+  bool previousWasSpace = false;
+  for (size_t i = 0; i < value.length(); i++) {
+    char c = value.charAt(i);
+    if (c == '\r' || c == '\n' || c == '\t') {
+      c = ' ';
+    }
+    if (c == ' ') {
+      if (!previousWasSpace) {
+        output += c;
+      }
+      previousWasSpace = true;
+      continue;
+    }
+    previousWasSpace = false;
+    output += c;
+  }
+  output.trim();
+  return output;
+}
+
+static bool gpNwsGet(const String &url, String &bodyOut, String &errorOut) {
+  bodyOut = "";
+  errorOut = "";
+
+  WiFiClientSecure client;
+  client.setInsecure();
+  client.setTimeout(20);
+
+  HTTPClient http;
+  if (!http.begin(client, url)) {
+    errorOut = "NWS request setup failed.";
+    return false;
+  }
+  http.addHeader("User-Agent", "Groqputer/1.0 weather feature");
+  http.addHeader("Accept", "application/geo+json, application/json;q=0.9");
+  http.setTimeout(15000);
+  int code = http.GET();
+  bodyOut = http.getString();
+  http.end();
+  client.stop();
+
+  if (code < 200 || code >= 300) {
+    String detail = gpCompactWhitespace(bodyOut);
+    if (!detail.length()) {
+      detail = String("HTTP ") + code;
+    }
+    errorOut = detail;
+    return false;
+  }
+  if (!bodyOut.length()) {
+    errorOut = "NWS returned an empty response.";
+    return false;
+  }
+  return true;
+}
+
+static String gpSummarizeForecastPeriods(JsonArray periods) {
+  String summary;
+  size_t count = 0;
+  for (JsonVariant periodValue : periods) {
+    if (count >= 4) break;
+    JsonObject period = periodValue.as<JsonObject>();
+    String name = String(period["name"] | "Forecast");
+    String details = gpCompactWhitespace(String(period["detailedForecast"] | ""));
+    int temperature = period["temperature"] | 0;
+    String temperatureUnit = String(period["temperatureUnit"] | "F");
+    String windSpeed = gpCompactWhitespace(String(period["windSpeed"] | ""));
+    String windDirection = gpCompactWhitespace(String(period["windDirection"] | ""));
+    String line = name + ": " + String(temperature) + "\xB0" + temperatureUnit + ".";
+    if (details.length()) {
+      line += " " + details;
+    }
+    if (windSpeed.length()) {
+      line += " Wind " + windSpeed;
+      if (windDirection.length()) {
+        line += " " + windDirection;
+      }
+      line += ".";
+    }
+    if (summary.length()) summary += "\n";
+    summary += line;
+    count += 1;
+  }
+  return summary;
+}
+
+static String gpSummarizeAlerts(JsonArray features) {
+  size_t alertCount = 0;
+  String summary;
+  for (JsonVariant featureValue : features) {
+    if (alertCount >= 3) break;
+    JsonObject properties = featureValue["properties"].as<JsonObject>();
+    String event = gpCompactWhitespace(String(properties["event"] | "Alert"));
+    String headline = gpCompactWhitespace(String(properties["headline"] | ""));
+    String urgency = gpCompactWhitespace(String(properties["urgency"] | ""));
+    String certainty = gpCompactWhitespace(String(properties["certainty"] | ""));
+    String description = gpCompactWhitespace(String(properties["description"] | ""));
+    if (description.length() > 220) {
+      description = description.substring(0, 220);
+      description += "...";
+    }
+    String line = event;
+    if (headline.length()) line += " - " + headline;
+    if (urgency.length()) line += " [" + urgency + "]";
+    if (certainty.length()) line += " (" + certainty + ")";
+    if (description.length()) line += ". " + description;
+    if (summary.length()) summary += "\n";
+    summary += line;
+    alertCount += 1;
+  }
+  if (!alertCount) {
+    return "No active weather alerts.";
+  }
+  return summary;
+}
+
+static bool gpFetchWeatherSummary(String &weatherSummaryOut, String &errorOut, bool forceRefresh = false) {
+  weatherSummaryOut = "";
+  errorOut = "";
+
+  double latitude = 0.0;
+  double longitude = 0.0;
+  if (!gpGetWeatherCoordinates(latitude, longitude)) {
+    errorOut = "Set weather latitude and longitude in setup first.";
+    return false;
+  }
+
+  char latBuffer[24];
+  char lonBuffer[24];
+  snprintf(latBuffer, sizeof(latBuffer), "%.4f", latitude);
+  snprintf(lonBuffer, sizeof(lonBuffer), "%.4f", longitude);
+  String cacheKey = String(latBuffer) + "," + String(lonBuffer);
+  unsigned long now = millis();
+  if (
+    !forceRefresh &&
+    gp_cached_weather_summary.length() &&
+    gp_cached_weather_key == cacheKey &&
+    now - gp_cached_weather_at_ms < GP_WEATHER_CACHE_MS
+  ) {
+    weatherSummaryOut = gp_cached_weather_summary;
+    return true;
+  }
+
+  String pointsBody;
+  if (!gpNwsGet(String("https://api.weather.gov/points/") + latBuffer + "," + lonBuffer, pointsBody, errorOut)) {
+    if (errorOut.startsWith("HTTP 404")) {
+      errorOut = "NWS has no forecast data for the saved latitude/longitude.";
+    } else if (errorOut.length()) {
+      errorOut = "NWS points lookup failed: " + errorOut;
+    } else {
+      errorOut = "NWS points lookup failed.";
+    }
+    return false;
+  }
+
+  JsonDocument pointsDoc;
+  if (deserializeJson(pointsDoc, pointsBody)) {
+    errorOut = "NWS points response parse failed.";
+    return false;
+  }
+  String forecastUrl = String(pointsDoc["properties"]["forecast"] | "");
+  forecastUrl.trim();
+  if (!forecastUrl.length()) {
+    errorOut = "NWS forecast URL was unavailable for this location.";
+    return false;
+  }
+
+  String city = gpCompactWhitespace(String(pointsDoc["properties"]["relativeLocation"]["properties"]["city"] | ""));
+  String state = gpCompactWhitespace(String(pointsDoc["properties"]["relativeLocation"]["properties"]["state"] | ""));
+  String locationLabel = city.length() ? city : cacheKey;
+  if (state.length()) {
+    locationLabel += ", " + state;
+  }
+
+  String forecastBody;
+  if (!gpNwsGet(forecastUrl, forecastBody, errorOut)) {
+    errorOut = errorOut.length() ? "NWS forecast lookup failed: " + errorOut : "NWS forecast lookup failed.";
+    return false;
+  }
+  JsonDocument forecastDoc;
+  if (deserializeJson(forecastDoc, forecastBody)) {
+    errorOut = "NWS forecast response parse failed.";
+    return false;
+  }
+  JsonArray periods = forecastDoc["properties"]["periods"].as<JsonArray>();
+  if (periods.isNull() || periods.size() == 0) {
+    errorOut = "NWS forecast periods were unavailable.";
+    return false;
+  }
+
+  String alertsBody;
+  if (!gpNwsGet(String("https://api.weather.gov/alerts/active?point=") + latBuffer + "," + lonBuffer, alertsBody, errorOut)) {
+    errorOut = errorOut.length() ? "NWS alerts lookup failed: " + errorOut : "NWS alerts lookup failed.";
+    return false;
+  }
+  JsonDocument alertsDoc;
+  if (deserializeJson(alertsDoc, alertsBody)) {
+    errorOut = "NWS alerts response parse failed.";
+    return false;
+  }
+  JsonArray alertFeatures = alertsDoc["features"].as<JsonArray>();
+
+  String forecastText = gpSummarizeForecastPeriods(periods);
+  String alertsText = gpSummarizeAlerts(alertFeatures);
+  weatherSummaryOut =
+    "Location: " + locationLabel +
+    "\n\nForecast:\n" + forecastText +
+    "\n\nAlerts:\n" + alertsText;
+
+  gp_cached_weather_key = cacheKey;
+  gp_cached_weather_summary = weatherSummaryOut;
+  gp_cached_weather_at_ms = now;
+  return true;
+}
+
+static bool gpSendWeatherChatMessage(
+  const String &userPrompt,
+  const String &weatherSummary,
+  String &replyOut,
+  String &errorOut
+) {
+  replyOut = "";
+  errorOut = "";
+  if (!userPrompt.length()) {
+    errorOut = "Empty weather prompt.";
+    return false;
+  }
+  if (gp_groq_api_key[0] == '\0') {
+    errorOut = "No Groq API key.";
+    return false;
+  }
+
+  WiFiClientSecure client;
+  client.setInsecure();
+  client.setTimeout(30);
+
+  HTTPClient http;
+  http.begin(client, GP_GROQ_CHAT_URL);
+  http.addHeader("Content-Type", "application/json");
+  http.addHeader("Authorization", String("Bearer ") + gp_groq_api_key);
+  http.setTimeout(30000);
+
+  JsonDocument doc;
+  JsonArray messages = doc["messages"].to<JsonArray>();
+
+  JsonObject system = messages.add<JsonObject>();
+  system["role"] = "system";
+  system["content"] =
+    String(gp_personality_prompt.length() ? gp_personality_prompt : GP_DEFAULT_PERSONALITY) + "\n" +
+    "You are answering a weather question using supplied NOAA/NWS forecast data. " +
+    "Stay concise, practical, and in character. Use only the supplied weather data. " +
+    "If alerts exist, mention them clearly. Do not invent extra forecast details.";
+
+  JsonObject user = messages.add<JsonObject>();
+  user["role"] = "user";
+  user["content"] = "Weather data:\n" + weatherSummary + "\n\nUser question: " + userPrompt;
+
+  doc["model"] = gp_model[0] ? gp_model : GP_DEFAULT_MODEL;
+  doc["temperature"] = 0.7;
+  doc["max_tokens"] = 300;
+
+  String payload;
+  serializeJson(doc, payload);
+  int code = http.POST(payload);
+  String response = http.getString();
+  http.end();
+  client.stop();
+  delay(100);
+
+  if (code < 200 || code >= 300) {
+    errorOut = response.length() ? response : String("HTTP ") + code;
+    return false;
+  }
+
+  JsonDocument responseDoc;
+  if (deserializeJson(responseDoc, response)) {
+    errorOut = "Groq weather response parse failed.";
+    return false;
+  }
+  replyOut = String(responseDoc["choices"][0]["message"]["content"] | "");
+  if (!replyOut.length()) {
+    errorOut = "Empty Groq weather reply.";
+    return false;
+  }
+
+  gpAppendChatHistoryPair(userPrompt, replyOut);
   return true;
 }
 

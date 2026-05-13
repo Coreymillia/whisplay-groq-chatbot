@@ -4,6 +4,7 @@
 #include <ArduinoJson.h>
 #include <DNSServer.h>
 #include <Preferences.h>
+#include <stdlib.h>
 #include <WebServer.h>
 #include <WiFi.h>
 
@@ -113,6 +114,8 @@ static char gp_groq_api_key[128] = "";
 static char gp_model[64] = "";
 static char gp_this_device_url[128] = "";
 static char gp_connected_device_url[128] = "";
+static char gp_weather_latitude[24] = "";
+static char gp_weather_longitude[24] = "";
 static uint8_t gp_record_seconds = GP_DEFAULT_RECORD_SECONDS;
 static uint8_t gp_text_scale = 1;
 static uint16_t gp_lcd_scroll_ms = GP_DEFAULT_LCD_SCROLL_MS;
@@ -149,6 +152,60 @@ static String gpEscapeHtml(const String &value) {
   escaped.replace("<", "&lt;");
   escaped.replace(">", "&gt;");
   return escaped;
+}
+
+static bool gpParseCoordinateValue(
+  const String &rawValue,
+  double minValue,
+  double maxValue,
+  char *buffer,
+  size_t bufferSize
+) {
+  if (!buffer || bufferSize == 0) return false;
+  String trimmed = rawValue;
+  trimmed.trim();
+  if (!trimmed.length()) {
+    buffer[0] = '\0';
+    return false;
+  }
+
+  char *endPtr = nullptr;
+  double parsed = strtod(trimmed.c_str(), &endPtr);
+  if (
+    endPtr == trimmed.c_str() ||
+    (endPtr && *endPtr != '\0') ||
+    !isfinite(parsed) ||
+    parsed < minValue ||
+    parsed > maxValue
+  ) {
+    buffer[0] = '\0';
+    return false;
+  }
+
+  snprintf(buffer, bufferSize, "%.4f", parsed);
+  return true;
+}
+
+static bool gpGetWeatherCoordinates(double &latitudeOut, double &longitudeOut) {
+  char *latEnd = nullptr;
+  char *lonEnd = nullptr;
+  latitudeOut = strtod(gp_weather_latitude, &latEnd);
+  longitudeOut = strtod(gp_weather_longitude, &lonEnd);
+  return
+    gp_weather_latitude[0] != '\0' &&
+    gp_weather_longitude[0] != '\0' &&
+    latEnd &&
+    lonEnd &&
+    *latEnd == '\0' &&
+    *lonEnd == '\0' &&
+    isfinite(latitudeOut) &&
+    isfinite(longitudeOut);
+}
+
+static bool gpWeatherCoordinatesReady() {
+  double latitude = 0.0;
+  double longitude = 0.0;
+  return gpGetWeatherCoordinates(latitude, longitude);
 }
 
 static void gpClearCustomPersonalityPresets() {
@@ -307,6 +364,8 @@ static void gpLoadSettings() {
   String personality = prefs.getString("personality", GP_DEFAULT_PERSONALITY);
   String thisDeviceUrl = prefs.getString("thisBotUrl", "");
   String connectedDeviceUrl = prefs.getString("peerBotUrl", "");
+  String weatherLatitude = prefs.getString("weatherLat", "");
+  String weatherLongitude = prefs.getString("weatherLon", "");
   gp_record_seconds = gpClampRecordSeconds(
     static_cast<int>(prefs.getUChar("recordSec", GP_DEFAULT_RECORD_SECONDS))
   );
@@ -324,6 +383,8 @@ static void gpLoadSettings() {
   model.toCharArray(gp_model, sizeof(gp_model));
   thisDeviceUrl.toCharArray(gp_this_device_url, sizeof(gp_this_device_url));
   connectedDeviceUrl.toCharArray(gp_connected_device_url, sizeof(gp_connected_device_url));
+  gpParseCoordinateValue(weatherLatitude, -90.0, 90.0, gp_weather_latitude, sizeof(gp_weather_latitude));
+  gpParseCoordinateValue(weatherLongitude, -180.0, 180.0, gp_weather_longitude, sizeof(gp_weather_longitude));
   if (gp_model[0] == '\0') {
     strlcpy(gp_model, GP_DEFAULT_MODEL, sizeof(gp_model));
   }
@@ -346,6 +407,8 @@ static void gpSaveSettings(
   uint8_t recordSeconds,
   const char *thisDeviceUrl,
   const char *connectedDeviceUrl,
+  const char *weatherLatitude,
+  const char *weatherLongitude,
   bool peerModeEnabled
 ) {
   Preferences prefs;
@@ -360,6 +423,8 @@ static void gpSaveSettings(
   prefs.putBool("lcdbl", gp_lcd_backlight_enabled);
   prefs.putString("thisBotUrl", thisDeviceUrl ? thisDeviceUrl : "");
   prefs.putString("peerBotUrl", connectedDeviceUrl ? connectedDeviceUrl : "");
+  prefs.putString("weatherLat", weatherLatitude ? weatherLatitude : "");
+  prefs.putString("weatherLon", weatherLongitude ? weatherLongitude : "");
   prefs.putBool("peerMode", peerModeEnabled);
   prefs.end();
 
@@ -369,6 +434,8 @@ static void gpSaveSettings(
   strlcpy(gp_model, model && model[0] ? model : GP_DEFAULT_MODEL, sizeof(gp_model));
   strlcpy(gp_this_device_url, thisDeviceUrl ? thisDeviceUrl : "", sizeof(gp_this_device_url));
   strlcpy(gp_connected_device_url, connectedDeviceUrl ? connectedDeviceUrl : "", sizeof(gp_connected_device_url));
+  strlcpy(gp_weather_latitude, weatherLatitude ? weatherLatitude : "", sizeof(gp_weather_latitude));
+  strlcpy(gp_weather_longitude, weatherLongitude ? weatherLongitude : "", sizeof(gp_weather_longitude));
   gp_personality_prompt = personality.length() ? personality : GP_DEFAULT_PERSONALITY;
   gp_record_seconds = gpClampRecordSeconds(recordSeconds);
   gp_peer_mode_enabled = peerModeEnabled;
@@ -420,6 +487,8 @@ static void gpSetPeerModeEnabled(bool enabled) {
     gp_record_seconds,
     gp_this_device_url,
     gp_connected_device_url,
+    gp_weather_latitude,
+    gp_weather_longitude,
     enabled
   );
 }
@@ -458,6 +527,8 @@ static void gpSetActiveModel(const char *model) {
     gp_record_seconds,
     gp_this_device_url,
     gp_connected_device_url,
+    gp_weather_latitude,
+    gp_weather_longitude,
     gp_peer_mode_enabled
   );
 }
@@ -472,6 +543,8 @@ static void gpSetActivePersonalityPrompt(const String &prompt) {
     gp_record_seconds,
     gp_this_device_url,
     gp_connected_device_url,
+    gp_weather_latitude,
+    gp_weather_longitude,
     gp_peer_mode_enabled
   );
 }
@@ -521,6 +594,8 @@ static String gpBuildPortalHtml() {
   html += "<label>Groq API Key</label><input name='groqKey' value='" + gpEscapeHtml(String(gp_groq_api_key)) + "' maxlength='127' required>";
   html += "<label>This Device URL</label><input name='thisBotUrl' value='" + gpEscapeHtml(String(gp_this_device_url)) + "' maxlength='127' placeholder='http://10.160.0.203:17880'>";
   html += "<label>Connected Device URL</label><input name='peerBotUrl' value='" + gpEscapeHtml(String(gp_connected_device_url)) + "' maxlength='127' placeholder='http://10.160.0.136:17880'>";
+  html += "<label>Weather Latitude</label><input name='weatherLat' value='" + gpEscapeHtml(String(gp_weather_latitude)) + "' maxlength='23' placeholder='40.7128'>";
+  html += "<label>Weather Longitude</label><input name='weatherLon' value='" + gpEscapeHtml(String(gp_weather_longitude)) + "' maxlength='23' placeholder='-74.0060'>";
   html += "<label>Chat Model</label><select name='model'>";
   for (size_t i = 0; i < gpModelOptionCount(); i++) {
     html += gpModelOptionHtml(GP_MODEL_OPTIONS[i].value, GP_MODEL_OPTIONS[i].label);
@@ -597,10 +672,36 @@ static void gpHandlePortalSave() {
   String apiKey = gp_portal_server->arg("groqKey");
   String thisDeviceUrl = gp_portal_server->arg("thisBotUrl");
   String connectedDeviceUrl = gp_portal_server->arg("peerBotUrl");
+  String weatherLatitude = gp_portal_server->arg("weatherLat");
+  String weatherLongitude = gp_portal_server->arg("weatherLon");
   String model = gp_portal_server->arg("model");
   String personality = gp_portal_server->arg("personality");
   uint8_t recordSec = gpClampRecordSeconds(gp_portal_server->arg("recordSec").toInt());
   bool peerModeEnabled = gp_peer_mode_enabled && thisDeviceUrl.length() && connectedDeviceUrl.length();
+  char normalizedWeatherLatitude[sizeof(gp_weather_latitude)] = "";
+  char normalizedWeatherLongitude[sizeof(gp_weather_longitude)] = "";
+  String trimmedWeatherLatitude = weatherLatitude;
+  String trimmedWeatherLongitude = weatherLongitude;
+  trimmedWeatherLatitude.trim();
+  trimmedWeatherLongitude.trim();
+
+  if (trimmedWeatherLatitude.length() || trimmedWeatherLongitude.length()) {
+    if (!trimmedWeatherLatitude.length() || !trimmedWeatherLongitude.length()) {
+      gp_portal_notice = "Enter both weather latitude and longitude, or leave both blank.";
+      gpHandlePortalRoot();
+      return;
+    }
+    if (!gpParseCoordinateValue(trimmedWeatherLatitude, -90.0, 90.0, normalizedWeatherLatitude, sizeof(normalizedWeatherLatitude))) {
+      gp_portal_notice = "Weather latitude must be between -90 and 90.";
+      gpHandlePortalRoot();
+      return;
+    }
+    if (!gpParseCoordinateValue(trimmedWeatherLongitude, -180.0, 180.0, normalizedWeatherLongitude, sizeof(normalizedWeatherLongitude))) {
+      gp_portal_notice = "Weather longitude must be between -180 and 180.";
+      gpHandlePortalRoot();
+      return;
+    }
+  }
 
   gpSaveSettings(
     ssid.c_str(),
@@ -611,6 +712,8 @@ static void gpHandlePortalSave() {
     recordSec,
     thisDeviceUrl.c_str(),
     connectedDeviceUrl.c_str(),
+    normalizedWeatherLatitude,
+    normalizedWeatherLongitude,
     peerModeEnabled
   );
   gp_portal_notice = "";
