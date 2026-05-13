@@ -6,13 +6,52 @@ export const genImgList: string[] = [];
 export const capturedImgList: string[] = [];
 export const MAX_CAPTURED_IMGS = 100;
 
+export type InteractiveImageSource =
+  | "manual-capture"
+  | "manual-selection"
+  | "browser-upload"
+  | "other";
+
 let latestDisplayImg = "";
 let latestShowedImg = "";
 let pendingCapturedImgForChat = "";
 let pendingCapturedImgConsumed = false;
+let interactiveImagePath = "";
+let interactiveImageSource: InteractiveImageSource = "other";
 
 const setLatestShowedImage = (imagePath: string) => {
-  latestShowedImg = imagePath;
+  latestShowedImg = imagePath ? path.resolve(imagePath) : "";
+};
+
+export const activateInteractiveImage = (
+  imagePath: string,
+  source: InteractiveImageSource,
+) => {
+  const normalizedPath = path.resolve(imagePath);
+  interactiveImagePath = normalizedPath;
+  interactiveImageSource = source;
+  setLatestShowedImage(normalizedPath);
+};
+
+export const clearInteractiveImage = () => {
+  interactiveImagePath = "";
+  interactiveImageSource = "other";
+};
+
+export const hasInteractiveImage = (): boolean => {
+  if (!interactiveImagePath || !latestShowedImg) {
+    return false;
+  }
+  const normalizedShown = path.resolve(latestShowedImg);
+  return normalizedShown === interactiveImagePath && fs.existsSync(interactiveImagePath);
+};
+
+export const getInteractiveImage = (): string => {
+  return hasInteractiveImage() ? interactiveImagePath : "";
+};
+
+export const getInteractiveImageSource = (): InteractiveImageSource | "" => {
+  return hasInteractiveImage() ? interactiveImageSource : "";
 };
 
 const readImagesFromDir = (dirPath: string): string[] => {
@@ -51,6 +90,9 @@ const clearTrackedImagePath = (imagePath: string) => {
   }
   if (latestShowedImg === imagePath) {
     latestShowedImg = "";
+  }
+  if (interactiveImagePath === imagePath) {
+    clearInteractiveImage();
   }
   if (pendingCapturedImgForChat === imagePath) {
     clearPendingCapturedImgForChat();
@@ -161,7 +203,7 @@ export const showCapturedImgByIndex = (index: number): string => {
     return "";
   }
   latestDisplayImg = imagePath;
-  setLatestShowedImage(imagePath);
+  activateInteractiveImage(imagePath, "manual-selection");
   return imagePath;
 };
 
@@ -190,12 +232,19 @@ export const showLatestCapturedImg = () => {
   if (capturedImgList.length !== 0) {
     latestDisplayImg = capturedImgList[capturedImgList.length - 1] || "";
     if (latestDisplayImg) {
-      setLatestShowedImage(latestDisplayImg);
+      activateInteractiveImage(latestDisplayImg, "manual-selection");
     }
     return !!latestDisplayImg;
   } else {
     return false;
   }
+};
+
+export const queueDisplayImage = (imagePath: string) => {
+  const normalizedPath = path.resolve(imagePath);
+  latestDisplayImg = normalizedPath;
+  setLatestShowedImage(normalizedPath);
+  return normalizedPath;
 };
 
 export const getLatestShowedImage = () => {

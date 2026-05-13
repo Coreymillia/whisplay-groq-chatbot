@@ -370,7 +370,14 @@ class RenderThread(threading.Thread):
             and time.time() >= current_scroll_sync_hold_until
         ):
             current_scroll_top += scroll_speed
-        if current_scroll_top > max_scroll_top:
+        if current_status == "last reply" and scroll_speed > 0 and max_scroll_top > 0:
+            if current_scroll_top >= max_scroll_top:
+                current_scroll_top = 0
+                current_scroll_sync_speed = None
+                current_scroll_sync_target_top = None
+                current_scroll_sync_hold_until = time.time() + 0.4
+                TextUtils.clean_line_image_cache()
+        elif current_scroll_top > max_scroll_top:
             current_scroll_top = max_scroll_top
         self.pending_auto_scroll_after_hold = (
             scroll_speed > 0
@@ -1221,6 +1228,7 @@ def handle_client(client_socket, addr, whisplay):
                     network_connected = content.get("network_connected", None)
                     wifi_signal_level = content.get("wifi_signal_level", None)
                     audio_level = content.get("audio_level", None)
+                    groq_requests_today = content.get("groq_requests_today", None)
                     vpn_connected = content.get("vpn_connected", None)
                     rag_icon_visible = content.get("rag_icon_visible", None)
                     image_icon_visible = content.get("image_icon_visible", None)
@@ -1276,9 +1284,10 @@ def handle_client(client_socket, addr, whisplay):
                     if (text is not None) or (status is not None) or (emoji is not None) or \
                        (battery_level is not None) or (battery_color is not None) or \
                               (image_path is not None) or (network_connected is not None) or \
-                              (wifi_signal_level is not None) or \
-                              (audio_level is not None) or \
-                              (vpn_connected is not None) or \
+                               (wifi_signal_level is not None) or \
+                               (groq_requests_today is not None) or \
+                               (audio_level is not None) or \
+                               (vpn_connected is not None) or \
                               (rag_icon_visible is not None) or (image_icon_visible is not None) or (scroll_sync is not None) or \
                                (music_progress is not None) or (music_duration_ms is not None) or \
                                (header_mode is not None) or (screensaver_mode is not None) or (idle_timeout_sec is not None) or \
@@ -1286,10 +1295,11 @@ def handle_client(client_socket, addr, whisplay):
                         update_display_data(status=status, emoji=emoji,
                                      text=text, scroll_speed=scroll_speed, scroll_speed_factor=scroll_speed_factor, scroll_sync=scroll_sync,
                                      battery_level=battery_level, battery_color=battery_tuple,
-                                                   image_path=image_path, network_connected=network_connected,
-                                                   wifi_signal_level=wifi_signal_level,
-                                                   audio_level=audio_level,
-                                       vpn_connected=vpn_connected,
+                                                    image_path=image_path, network_connected=network_connected,
+                                                    wifi_signal_level=wifi_signal_level,
+                                                    groq_requests_today=groq_requests_today,
+                                                    audio_level=audio_level,
+                                        vpn_connected=vpn_connected,
                                                   rag_icon_visible=rag_icon_visible,
                                           image_icon_visible=image_icon_visible,
                                                   transaction_id=transaction_id,

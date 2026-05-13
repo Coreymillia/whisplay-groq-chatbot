@@ -441,14 +441,18 @@ class ChatFlow implements ChatFlowContext {
     if (!this.hasLastAnswer()) {
       return;
     }
+    const replayText = this.lastAnswerText
+      ? `${this.lastAnswerText}\n `
+      : undefined;
     display({
       status: "last reply",
       emoji: this.lastAnswerEmoji || STATE_EMOJIS.answering,
-      text: this.lastAnswerText || undefined,
+      text: replayText,
       image: this.lastAnswerImage || "",
       image_icon_visible: Boolean(this.lastAnswerImage),
       RGB: "#00c8a3",
       scroll_speed: 3,
+      transaction_id: `last-reply-${Date.now()}`,
       text_input_enabled: true,
     });
   };

@@ -10,10 +10,12 @@ import serve from "koa-static";
 import { WebSocketServer, WebSocket, RawData } from "ws";
 import { dataDir, cameraFeedDir } from "../utils/dir";
 import {
+  activateInteractiveImage,
   deleteCapturedImg,
   getImageMimeType,
   listCapturedImgs,
   getLatestShowedImage,
+  queueDisplayImage,
   setLatestCapturedImg,
 } from "../utils/image";
 import {
@@ -43,6 +45,7 @@ import {
   saveNamedPersonalityPreset,
   saveRuntimeSettings,
 } from "../config/runtime-settings";
+import { recordRpdMessage } from "../status/rpd-counter";
 import { getPersonalityPresets } from "../config/personality-presets";
 import type { RuntimeSettings } from "../config/runtime-settings";
 import {
@@ -419,6 +422,8 @@ export class WebDisplayServer implements WebAudioBridgeServer {
       const savedPath = path.join(uploadDir, `vision-upload-${Date.now()}${extension}`);
       fs.writeFileSync(savedPath, buffer);
       setLatestCapturedImg(savedPath);
+      activateInteractiveImage(savedPath, "browser-upload");
+      queueDisplayImage(savedPath);
       clearLatestVisionAnalysis();
       this.onImageUploaded(savedPath);
       ctx.body = {
@@ -443,6 +448,8 @@ export class WebDisplayServer implements WebAudioBridgeServer {
         return;
       }
       setLatestCapturedImg(savedPath);
+      activateInteractiveImage(savedPath, "manual-capture");
+      queueDisplayImage(savedPath);
       clearLatestVisionAnalysis();
       this.onImageUploaded(savedPath);
       ctx.body = {
@@ -810,6 +817,9 @@ export class WebDisplayServer implements WebAudioBridgeServer {
           botnetMode === "persona-relay" && starter === "self"
             ? await this.botNet.relayPrompt(topic)
             : await this.botNet.startConversation(topic, starter, botnetMode);
+        if (starter === "self") {
+          recordRpdMessage(2);
+        }
         ctx.body = { ok: true, conversation };
       } catch (error) {
         ctx.status = 400;
@@ -842,6 +852,7 @@ export class WebDisplayServer implements WebAudioBridgeServer {
           botnetMode === "persona-relay"
             ? await this.botNet.relayPrompt(text)
             : await this.botNet.startConversation(text, "self", botnetMode);
+        recordRpdMessage(2);
         ctx.body = { ok: true, conversation };
       } catch (error) {
         ctx.status = 400;

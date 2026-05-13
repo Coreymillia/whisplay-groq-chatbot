@@ -25,11 +25,16 @@ import { getSystemPrompt } from "../../config/llm-config";
 import { getOpenAIClient, getOpenAILLMModel } from "../../cloud-api/openai/openai";
 import { cameraDir } from "../../utils/dir";
 import {
+  activateInteractiveImage,
+  clearInteractiveImage,
   clearPendingCapturedImgForChat,
+  getInteractiveImage,
+  hasInteractiveImage,
   listCapturedImgs,
   getLatestGenImg,
   getLatestDisplayImg,
   getLatestShowedImage,
+  queueDisplayImage,
   setLatestCapturedImg,
   setPendingCapturedImgForChat,
   showCapturedImgByIndex,
@@ -85,6 +90,7 @@ import {
   getImageEffectLabel,
   type ImageEffectId,
 } from "../../device/image-effects";
+import { recordRpdMessage } from "../../status/rpd-counter";
 import {
   fetchWeatherSnapshot,
   isWeatherConfigured,
@@ -302,10 +308,11 @@ const previousSongIntentPatterns = [
 const PHOTO_BROWSER_EXIT_HOLD_MS = 1800;
 const VOICE_HELP_EXIT_HOLD_MS = 1800;
 const VOICE_COMMAND_HELP_PAGES = buildVoiceCommandHelpPages();
+const TEXT_AUTO_REPLAY_PAUSE_MS = 900;
 
 function shouldRouteToVision(prompt: string): boolean {
   const trimmed = prompt.trim();
-  if (!trimmed || !getLatestShowedImage()) {
+  if (!trimmed || !hasInteractiveImage()) {
     return false;
   }
   return imageIntentPatterns.some((pattern) => pattern.test(trimmed));
@@ -333,6 +340,31 @@ function shouldUseImageContextForGeneration(prompt: string): boolean {
     return false;
   }
   return imageGenerationContextPattern.test(trimmed);
+}
+
+function shouldKeepInteractiveImageFocus(prompt: string): boolean {
+  return (
+    shouldRouteToVision(prompt) ||
+    parseImageEffectCommand(prompt) !== null ||
+    shouldUseImageContextForGeneration(prompt)
+  );
+}
+
+function replayTextAnswerAndSleep(
+  ctx: ChatFlowContext,
+  flowName: FlowName,
+  answerId: number,
+): void {
+  setTimeout(() => {
+    if (ctx.currentFlowName !== flowName || ctx.answerId !== answerId) {
+      return;
+    }
+    ctx.replayLastAnswer();
+    if (ctx.currentFlowName !== flowName || ctx.answerId !== answerId) {
+      return;
+    }
+    ctx.transitionTo("sleep");
+  }, TEXT_AUTO_REPLAY_PAUSE_MS);
 }
 
 function parseImageEffectCommand(prompt: string): ImageEffectId | null {
@@ -511,7 +543,8 @@ async function captureAndPrepareLatestImage(): Promise<string> {
   )}.jpg`;
   await captureCameraImage(captureImagePath, 8000);
   setLatestCapturedImg(captureImagePath);
-  showLatestCapturedImg();
+  activateInteractiveImage(captureImagePath, "manual-capture");
+  queueDisplayImage(captureImagePath);
   clearLatestVisionAnalysis();
   return captureImagePath;
 }
@@ -605,6 +638,9 @@ async function streamWeatherRelayReply(
 
 export const flowStates: Record<FlowName, FlowStateHandler> = {
   sleep: (ctx: ChatFlowContext) => {
+    const currentStatus = getCurrentStatus();
+    const preserveLastReply =
+      currentStatus.status === "last reply" && Boolean(currentStatus.text);
     onButtonDoubleClick(() => {
       if (ctx.hasLastAnswer()) {
         ctx.replayLastAnswer();
@@ -634,11 +670,15 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
       ctx.transitionTo("answer");
     });
     display({
-      status: "idle",
-      emoji: STATE_EMOJIS.idle,
-      RGB: "#000055",
+      status: preserveLastReply ? "last reply" : "idle",
+      emoji: preserveLastReply
+        ? currentStatus.emoji || STATE_EMOJIS.answering
+        : STATE_EMOJIS.idle,
+      RGB: preserveLastReply ? "#00c8a3" : "#000055",
       rag_icon_visible: false,
-      ...(getCurrentStatus().text.endsWith("Listening...") || !getCurrentStatus().text
+      ...(preserveLastReply
+        ? {}
+        : currentStatus.text.endsWith("Listening...") || !currentStatus.text
         ? {
           text: `Long press to talk${ctx.hasLastAnswer() ? ",\ndouble press to replay" : ctx.enableCamera ? ",\ndouble press for camera" : ""
             }.`,
@@ -661,6 +701,7 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
         return;
       }
       setLatestCapturedImg(captureImagePath);
+      activateInteractiveImage(captureImagePath, "manual-capture");
       setPendingCapturedImgForChat(captureImagePath);
       clearLatestVisionAnalysis();
       latestCapturePath = captureImagePath;
@@ -1084,6 +1125,7 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
     ctx.musicDisplayText = "";
     if (ctx.asrText) {
       recordConversationTurn("user", ctx.asrText);
+      recordRpdMessage(1);
     }
     display({
       status: "answering...",
@@ -1091,6 +1133,9 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
       RGB: "#00c8a3",
     });
     const currentAnswerId = ctx.answerId;
+    if (hasInteractiveImage() && !shouldKeepInteractiveImageFocus(ctx.asrText)) {
+      clearInteractiveImage();
+    }
     if (isImMode) {
       const prompt: {
         role: "system" | "user";
@@ -1171,7 +1216,7 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
           ctx.transitionTo("image");
           return;
         }
-        ctx.transitionTo("sleep");
+        replayTextAnswerAndSleep(ctx, "answer", currentAnswerId);
       });
     };
     ctx.partialThinking = "";
@@ -1512,6 +1557,7 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
           return;
         }
         if (shouldRouteToVision(ctx.asrText) && typeof llmFuncMap.describeImage === "function") {
+          const focusedImagePath = getInteractiveImage() || getLatestShowedImage();
           display({
             text: "[describeImage]Analyzing uploaded image...",
           });
@@ -1557,23 +1603,29 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
                 rawResponse: cleaned,
                 relayResponse: finalReply,
                 updatedAt: Date.now(),
-                ok: true,
-              });
-              endPartial();
-            })
-            .catch((error) => {
+                  ok: true,
+                });
+                if (focusedImagePath) {
+                  queueDisplayImage(focusedImagePath);
+                }
+                endPartial();
+              })
+              .catch((error) => {
               console.error("Vision routing failed:", error);
               if (currentAnswerId !== ctx.answerId) {
                 return;
               }
               const message = "I couldn't analyze that image right now.";
-              setLatestVisionAnalysis({
-                question: ctx.asrText,
-                rawResponse: message,
-                relayResponse: message,
-                updatedAt: Date.now(),
-                ok: false,
-              });
+                setLatestVisionAnalysis({
+                  question: ctx.asrText,
+                  rawResponse: message,
+                  relayResponse: message,
+                  updatedAt: Date.now(),
+                  ok: false,
+                });
+                if (focusedImagePath) {
+                  queueDisplayImage(focusedImagePath);
+                }
                 trackingPartial(message);
                 endPartial();
               });
@@ -1682,7 +1734,7 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
         if (img) {
           ctx.transitionTo("image");
         } else {
-          ctx.transitionTo("sleep");
+          replayTextAnswerAndSleep(ctx, "answer", currentAnswerId);
         }
       }
     });
@@ -1752,7 +1804,7 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
           // Stay in image display mode after TTS finishes
           ctx.transitionTo("image");
         } else {
-          ctx.transitionTo("sleep");
+          replayTextAnswerAndSleep(ctx, "external_answer", ctx.answerId);
         }
       });
     } else {

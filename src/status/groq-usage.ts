@@ -62,25 +62,12 @@ function ensureCurrentUsageState(): GroqUsageState {
   return nextState;
 }
 
-function updateDisplay(requestsToday: number): void {
-  try {
-    const { display } = require("../device/display") as {
-      display: (status: { groq_requests_today: number }) => Promise<void> | void;
-    };
-    void display({ groq_requests_today: requestsToday });
-  } catch (error) {
-    console.warn("[groq-usage] Failed to update display:", error);
-  }
-}
-
 export function getGroqRequestsToday(): number {
   return ensureCurrentUsageState().requestsToday;
 }
 
 export function syncGroqUsageDisplay(): number {
-  const requestsToday = getGroqRequestsToday();
-  updateDisplay(requestsToday);
-  return requestsToday;
+  return getGroqRequestsToday();
 }
 
 export function recordGroqRequest(): number {
@@ -90,6 +77,5 @@ export function recordGroqRequest(): number {
     requestsToday: state.requestsToday + 1,
   };
   writeUsageState(nextState);
-  updateDisplay(nextState.requestsToday);
   return nextState.requestsToday;
 }

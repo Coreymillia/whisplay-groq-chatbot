@@ -17,6 +17,7 @@ export interface Status {
   status: string;
   emoji: string;
   text: string;
+  transaction_id?: string;
   text_input_enabled?: boolean;
   scroll_speed: number;
   scroll_speed_factor: number;
