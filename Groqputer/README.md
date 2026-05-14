@@ -35,6 +35,8 @@ Working now:
 - direct Groq replies
 - saved local chat history
 - full-screen incoming/outgoing reader
+- toggleable vertical or horizontal bot reply reader
+- saved chat font color and background theme presets
 - reduced Cardputer redraw flicker
 - battery level in the top header
 - on-device bot settings
@@ -93,6 +95,9 @@ Using the wrong flash mode can produce a merged image that flashes successfully 
    - optional weather latitude / longitude for NWS forecast + alerts
    - screensaver mode for idle use
    - idle screensaver delay in seconds
+   - preferred reader mode
+   - chat font color preset
+   - background theme preset
    - optional custom bot saves from that current prompt
    - max record seconds
    - optional **This Device URL**
@@ -133,25 +138,64 @@ http://<groqputer-ip>/api/companion/chat
 - **Enter** = send typed message
 - **Hold BtnA** = record voice message
 - **Fn+A** = open setup AP
-- **Fn+H** = open hotkey sheet
+- **Fn+Space** = open command browser
+- **Fn+H** = alternate command browser shortcut
 - **Fn+M** = incoming view
 - **Fn+O** = outgoing view
 - **Fn+S** = settings screen
 - **Fn+B** = bot settings
 - **Fn+V** = custom personality flow
 - **Fn+P** = ask for the weather
+- **Fn+W** = toggle vertical or horizontal reply reader
 - **Fn+X** = start screensaver preview
 - **Fn+G** = capture photo from ESP32-CAM to SD
 - **Fn+I** = open saved photo browser
 - **Fn+T** = rotate current photo in the browser
 - **Fn+C** = connected-device / LAN mode on or off
 - **Fn+N** = new chat
-- **Fn+;** / **Fn+.** = read up / down
+- **Fn+;** / **Fn+.** = read pages or seek the marquee
 - **Fn+,** / **Fn+/** = previous / next turn
 - **Fn+[** / **Fn+]** = slower / faster shared scroll speed
 - **Fn+1** / **Fn+2** = LCD backlight off / on
 - **Fn++** / **Fn+-** = Cardputer text size up / down
 - **Any key / BtnA tap while screensaver is active** = wake back to chat
+
+### Command browser
+
+Groqputer now includes a compact on-device command browser for the tiny screen:
+
+- **Fn+Space** opens or closes it
+- **Fn+H** still opens the same browser
+- **Fn+;** / **Fn+.** moves between items
+- **Fn+,** / **Fn+/** switches between **Hotkeys** and **Voice** sections
+
+The browser currently covers the main hotkeys plus supported weather/camera voice triggers, so you do not have to keep checking the README while using the device.
+
+### Theme presets
+
+Groqputer now lets you tune the display without editing code:
+
+- **Chat Font Color** changes the reader text color
+- **Background Theme** recolors the full screen + panel backgrounds
+- includes a **Multicolor** chat-font option
+
+You can change both from:
+
+- the **Fn+S** settings screen
+- the setup AP at **192.168.4.1**
+
+### Reader modes
+
+Groqputer now supports two reader styles:
+
+- **Vertical** = wrapped reply pages
+- **Horizontal** = a marquee reply with your last prompt scrolling in a strip above it
+
+Switch it with:
+
+- **Fn+W**
+- the **Reader** row inside **Fn+S** settings
+- the **Reader Mode** field in the setup AP
 
 ### Screensavers
 

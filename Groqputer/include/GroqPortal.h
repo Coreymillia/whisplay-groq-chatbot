@@ -22,6 +22,9 @@ static const uint16_t GP_DEFAULT_IDLE_SAVER_SEC = 60;
 static const uint16_t GP_MIN_IDLE_SAVER_SEC = 0;
 static const uint16_t GP_MAX_IDLE_SAVER_SEC = 600;
 static const char GP_DEFAULT_SAVER_MODE[] = "matrix";
+static const char GP_DEFAULT_READER_MODE[] = "vertical";
+static const char GP_DEFAULT_TEXT_THEME[] = "classic";
+static const char GP_DEFAULT_BG_THEME[] = "classic";
 
 struct GpModelOption {
   const char *value;
@@ -35,6 +38,21 @@ struct GpPersonalityPreset {
 };
 
 struct GpScreensaverOption {
+  const char *value;
+  const char *label;
+};
+
+struct GpReaderModeOption {
+  const char *value;
+  const char *label;
+};
+
+struct GpTextThemeOption {
+  const char *value;
+  const char *label;
+};
+
+struct GpBackgroundThemeOption {
   const char *value;
   const char *label;
 };
@@ -121,6 +139,28 @@ static constexpr GpScreensaverOption GP_SCREENSAVER_OPTIONS[] = {
   {"plasma", "Plasma"},
 };
 
+static constexpr GpReaderModeOption GP_READER_MODE_OPTIONS[] = {
+  {"vertical", "Vertical Pages"},
+  {"horizontal", "Horizontal Marquee"},
+};
+
+static constexpr GpTextThemeOption GP_TEXT_THEME_OPTIONS[] = {
+  {"classic", "Classic White"},
+  {"mint", "Mint Green"},
+  {"cyan", "Cyan"},
+  {"amber", "Amber"},
+  {"pink", "Pink"},
+  {"multicolor", "Multicolor"},
+};
+
+static constexpr GpBackgroundThemeOption GP_BG_THEME_OPTIONS[] = {
+  {"classic", "Classic"},
+  {"midnight", "Midnight"},
+  {"forest", "Forest"},
+  {"plum", "Plum"},
+  {"ember", "Ember"},
+};
+
 static constexpr size_t GP_MAX_CUSTOM_PERSONALITY_PRESETS = 8;
 
 struct GpCustomPersonalityPreset {
@@ -138,6 +178,9 @@ static char gp_camera_base_url[128] = "";
 static char gp_weather_latitude[24] = "";
 static char gp_weather_longitude[24] = "";
 static char gp_screensaver_mode[24] = "matrix";
+static char gp_reader_mode[16] = "vertical";
+static char gp_text_theme[16] = "classic";
+static char gp_bg_theme[16] = "classic";
 static uint8_t gp_record_seconds = GP_DEFAULT_RECORD_SECONDS;
 static uint8_t gp_text_scale = 1;
 static uint16_t gp_lcd_scroll_ms = GP_DEFAULT_LCD_SCROLL_MS;
@@ -189,6 +232,72 @@ static bool gpIsValidScreensaverMode(const String &value) {
 static int gpCurrentScreensaverOptionIndex() {
   for (size_t i = 0; i < gpScreensaverOptionCount(); i++) {
     if (strcmp(gp_screensaver_mode, GP_SCREENSAVER_OPTIONS[i].value) == 0) {
+      return static_cast<int>(i);
+    }
+  }
+  return 0;
+}
+
+static size_t gpReaderModeOptionCount() {
+  return sizeof(GP_READER_MODE_OPTIONS) / sizeof(GP_READER_MODE_OPTIONS[0]);
+}
+
+static bool gpIsValidReaderMode(const String &value) {
+  for (size_t i = 0; i < gpReaderModeOptionCount(); i++) {
+    if (value == GP_READER_MODE_OPTIONS[i].value) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static int gpCurrentReaderModeOptionIndex() {
+  for (size_t i = 0; i < gpReaderModeOptionCount(); i++) {
+    if (strcmp(gp_reader_mode, GP_READER_MODE_OPTIONS[i].value) == 0) {
+      return static_cast<int>(i);
+    }
+  }
+  return 0;
+}
+
+static size_t gpTextThemeOptionCount() {
+  return sizeof(GP_TEXT_THEME_OPTIONS) / sizeof(GP_TEXT_THEME_OPTIONS[0]);
+}
+
+static bool gpIsValidTextTheme(const String &value) {
+  for (size_t i = 0; i < gpTextThemeOptionCount(); i++) {
+    if (value == GP_TEXT_THEME_OPTIONS[i].value) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static int gpCurrentTextThemeOptionIndex() {
+  for (size_t i = 0; i < gpTextThemeOptionCount(); i++) {
+    if (strcmp(gp_text_theme, GP_TEXT_THEME_OPTIONS[i].value) == 0) {
+      return static_cast<int>(i);
+    }
+  }
+  return 0;
+}
+
+static size_t gpBackgroundThemeOptionCount() {
+  return sizeof(GP_BG_THEME_OPTIONS) / sizeof(GP_BG_THEME_OPTIONS[0]);
+}
+
+static bool gpIsValidBackgroundTheme(const String &value) {
+  for (size_t i = 0; i < gpBackgroundThemeOptionCount(); i++) {
+    if (value == GP_BG_THEME_OPTIONS[i].value) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static int gpCurrentBackgroundThemeOptionIndex() {
+  for (size_t i = 0; i < gpBackgroundThemeOptionCount(); i++) {
+    if (strcmp(gp_bg_theme, GP_BG_THEME_OPTIONS[i].value) == 0) {
       return static_cast<int>(i);
     }
   }
@@ -419,6 +528,9 @@ static void gpLoadSettings() {
   String weatherLatitude = prefs.getString("weatherLat", "");
   String weatherLongitude = prefs.getString("weatherLon", "");
   String screensaverMode = prefs.getString("saverMode", GP_DEFAULT_SAVER_MODE);
+  String readerMode = prefs.getString("readerMode", GP_DEFAULT_READER_MODE);
+  String textTheme = prefs.getString("textTheme", GP_DEFAULT_TEXT_THEME);
+  String bgTheme = prefs.getString("bgTheme", GP_DEFAULT_BG_THEME);
   gp_record_seconds = gpClampRecordSeconds(
     static_cast<int>(prefs.getUChar("recordSec", GP_DEFAULT_RECORD_SECONDS))
   );
@@ -445,7 +557,19 @@ static void gpLoadSettings() {
   if (!gpIsValidScreensaverMode(screensaverMode)) {
     screensaverMode = GP_DEFAULT_SAVER_MODE;
   }
+  if (!gpIsValidReaderMode(readerMode)) {
+    readerMode = GP_DEFAULT_READER_MODE;
+  }
+  if (!gpIsValidTextTheme(textTheme)) {
+    textTheme = GP_DEFAULT_TEXT_THEME;
+  }
+  if (!gpIsValidBackgroundTheme(bgTheme)) {
+    bgTheme = GP_DEFAULT_BG_THEME;
+  }
   screensaverMode.toCharArray(gp_screensaver_mode, sizeof(gp_screensaver_mode));
+  readerMode.toCharArray(gp_reader_mode, sizeof(gp_reader_mode));
+  textTheme.toCharArray(gp_text_theme, sizeof(gp_text_theme));
+  bgTheme.toCharArray(gp_bg_theme, sizeof(gp_bg_theme));
   if (gp_model[0] == '\0') {
     strlcpy(gp_model, GP_DEFAULT_MODEL, sizeof(gp_model));
   }
@@ -473,6 +597,9 @@ static void gpSaveSettings(
   const char *weatherLongitude,
   const char *screensaverMode,
   uint16_t idleSaverSec,
+  const char *readerMode,
+  const char *textTheme,
+  const char *bgTheme,
   bool peerModeEnabled
 ) {
   Preferences prefs;
@@ -497,6 +624,24 @@ static void gpSaveSettings(
       : GP_DEFAULT_SAVER_MODE
   );
   prefs.putUInt("idler", gpClampIdleSaverSec(idleSaverSec));
+  prefs.putString(
+    "readerMode",
+    (readerMode && gpIsValidReaderMode(String(readerMode)))
+      ? readerMode
+      : GP_DEFAULT_READER_MODE
+  );
+  prefs.putString(
+    "textTheme",
+    (textTheme && gpIsValidTextTheme(String(textTheme)))
+      ? textTheme
+      : GP_DEFAULT_TEXT_THEME
+  );
+  prefs.putString(
+    "bgTheme",
+    (bgTheme && gpIsValidBackgroundTheme(String(bgTheme)))
+      ? bgTheme
+      : GP_DEFAULT_BG_THEME
+  );
   prefs.putBool("peerMode", peerModeEnabled);
   prefs.end();
 
@@ -515,6 +660,27 @@ static void gpSaveSettings(
       ? screensaverMode
       : GP_DEFAULT_SAVER_MODE,
     sizeof(gp_screensaver_mode)
+  );
+  strlcpy(
+    gp_reader_mode,
+    (readerMode && gpIsValidReaderMode(String(readerMode)))
+      ? readerMode
+      : GP_DEFAULT_READER_MODE,
+    sizeof(gp_reader_mode)
+  );
+  strlcpy(
+    gp_text_theme,
+    (textTheme && gpIsValidTextTheme(String(textTheme)))
+      ? textTheme
+      : GP_DEFAULT_TEXT_THEME,
+    sizeof(gp_text_theme)
+  );
+  strlcpy(
+    gp_bg_theme,
+    (bgTheme && gpIsValidBackgroundTheme(String(bgTheme)))
+      ? bgTheme
+      : GP_DEFAULT_BG_THEME,
+    sizeof(gp_bg_theme)
   );
   gp_personality_prompt = personality.length() ? personality : GP_DEFAULT_PERSONALITY;
   gp_record_seconds = gpClampRecordSeconds(recordSeconds);
@@ -573,6 +739,9 @@ static void gpSetPeerModeEnabled(bool enabled) {
     gp_weather_longitude,
     gp_screensaver_mode,
     gp_idle_saver_sec,
+    gp_reader_mode,
+    gp_text_theme,
+    gp_bg_theme,
     enabled
   );
 }
@@ -616,6 +785,9 @@ static void gpSetActiveModel(const char *model) {
     gp_weather_longitude,
     gp_screensaver_mode,
     gp_idle_saver_sec,
+    gp_reader_mode,
+    gp_text_theme,
+    gp_bg_theme,
     gp_peer_mode_enabled
   );
 }
@@ -635,6 +807,9 @@ static void gpSetActivePersonalityPrompt(const String &prompt) {
     gp_weather_longitude,
     gp_screensaver_mode,
     gp_idle_saver_sec,
+    gp_reader_mode,
+    gp_text_theme,
+    gp_bg_theme,
     gp_peer_mode_enabled
   );
 }
@@ -654,6 +829,9 @@ static void gpSetActiveScreensaverMode(const char *mode) {
     gp_weather_longitude,
     mode && mode[0] ? mode : GP_DEFAULT_SAVER_MODE,
     gp_idle_saver_sec,
+    gp_reader_mode,
+    gp_text_theme,
+    gp_bg_theme,
     gp_peer_mode_enabled
   );
 }
@@ -673,6 +851,75 @@ static void gpSetIdleSaverSec(uint16_t idleSaverSec) {
     gp_weather_longitude,
     gp_screensaver_mode,
     idleSaverSec,
+    gp_reader_mode,
+    gp_text_theme,
+    gp_bg_theme,
+    gp_peer_mode_enabled
+  );
+}
+
+static void gpSetReaderMode(const char *mode) {
+  gpSaveSettings(
+    gp_wifi_ssid,
+    gp_wifi_pass,
+    gp_groq_api_key,
+    gp_model,
+    gp_personality_prompt,
+    gp_record_seconds,
+    gp_this_device_url,
+    gp_connected_device_url,
+    gp_camera_base_url,
+    gp_weather_latitude,
+    gp_weather_longitude,
+    gp_screensaver_mode,
+    gp_idle_saver_sec,
+    mode && mode[0] ? mode : GP_DEFAULT_READER_MODE,
+    gp_text_theme,
+    gp_bg_theme,
+    gp_peer_mode_enabled
+  );
+}
+
+static void gpSetTextTheme(const char *theme) {
+  gpSaveSettings(
+    gp_wifi_ssid,
+    gp_wifi_pass,
+    gp_groq_api_key,
+    gp_model,
+    gp_personality_prompt,
+    gp_record_seconds,
+    gp_this_device_url,
+    gp_connected_device_url,
+    gp_camera_base_url,
+    gp_weather_latitude,
+    gp_weather_longitude,
+    gp_screensaver_mode,
+    gp_idle_saver_sec,
+    gp_reader_mode,
+    theme && theme[0] ? theme : GP_DEFAULT_TEXT_THEME,
+    gp_bg_theme,
+    gp_peer_mode_enabled
+  );
+}
+
+static void gpSetBackgroundTheme(const char *theme) {
+  gpSaveSettings(
+    gp_wifi_ssid,
+    gp_wifi_pass,
+    gp_groq_api_key,
+    gp_model,
+    gp_personality_prompt,
+    gp_record_seconds,
+    gp_this_device_url,
+    gp_connected_device_url,
+    gp_camera_base_url,
+    gp_weather_latitude,
+    gp_weather_longitude,
+    gp_screensaver_mode,
+    gp_idle_saver_sec,
+    gp_reader_mode,
+    gp_text_theme,
+    theme && theme[0] ? theme : GP_DEFAULT_BG_THEME,
     gp_peer_mode_enabled
   );
 }
@@ -682,6 +929,45 @@ static String gpScreensaverOptionHtml(const char *value, const char *label) {
   html += value;
   html += "'";
   if (strcmp(gp_screensaver_mode, value) == 0) {
+    html += " selected";
+  }
+  html += ">";
+  html += label;
+  html += "</option>";
+  return html;
+}
+
+static String gpReaderModeOptionHtml(const char *value, const char *label) {
+  String html = "<option value='";
+  html += value;
+  html += "'";
+  if (strcmp(gp_reader_mode, value) == 0) {
+    html += " selected";
+  }
+  html += ">";
+  html += label;
+  html += "</option>";
+  return html;
+}
+
+static String gpTextThemeOptionHtml(const char *value, const char *label) {
+  String html = "<option value='";
+  html += value;
+  html += "'";
+  if (strcmp(gp_text_theme, value) == 0) {
+    html += " selected";
+  }
+  html += ">";
+  html += label;
+  html += "</option>";
+  return html;
+}
+
+static String gpBackgroundThemeOptionHtml(const char *value, const char *label) {
+  String html = "<option value='";
+  html += value;
+  html += "'";
+  if (strcmp(gp_bg_theme, value) == 0) {
     html += " selected";
   }
   html += ">";
@@ -709,7 +995,7 @@ static String gpModelOptionHtml(const char *value, const char *label) {
 
 static String gpBuildPortalHtml() {
   String html;
-  html.reserve(6500);
+  html.reserve(7600);
   html += "<!DOCTYPE html><html><head>";
   html += "<meta charset='UTF-8'><meta name='viewport' content='width=device-width,initial-scale=1'>";
   html += "<title>Groqputer Setup</title><style>";
@@ -755,6 +1041,23 @@ static String gpBuildPortalHtml() {
   html += String(gp_idle_saver_sec);
   html += "' min='0' max='600' required>";
   html += "<p class='hint'>Groqputer boots into Matrix first, then uses the selected saver after idle. Set 0 to disable idle activation.</p>";
+  html += "<label>Reader Mode</label><select name='readerMode'>";
+  for (size_t i = 0; i < gpReaderModeOptionCount(); i++) {
+    html += gpReaderModeOptionHtml(GP_READER_MODE_OPTIONS[i].value, GP_READER_MODE_OPTIONS[i].label);
+  }
+  html += "</select>";
+  html += "<p class='hint'>Vertical keeps the wrapped page reader. Horizontal uses a marquee reply with the last user prompt shown above it.</p>";
+  html += "<label>Chat Font Color</label><select name='textTheme'>";
+  for (size_t i = 0; i < gpTextThemeOptionCount(); i++) {
+    html += gpTextThemeOptionHtml(GP_TEXT_THEME_OPTIONS[i].value, GP_TEXT_THEME_OPTIONS[i].label);
+  }
+  html += "</select>";
+  html += "<label>Background Theme</label><select name='bgTheme'>";
+  for (size_t i = 0; i < gpBackgroundThemeOptionCount(); i++) {
+    html += gpBackgroundThemeOptionHtml(GP_BG_THEME_OPTIONS[i].value, GP_BG_THEME_OPTIONS[i].label);
+  }
+  html += "</select>";
+  html += "<p class='hint'>Chat font color changes message text. Background theme recolors the full Groqputer UI panels and screen background.</p>";
   html += "<label>Personality Prompt</label><textarea name='personality' required>";
   html += gpEscapeHtml(gp_personality_prompt);
   html += "</textarea>";
@@ -831,6 +1134,9 @@ static void gpHandlePortalSave() {
   uint8_t recordSec = gpClampRecordSeconds(gp_portal_server->arg("recordSec").toInt());
   String screensaverMode = gp_portal_server->arg("saverMode");
   uint16_t idleSaverSec = gpClampIdleSaverSec(gp_portal_server->arg("idleSaverSec").toInt());
+  String readerMode = gp_portal_server->arg("readerMode");
+  String textTheme = gp_portal_server->arg("textTheme");
+  String bgTheme = gp_portal_server->arg("bgTheme");
   bool peerModeEnabled = gp_peer_mode_enabled && thisDeviceUrl.length() && connectedDeviceUrl.length();
   char normalizedWeatherLatitude[sizeof(gp_weather_latitude)] = "";
   char normalizedWeatherLongitude[sizeof(gp_weather_longitude)] = "";
@@ -860,6 +1166,15 @@ static void gpHandlePortalSave() {
   if (!gpIsValidScreensaverMode(screensaverMode)) {
     screensaverMode = GP_DEFAULT_SAVER_MODE;
   }
+  if (!gpIsValidReaderMode(readerMode)) {
+    readerMode = GP_DEFAULT_READER_MODE;
+  }
+  if (!gpIsValidTextTheme(textTheme)) {
+    textTheme = GP_DEFAULT_TEXT_THEME;
+  }
+  if (!gpIsValidBackgroundTheme(bgTheme)) {
+    bgTheme = GP_DEFAULT_BG_THEME;
+  }
 
   gpSaveSettings(
     ssid.c_str(),
@@ -875,6 +1190,9 @@ static void gpHandlePortalSave() {
     normalizedWeatherLongitude,
     screensaverMode.c_str(),
     idleSaverSec,
+    readerMode.c_str(),
+    textTheme.c_str(),
+    bgTheme.c_str(),
     peerModeEnabled
   );
   gp_portal_notice = "";

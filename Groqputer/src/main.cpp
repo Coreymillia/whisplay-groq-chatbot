@@ -10,14 +10,16 @@
 #include "GroqLcd.h"
 #include "GroqPortal.h"
 
-static const uint32_t COLOR_BG = BLACK;
-static const uint32_t COLOR_PANEL = 0x18C3;
-static const uint32_t COLOR_ACCENT = 0x07FF;
+static uint32_t COLOR_BG = BLACK;
+static uint32_t COLOR_PANEL = 0x18C3;
+static uint32_t COLOR_ACCENT = 0x07FF;
 static const uint32_t COLOR_TEXT = WHITE;
-static const uint32_t COLOR_DIM = 0x7BEF;
+static uint32_t COLOR_DIM = 0x7BEF;
 static const uint32_t COLOR_WARN = 0xFFE0;
 static const uint32_t COLOR_OK = 0x07E0;
 static const uint32_t COLOR_ERROR = 0xF800;
+static uint32_t CHAT_TEXT_COLOR = WHITE;
+static bool CHAT_TEXT_MULTICOLOR = false;
 
 static String inputBuffer;
 static String toastMessage;
@@ -95,7 +97,15 @@ enum class SettingField : uint8_t {
   WeatherCamera,
   Screensaver,
   IdleDelay,
+  Reader,
+  ChatColor,
+  Theme,
   Peer,
+};
+
+enum class CommandGuideSection : uint8_t {
+  Hotkeys,
+  Voice,
 };
 
 enum class CustomPersonalityStage : uint8_t {
@@ -117,6 +127,8 @@ static ChatPane activePane = ChatPane::Incoming;
 static ScreenMode activeScreen = ScreenMode::Chat;
 static BotSettingField activeBotSettingField = BotSettingField::Model;
 static SettingField activeSettingField = SettingField::Screensaver;
+static CommandGuideSection activeCommandGuideSection = CommandGuideSection::Hotkeys;
+static int activeCommandGuideIndex = 0;
 static CustomPersonalityStage activeCustomPersonalityStage = CustomPersonalityStage::Prompt;
 static bool usingExternalPower = true;
 static String customPersonalityPromptBuffer;
@@ -155,6 +167,19 @@ struct TetrisRainPiece {
   uint8_t shape;
   uint8_t rotation;
   uint16_t color;
+};
+
+struct CommandGuideEntry {
+  const char *label;
+  const char *detail;
+};
+
+static constexpr uint32_t CHAT_RAINBOW_COLORS[] = {
+  0x07FF,
+  0x07E0,
+  0xFFE0,
+  0xF81F,
+  0xFFFF,
 };
 
 static void markDirty(uint8_t regions) {
@@ -250,12 +275,24 @@ static int messageTextScale() {
   return max(2, min(4, static_cast<int>(gp_text_scale) + 1));
 }
 
+static int horizontalReaderTextScale() {
+  return min(2, messageTextScale());
+}
+
 static int scaledCharWidth() {
   return 6 * messageTextScale();
 }
 
 static int scaledLineHeight() {
   return (8 * messageTextScale()) + 2;
+}
+
+static int horizontalReaderCharWidth() {
+  return 6 * horizontalReaderTextScale();
+}
+
+static int horizontalReaderLineHeight() {
+  return (8 * horizontalReaderTextScale()) + 2;
 }
 
 static unsigned long currentReaderAutoScrollIntervalMs() {
@@ -280,8 +317,136 @@ static String truncateFont0Text(const String &text, int maxChars) {
   return text.substring(0, maxChars - 3) + "...";
 }
 
+static String selectedTextThemeLabel() {
+  return GP_TEXT_THEME_OPTIONS[gpCurrentTextThemeOptionIndex()].label;
+}
+
+static String selectedBackgroundThemeLabel() {
+  return GP_BG_THEME_OPTIONS[gpCurrentBackgroundThemeOptionIndex()].label;
+}
+
+static uint32_t rainbowChatColorAt(int index) {
+  const int count = static_cast<int>(sizeof(CHAT_RAINBOW_COLORS) / sizeof(CHAT_RAINBOW_COLORS[0]));
+  index = ((index % count) + count) % count;
+  return CHAT_RAINBOW_COLORS[index];
+}
+
+static uint32_t currentChatTextColor(int index = 0) {
+  return CHAT_TEXT_MULTICOLOR ? rainbowChatColorAt(index) : CHAT_TEXT_COLOR;
+}
+
+static void applyThemeColors() {
+  COLOR_BG = BLACK;
+  COLOR_PANEL = 0x18C3;
+  COLOR_ACCENT = 0x07FF;
+  COLOR_DIM = 0x7BEF;
+
+  if (strcmp(gp_bg_theme, "midnight") == 0) {
+    COLOR_BG = 0x0843;
+    COLOR_PANEL = 0x10A6;
+    COLOR_ACCENT = 0x5DFF;
+    COLOR_DIM = 0x6B6D;
+  } else if (strcmp(gp_bg_theme, "forest") == 0) {
+    COLOR_BG = 0x0200;
+    COLOR_PANEL = 0x11C4;
+    COLOR_ACCENT = 0xAFE5;
+    COLOR_DIM = 0x7BEF;
+  } else if (strcmp(gp_bg_theme, "plum") == 0) {
+    COLOR_BG = 0x1002;
+    COLOR_PANEL = 0x30A6;
+    COLOR_ACCENT = 0xF81F;
+    COLOR_DIM = 0xA514;
+  } else if (strcmp(gp_bg_theme, "ember") == 0) {
+    COLOR_BG = 0x2000;
+    COLOR_PANEL = 0x5220;
+    COLOR_ACCENT = 0xFD20;
+    COLOR_DIM = 0xC618;
+  }
+
+  CHAT_TEXT_MULTICOLOR = false;
+  CHAT_TEXT_COLOR = WHITE;
+  if (strcmp(gp_text_theme, "mint") == 0) {
+    CHAT_TEXT_COLOR = 0x97F0;
+  } else if (strcmp(gp_text_theme, "cyan") == 0) {
+    CHAT_TEXT_COLOR = 0x07FF;
+  } else if (strcmp(gp_text_theme, "amber") == 0) {
+    CHAT_TEXT_COLOR = 0xFD20;
+  } else if (strcmp(gp_text_theme, "pink") == 0) {
+    CHAT_TEXT_COLOR = 0xF81F;
+  } else if (strcmp(gp_text_theme, "multicolor") == 0) {
+    CHAT_TEXT_MULTICOLOR = true;
+  }
+}
+
+static bool readerModeIsHorizontal(const char *mode) {
+  return mode && strcmp(mode, "horizontal") == 0;
+}
+
+static bool currentReaderModeIsHorizontal() {
+  return readerModeIsHorizontal(gp_reader_mode);
+}
+
+static bool shouldUseHorizontalReader() {
+  return currentReaderModeIsHorizontal() && activePane == ChatPane::Incoming;
+}
+
+static String selectedReaderModeLabel() {
+  return currentReaderModeIsHorizontal() ? "Horiz" : "Vert";
+}
+
+static String readerModeToastLabel() {
+  return currentReaderModeIsHorizontal() ? "horizontal" : "vertical";
+}
+
+static String normalizeMarqueeText(const String &value) {
+  String normalized;
+  normalized.reserve(value.length());
+  bool previousWasSpace = false;
+  for (size_t i = 0; i < value.length(); i++) {
+    char c = value.charAt(i);
+    if (c == '\r' || c == '\n' || c == '\t') {
+      c = ' ';
+    }
+    if (c < 32) continue;
+    if (c == ' ') {
+      if (previousWasSpace) continue;
+      previousWasSpace = true;
+    } else {
+      previousWasSpace = false;
+    }
+    normalized += c;
+  }
+  normalized.trim();
+  return normalized.length() ? normalized : String("—");
+}
+
+static int marqueeOffsetLimit(const String &sourceText, int visibleChars) {
+  if (visibleChars <= 0) return 0;
+  String normalized = normalizeMarqueeText(sourceText);
+  if (normalized.length() <= static_cast<size_t>(visibleChars)) return 0;
+  return static_cast<int>(normalized.length()) + 2;
+}
+
+static String marqueeWindowText(const String &sourceText, int visibleChars, int offset) {
+  if (visibleChars <= 0) return "";
+  String normalized = normalizeMarqueeText(sourceText);
+  if (normalized.length() <= static_cast<size_t>(visibleChars)) {
+    return normalized;
+  }
+
+  String cycle = normalized + "   ";
+  const int cycleLength = static_cast<int>(cycle.length());
+  const int start = ((offset % cycleLength) + cycleLength) % cycleLength;
+  String window;
+  window.reserve(visibleChars);
+  for (int i = 0; i < visibleChars; i++) {
+    window += cycle.charAt((start + i) % cycleLength);
+  }
+  return window;
+}
+
 static int settingFieldCount() {
-  return 8;
+  return 11;
 }
 
 static int currentSettingFieldIndex() {
@@ -293,7 +458,11 @@ static SettingField settingFieldAt(int index) {
 }
 
 static bool settingFieldEditable(SettingField field) {
-  return field == SettingField::Screensaver || field == SettingField::IdleDelay;
+  return field == SettingField::Screensaver ||
+         field == SettingField::IdleDelay ||
+         field == SettingField::Reader ||
+         field == SettingField::ChatColor ||
+         field == SettingField::Theme;
 }
 
 static String settingFieldLabel(SettingField field) {
@@ -305,6 +474,9 @@ static String settingFieldLabel(SettingField field) {
     case SettingField::WeatherCamera: return "Wx/Cam";
     case SettingField::Screensaver: return "Saver";
     case SettingField::IdleDelay: return "Idle";
+    case SettingField::Reader: return "Reader";
+    case SettingField::ChatColor: return "ChatClr";
+    case SettingField::Theme: return "Theme";
     case SettingField::Peer: return "Peer";
   }
   return "";
@@ -327,11 +499,92 @@ static String settingFieldValue(SettingField field) {
       return selectedScreensaverLabel();
     case SettingField::IdleDelay:
       return String(gp_idle_saver_sec) + " sec";
+    case SettingField::Reader:
+      return selectedReaderModeLabel();
+    case SettingField::ChatColor:
+      return selectedTextThemeLabel();
+    case SettingField::Theme:
+      return selectedBackgroundThemeLabel();
     case SettingField::Peer:
       return String(gp_peer_mode_enabled ? "ON" : "OFF") + " / " +
              (gpPeerSettingsReady() ? "ready" : "missing");
   }
   return "";
+}
+
+static constexpr CommandGuideEntry GP_HOTKEY_GUIDE[] = {
+  {"Fn+Space = Guide", "Open or close this cheat sheet."},
+  {"Fn+H = Guide", "Backup shortcut for the same cheat sheet."},
+  {"Fn+M / O = View", "Swap between bot reply view and your draft."},
+  {"Fn+; / . = Read", "Move through the reply or seek the marquee."},
+  {"Fn+, / / = Turn", "Move to the previous or next saved turn."},
+  {"Fn+W = Reader", "Toggle vertical pages or horizontal marquee."},
+  {"Fn+[ / ] = Speed", "Adjust reader scroll speed."},
+  {"Fn+S = Settings", "Open device settings."},
+  {"Fn+B = Bot", "Open model and persona settings."},
+  {"Fn+P = Weather", "Ask for weather using saved coordinates."},
+  {"Fn+G = Capture", "Take a photo from the ESP32-CAM."},
+  {"Fn+I = Photos", "Open saved camera photos."},
+  {"Fn+T = Rotate", "Rotate the current photo."},
+  {"Fn+X = Saver", "Preview the selected screensaver now."},
+  {"Fn+C = Linked", "Toggle connected-device mode."},
+  {"Fn+V = Custom", "Open the custom bot editor."},
+  {"Fn+A = Setup", "Open the setup AP at 192.168.4.1."},
+  {"Fn+N / R = Chat", "New chat or clear history."},
+  {"Hold BtnA = Talk", "Record and transcribe a voice prompt."},
+};
+
+static constexpr CommandGuideEntry GP_VOICE_GUIDE[] = {
+  {"What's the weather?", "Full weather question using NOAA/NWS data."},
+  {"Where's the weather?", "Alternate trigger for the same weather route."},
+  {"Weather alerts", "Ask for current alerts at the saved location."},
+  {"Weather forecast", "Ask for the local forecast summary."},
+  {"Take photo", "Capture and save a fresh ESP32-CAM image."},
+  {"Capture image", "Alternate phrase for the same camera capture."},
+  {"Snapshot", "Short camera trigger that saves a photo."},
+};
+
+static size_t commandGuideEntryCount(CommandGuideSection section) {
+  return section == CommandGuideSection::Hotkeys
+    ? sizeof(GP_HOTKEY_GUIDE) / sizeof(GP_HOTKEY_GUIDE[0])
+    : sizeof(GP_VOICE_GUIDE) / sizeof(GP_VOICE_GUIDE[0]);
+}
+
+static const CommandGuideEntry *commandGuideEntries(CommandGuideSection section) {
+  return section == CommandGuideSection::Hotkeys ? GP_HOTKEY_GUIDE : GP_VOICE_GUIDE;
+}
+
+static const char *commandGuideSectionLabel(CommandGuideSection section) {
+  return section == CommandGuideSection::Hotkeys ? "HOTKEYS" : "VOICE";
+}
+
+static void clampCommandGuideIndex() {
+  int count = static_cast<int>(commandGuideEntryCount(activeCommandGuideSection));
+  if (count <= 0) {
+    activeCommandGuideIndex = 0;
+    return;
+  }
+  activeCommandGuideIndex = constrain(activeCommandGuideIndex, 0, count - 1);
+}
+
+static void moveCommandGuideSelection(int delta) {
+  int count = static_cast<int>(commandGuideEntryCount(activeCommandGuideSection));
+  if (count <= 0 || delta == 0) return;
+  activeCommandGuideIndex = (activeCommandGuideIndex + delta + count) % count;
+  markDirty(DIRTY_CONTENT | DIRTY_FOOTER);
+}
+
+static void switchCommandGuideSection(int delta) {
+  if (delta == 0) return;
+  activeCommandGuideSection = delta > 0 ? CommandGuideSection::Voice : CommandGuideSection::Hotkeys;
+  clampCommandGuideIndex();
+  markDirty(DIRTY_CONTENT | DIRTY_FOOTER);
+}
+
+static void toggleCommandGuide() {
+  activeScreen = activeScreen == ScreenMode::Hotkeys ? ScreenMode::Chat : ScreenMode::Hotkeys;
+  clampCommandGuideIndex();
+  markDirty(DIRTY_CONTENT | DIRTY_FOOTER);
 }
 
 static bool screensaverModeIsRandom(const char *mode) {
@@ -1245,45 +1498,58 @@ static void drawBotSettingsView(int x, int y, int w, int h) {
 }
 
 static void drawHotkeysView(int x, int y, int w, int h) {
-  const int lineHeight = 11;
-  int cursorY = y;
+  const int lineHeight = 10;
+  const int titleY = y;
+  const int entriesY = y + 20;
+  const int entriesVisible = 4;
+  const int detailY = y + 64;
+  const int hintY = y + h - 10;
+  const CommandGuideEntry *entries = commandGuideEntries(activeCommandGuideSection);
+  const int count = static_cast<int>(commandGuideEntryCount(activeCommandGuideSection));
+  clampCommandGuideIndex();
+  const int selected = constrain(activeCommandGuideIndex, 0, max(0, count - 1));
+  const int start = constrain(selected - 1, 0, max(0, count - entriesVisible));
 
   M5Cardputer.Display.setTextColor(COLOR_OK, COLOR_PANEL);
-  M5Cardputer.Display.setCursor(x, cursorY);
-  M5Cardputer.Display.print("HOTKEYS");
-  cursorY += lineHeight + 1;
+  M5Cardputer.Display.setCursor(x, titleY);
+  M5Cardputer.Display.print("COMMANDS");
 
-  M5Cardputer.Display.setTextColor(COLOR_TEXT, COLOR_PANEL);
-  const char *lines[] = {
-    "Any key wakes saver",
-    "Fn+H close sheet",
-    "Fn+M bot  Fn+O you",
-    "Fn+,/ turns",
-    "Fn+;. read up/down",
-    "Fn+[/] scroll speed",
-    "Fn+X saver preview",
-    "Fn+T photo rotate",
-    "Fn+V custom bot",
-    "Fn+S settings",
-    "Fn+B bot settings",
-    "Fn+P weather",
-    "Fn+G capture",
-    "Fn+I photos",
-    "Fn+C linked device",
-    "Fn+N new  Fn+R clear",
-    "Fn+A setup portal",
-  };
+  String sectionLabel = String(commandGuideSectionLabel(activeCommandGuideSection)) +
+                        " " + String(selected + 1) + "/" + String(max(1, count));
+  M5Cardputer.Display.setTextColor(COLOR_DIM, COLOR_PANEL);
+  M5Cardputer.Display.setCursor(max(x + 58, x + w - font0TextWidth(sectionLabel)), titleY);
+  M5Cardputer.Display.print(sectionLabel);
+  M5Cardputer.Display.drawFastHLine(x, y + 11, w, COLOR_DIM);
 
-  for (const char *line : lines) {
-    if (cursorY > y + h - 22) break;
-    M5Cardputer.Display.setCursor(x, cursorY);
-    M5Cardputer.Display.print(line);
-    cursorY += lineHeight;
+  for (int row = 0; row < entriesVisible && start + row < count; row++) {
+    const int entryIndex = start + row;
+    const bool selectedRow = entryIndex == selected;
+    const int rowY = entriesY + row * lineHeight;
+    String label = truncateFont0Text(entries[entryIndex].label, max(8, (w - 12) / 6));
+    M5Cardputer.Display.setTextColor(selectedRow ? COLOR_WARN : COLOR_TEXT, COLOR_PANEL);
+    M5Cardputer.Display.setCursor(x, rowY);
+    M5Cardputer.Display.print(selectedRow ? "> " : "  ");
+    M5Cardputer.Display.print(label);
+  }
+
+  M5Cardputer.Display.drawFastHLine(x, detailY - 4, w, COLOR_DIM);
+  if (count > 0) {
+    String detailLines[5];
+    int detailLineCount = 0;
+    fillWrappedLines(entries[selected].detail, detailLines, detailLineCount, 5, max(8, w / 6));
+    M5Cardputer.Display.setTextColor(COLOR_ACCENT, COLOR_PANEL);
+    M5Cardputer.Display.setCursor(x, detailY);
+    M5Cardputer.Display.print(truncateFont0Text(entries[selected].label, max(8, w / 6)));
+    M5Cardputer.Display.setTextColor(COLOR_DIM, COLOR_PANEL);
+    for (int i = 0; i < detailLineCount && i < 3; i++) {
+      M5Cardputer.Display.setCursor(x, detailY + 10 + i * 9);
+      M5Cardputer.Display.print(detailLines[i]);
+    }
   }
 
   M5Cardputer.Display.setTextColor(COLOR_DIM, COLOR_PANEL);
-  M5Cardputer.Display.setCursor(x, y + h - 10);
-  M5Cardputer.Display.print("Enter sends only in draft");
+  M5Cardputer.Display.setCursor(x, hintY);
+  M5Cardputer.Display.print("Fn+;/. item Fn+,// tab");
 }
 
 static String customPersonalityStageLabel() {
@@ -1470,6 +1736,10 @@ static int currentReplyMaxScrollOffset(int width, int height) {
     return 0;
   }
   const ChatTurnPage &turnPage = chatTurnPages[activeTurnIndex];
+  if (shouldUseHorizontalReader()) {
+    const int visibleChars = max(4, width / horizontalReaderCharWidth());
+    return marqueeOffsetLimit(turnPage.replyText.length() ? turnPage.replyText : "—", visibleChars);
+  }
   const int bodyHeight = max(1, height - 18);
   const int maxChars = max(8, (width / scaledCharWidth()) - 1);
   const int visibleReplyLines = max(1, bodyHeight / scaledLineHeight());
@@ -1483,6 +1753,20 @@ static void scrollCurrentReply(int delta, int width, int height) {
   int maxOffset = currentReplyMaxScrollOffset(width, height);
   if (maxOffset <= 0) {
     setToast("Reply fits on one page.");
+    return;
+  }
+  if (shouldUseHorizontalReader()) {
+    int step = delta < 0 ? -1 : 1;
+    int next = constrain(activeReplyScrollOffset + step, 0, maxOffset);
+    if (next == activeReplyScrollOffset) {
+      setToast(delta < 0 ? "Start of marquee." : "End of marquee.");
+      return;
+    }
+    activeReplyScrollOffset = next;
+    replyAutoScrollComplete = false;
+    replyAutoScrollPauseUntilMs = millis() + TURN_AUTO_SCROLL_PAUSE_MS;
+    lastReplyAutoScrollMs = millis();
+    markDirty(DIRTY_CONTENT | DIRTY_FOOTER);
     return;
   }
   int next = constrain(activeReplyScrollOffset + delta, 0, maxOffset);
@@ -1499,10 +1783,22 @@ static void scrollCurrentReply(int delta, int width, int height) {
 
 static void pollReplyAutoScroll() {
   if (activePane != ChatPane::Incoming || activeScreen != ScreenMode::Chat) return;
-  if (replyAutoScrollComplete) return;
   if (replyAutoScrollPauseUntilMs > millis()) return;
   const int contentW = M5Cardputer.Display.width() - (CONTENT_MARGIN * 2) - 12;
   const int contentH = M5Cardputer.Display.height() - HEADER_HEIGHT - FOOTER_HEIGHT - (CONTENT_MARGIN * 2) - 28;
+  if (shouldUseHorizontalReader()) {
+    int maxOffset = currentReplyMaxScrollOffset(contentW, contentH);
+    if (maxOffset <= 0) return;
+    if (lastReplyAutoScrollMs != 0 && millis() - lastReplyAutoScrollMs < currentReaderAutoScrollIntervalMs()) {
+      return;
+    }
+    activeReplyScrollOffset = (activeReplyScrollOffset + 1) % (maxOffset + 1);
+    replyAutoScrollComplete = false;
+    lastReplyAutoScrollMs = millis();
+    markDirty(DIRTY_CONTENT | DIRTY_FOOTER);
+    return;
+  }
+  if (replyAutoScrollComplete) return;
   int maxOffset = currentReplyMaxScrollOffset(contentW, contentH);
   if (maxOffset <= 0) return;
   if (lastReplyAutoScrollMs != 0 && millis() - lastReplyAutoScrollMs < currentReaderAutoScrollIntervalMs()) {
@@ -1555,8 +1851,20 @@ static String currentReaderText() {
   return "Type a message or hold BtnA to record.";
 }
 
+static String currentReaderPromptHeaderText() {
+  const ChatTurnPage *turnPage = activeTurnPage();
+  if (turnPage && turnPage->userText.length()) {
+    return turnPage->userText;
+  }
+  if (inputBuffer.length()) {
+    return inputBuffer;
+  }
+  return "Type or speak a prompt.";
+}
+
 static String currentReaderHint() {
   String hint = currentTurnIndicator();
+  hint += shouldUseHorizontalReader() ? " H" : " V";
   if (activePane == ChatPane::Incoming) {
     hint += "  Fn+O";
   } else {
@@ -1565,7 +1873,54 @@ static String currentReaderHint() {
   return hint;
 }
 
+static void drawHorizontalReaderView(int x, int y, int w, int h) {
+  String title = currentReaderTitle();
+  String text = currentReaderText();
+  String promptText = currentReaderPromptHeaderText();
+  const int headerY = y;
+  const int promptStripY = y + 14;
+  const int promptStripH = 14;
+  const int replyY = promptStripY + promptStripH + 4;
+  const int promptLabelWidth = 22;
+  const int promptChars = max(6, (w - promptLabelWidth - 4) / 6);
+  const int replyChars = max(4, w / horizontalReaderCharWidth());
+
+  M5Cardputer.Display.setTextColor(COLOR_OK, COLOR_PANEL);
+  M5Cardputer.Display.setCursor(x, headerY + 2);
+  M5Cardputer.Display.print(title);
+  M5Cardputer.Display.setTextColor(COLOR_DIM, COLOR_PANEL);
+  String readerHint = currentReaderHint();
+  M5Cardputer.Display.setCursor(max(x + 22, x + w - font0TextWidth(readerHint) - 2), headerY + 2);
+  M5Cardputer.Display.print(readerHint);
+  M5Cardputer.Display.drawFastHLine(x, y + 12, w, COLOR_DIM);
+
+  M5Cardputer.Display.fillRoundRect(x, promptStripY, w, promptStripH, 4, COLOR_BG);
+  M5Cardputer.Display.setTextColor(COLOR_ACCENT, COLOR_BG);
+  M5Cardputer.Display.setCursor(x + 4, promptStripY + 10);
+  M5Cardputer.Display.print("YOU");
+  M5Cardputer.Display.setTextColor(currentChatTextColor(activeReplyScrollOffset + 1), COLOR_BG);
+  M5Cardputer.Display.setCursor(x + promptLabelWidth, promptStripY + 10);
+  M5Cardputer.Display.print(truncateFont0Text(normalizeMarqueeText(promptText), promptChars));
+  M5Cardputer.Display.drawFastHLine(x, promptStripY + promptStripH + 2, w, COLOR_DIM);
+
+  String replyWindow = marqueeWindowText(text, replyChars, activeReplyScrollOffset);
+  M5Cardputer.Display.setTextColor(currentChatTextColor(activeReplyScrollOffset), COLOR_PANEL);
+  M5Cardputer.Display.setTextSize(horizontalReaderTextScale());
+  int textX = x;
+  if (normalizeMarqueeText(text).length() <= static_cast<size_t>(replyChars)) {
+    textX = x + max(0, (w - (static_cast<int>(replyWindow.length()) * horizontalReaderCharWidth())) / 2);
+  }
+  int textY = min(y + h - 4, replyY + horizontalReaderLineHeight());
+  M5Cardputer.Display.setCursor(textX, textY);
+  M5Cardputer.Display.print(replyWindow);
+  M5Cardputer.Display.setTextSize(1);
+}
+
 static void drawReaderView(int x, int y, int w, int h) {
+  if (shouldUseHorizontalReader()) {
+    drawHorizontalReaderView(x, y, w, h);
+    return;
+  }
   String title = currentReaderTitle();
   String text = currentReaderText();
   const bool incomingView = activePane == ChatPane::Incoming;
@@ -1600,10 +1955,10 @@ static void drawReaderView(int x, int y, int w, int h) {
   M5Cardputer.Display.print(readerHint);
   M5Cardputer.Display.drawFastHLine(x, y + 12, w, COLOR_DIM);
 
-  M5Cardputer.Display.setTextColor(COLOR_TEXT, COLOR_PANEL);
   M5Cardputer.Display.setTextSize(messageTextScale());
   int cursorY = bodyY;
   for (int i = startLine; i < endLine; i++) {
+    M5Cardputer.Display.setTextColor(currentChatTextColor(i - startLine), COLOR_PANEL);
     M5Cardputer.Display.setCursor(x, cursorY);
     M5Cardputer.Display.print(lines[i]);
     cursorY += scaledLineHeight();
@@ -1723,7 +2078,7 @@ static void drawFooter(int screenW, int screenH) {
   } else if (activeScreen == ScreenMode::BotSettings) {
     M5Cardputer.Display.print("Fn+B BOT  Fn+;/. NAV");
   } else if (activeScreen == ScreenMode::Hotkeys) {
-    M5Cardputer.Display.print("Fn+H CLOSE Fn+M BOT");
+    M5Cardputer.Display.print("Fn+Space CLOSE Fn+,/ TAB");
   } else if (activeScreen == ScreenMode::CustomPersonality) {
     if (activeCustomPersonalityStage == CustomPersonalityStage::Confirm) {
       M5Cardputer.Display.print("Y SAVE  T TEST  N CANCEL");
@@ -1736,7 +2091,7 @@ static void drawFooter(int screenW, int screenH) {
     M5Cardputer.Display.print("Any key wakes Groqputer");
   } else {
     if (activePane == ChatPane::Incoming) {
-      M5Cardputer.Display.print("Fn+;. read  Fn+,/ turn");
+      M5Cardputer.Display.print(shouldUseHorizontalReader() ? "Fn+;. seek Fn+W mode" : "Fn+;. read Fn+W mode");
     } else {
       M5Cardputer.Display.print("Enter send  Fn+M BOT");
     }
@@ -2155,6 +2510,36 @@ static void cycleSettingsValue(int delta) {
     return;
   }
 
+  if (activeSettingField == SettingField::Reader) {
+    gpSetReaderMode(currentReaderModeIsHorizontal() ? "vertical" : "horizontal");
+    resetReplyScroll(500);
+    markDirty(DIRTY_CONTENT | DIRTY_FOOTER);
+    setToast(String("Reader: ") + readerModeToastLabel());
+    return;
+  }
+
+  if (activeSettingField == SettingField::ChatColor) {
+    int count = static_cast<int>(gpTextThemeOptionCount());
+    int index = gpCurrentTextThemeOptionIndex();
+    index = (index + delta + count) % count;
+    gpSetTextTheme(GP_TEXT_THEME_OPTIONS[index].value);
+    applyThemeColors();
+    markDirty(DIRTY_CONTENT | DIRTY_FOOTER | DIRTY_TOAST);
+    setToast(String("Chat color: ") + GP_TEXT_THEME_OPTIONS[index].label);
+    return;
+  }
+
+  if (activeSettingField == SettingField::Theme) {
+    int count = static_cast<int>(gpBackgroundThemeOptionCount());
+    int index = gpCurrentBackgroundThemeOptionIndex();
+    index = (index + delta + count) % count;
+    gpSetBackgroundTheme(GP_BG_THEME_OPTIONS[index].value);
+    applyThemeColors();
+    markDirty(DIRTY_ALL);
+    setToast(String("Theme: ") + GP_BG_THEME_OPTIONS[index].label);
+    return;
+  }
+
   if (activeSettingField == SettingField::Model) {
     setToast("Use Fn+B for model.");
   } else if (activeSettingField == SettingField::Wifi ||
@@ -2207,6 +2592,13 @@ static void togglePeerMode() {
   gpSetPeerModeEnabled(true);
   markDirty(DIRTY_CONTENT | DIRTY_FOOTER);
   setToast("Connected device on.");
+}
+
+static void toggleReaderMode() {
+  gpSetReaderMode(currentReaderModeIsHorizontal() ? "vertical" : "horizontal");
+  resetReplyScroll(500);
+  markDirty(DIRTY_CONTENT | DIRTY_FOOTER);
+  setToast(String("Reader: ") + readerModeToastLabel());
 }
 
 static bool isRepeatableFnKey(char c) {
@@ -2312,6 +2704,8 @@ static bool handleRepeatableFnAction(char c) {
       cycleBotSettingField(-1);
     } else if (activeScreen == ScreenMode::Settings) {
       cycleSettingField(-1);
+    } else if (activeScreen == ScreenMode::Hotkeys) {
+      moveCommandGuideSelection(-1);
     } else if (activeScreen == ScreenMode::Chat) {
       scrollCurrentReply(-TURN_SCROLL_STEP,
                          M5Cardputer.Display.width() - (CONTENT_MARGIN * 2) - 12,
@@ -2327,6 +2721,8 @@ static bool handleRepeatableFnAction(char c) {
       cycleBotSettingField(1);
     } else if (activeScreen == ScreenMode::Settings) {
       cycleSettingField(1);
+    } else if (activeScreen == ScreenMode::Hotkeys) {
+      moveCommandGuideSelection(1);
     } else if (activeScreen == ScreenMode::Chat) {
       scrollCurrentReply(TURN_SCROLL_STEP,
                          M5Cardputer.Display.width() - (CONTENT_MARGIN * 2) - 12,
@@ -2342,6 +2738,8 @@ static bool handleRepeatableFnAction(char c) {
       cycleBotSettingValue(-1);
     } else if (activeScreen == ScreenMode::Settings) {
       cycleSettingsValue(-1);
+    } else if (activeScreen == ScreenMode::Hotkeys) {
+      switchCommandGuideSection(-1);
     } else if (activeScreen == ScreenMode::PhotoViewer) {
       navigatePhotoViewer(-1);
     } else if (activeScreen == ScreenMode::Chat) {
@@ -2357,6 +2755,8 @@ static bool handleRepeatableFnAction(char c) {
       cycleBotSettingValue(1);
     } else if (activeScreen == ScreenMode::Settings) {
       cycleSettingsValue(1);
+    } else if (activeScreen == ScreenMode::Hotkeys) {
+      switchCommandGuideSection(1);
     } else if (activeScreen == ScreenMode::PhotoViewer) {
       navigatePhotoViewer(1);
     } else if (activeScreen == ScreenMode::Chat) {
@@ -2449,6 +2849,10 @@ static void handleKeyboard() {
     if (!changed) return;
     if (fnComboConsumed) return;
     bool handledFn = false;
+    if (status.space) {
+      toggleCommandGuide();
+      handledFn = true;
+    }
     for (auto c : status.word) {
       if (isRepeatableFnKey(c)) continue;
       if (c == 'a' || c == 'A') {
@@ -2486,8 +2890,7 @@ static void handleKeyboard() {
         markDirty(DIRTY_CONTENT | DIRTY_FOOTER);
         handledFn = true;
       } else if (c == 'h' || c == 'H') {
-        activeScreen = activeScreen == ScreenMode::Hotkeys ? ScreenMode::Chat : ScreenMode::Hotkeys;
-        markDirty(DIRTY_CONTENT | DIRTY_FOOTER);
+        toggleCommandGuide();
         handledFn = true;
       } else if (c == 'v' || c == 'V') {
         if (activeScreen == ScreenMode::CustomPersonality) {
@@ -2533,6 +2936,9 @@ static void handleKeyboard() {
         handledFn = true;
       } else if (c == 'p' || c == 'P') {
         submitMessageForReply("What's the weather?", false);
+        handledFn = true;
+      } else if (c == 'w' || c == 'W') {
+        toggleReaderMode();
         handledFn = true;
       } else if (c == 'x' || c == 'X') {
         if (!recordingActive) {
@@ -2712,6 +3118,7 @@ void setup() {
   gpInitLcd();
 
   gpLoadSettings();
+  applyThemeColors();
   if (!gp_has_settings) {
     showSetupPortalInstructions();
     gpSetLcdIncomingMessage("Join Groqputer-Setup at 192.168.4.1");
