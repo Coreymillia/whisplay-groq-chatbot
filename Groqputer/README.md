@@ -45,6 +45,7 @@ Working now:
 - optional 16x2 I2C LCD output
 - NWS weather routed through the active persona
 - ESP32-CAM capture with on-device photo browser
+- wireless companion-display API for external viewers
 - merged M5Burner-ready firmware image
 
 Current experimental feature:
@@ -117,6 +118,12 @@ For Whisplay relay testing, the connected device URL should be the Whisplay brow
 http://10.160.0.136:17880
 ```
 
+For wireless companion displays such as the Core1 viewer firmware, point them at the Groqputer base URL and poll:
+
+```text
+http://<groqputer-ip>/api/companion/chat
+```
+
 ## Hotkeys
 
 - **Enter** = send typed message
@@ -185,6 +192,16 @@ Model tags are compact 3-character labels such as:
 - **BOT** = fallback for anything else
 
 Special states still override the top row when needed, such as recording and no-WiFi/setup mode.
+
+### Wireless companion endpoint
+
+Groqputer now exposes a lightweight JSON endpoint for external viewers on the same LAN:
+
+```text
+/api/companion/chat
+```
+
+The response includes the current model tag, persona label, latest submitted user prompt, latest bot reply, and a compact status field such as `thinking`, `reply_ready`, or `error`.
 
 ### Bot settings controls
 

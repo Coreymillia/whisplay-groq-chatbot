@@ -106,6 +106,7 @@ static String customPersonalityPromptBuffer;
 static String customPersonalityNameBuffer;
 static bool sdCardInitAttempted = false;
 static bool sdCardReady = false;
+static WebServer *gp_companion_server = nullptr;
 
 static void markDirty(uint8_t regions) {
   dirtyRegions |= regions;
@@ -118,6 +119,8 @@ static bool submitMessageForReply(const String &text, bool clearInputOnSuccess);
 static void recordConversationTurn(const String &userText, const String &replyText);
 static bool captureEsp32CamPhoto(String &savedPathOut, String &errorOut);
 static bool openPhotoViewer(const String &preferredPath, String &errorOut);
+static void ensureCompanionServer();
+static void pollCompanionServer();
 
 static int32_t currentBatteryLevel() {
   int32_t level = M5.Power.getBatteryLevel();
@@ -638,7 +641,7 @@ static String gpCurrentPersonalityLabel() {
 }
 
 static void drawSettingsView(int x, int y, int w, int h) {
-  const int lineHeight = 11;
+  const int lineHeight = 10;
   int cursorY = y;
   M5Cardputer.Display.setTextColor(COLOR_OK, COLOR_PANEL);
   M5Cardputer.Display.setCursor(x, cursorY);
@@ -647,44 +650,29 @@ static void drawSettingsView(int x, int y, int w, int h) {
 
   M5Cardputer.Display.setTextColor(COLOR_TEXT, COLOR_PANEL);
   M5Cardputer.Display.setCursor(x, cursorY);
-  M5Cardputer.Display.print(String("LCD ") + (gpIsLcdReady() ? "ready" : "missing"));
+  M5Cardputer.Display.print(String("WiFi ") + (WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : String("offline")));
   cursorY += lineHeight;
 
   M5Cardputer.Display.setCursor(x, cursorY);
-  M5Cardputer.Display.print("Scroll " + String(gp_lcd_scroll_ms) + "ms");
+  M5Cardputer.Display.print("Model " + modelShortLabel());
   cursorY += lineHeight;
 
   M5Cardputer.Display.setCursor(x, cursorY);
-  M5Cardputer.Display.print(String("Light ") + (gp_lcd_backlight_enabled ? "on" : "off"));
+  M5Cardputer.Display.print("Rec " + String(gp_record_seconds) + "s  Scr " + String(gp_lcd_scroll_ms));
   cursorY += lineHeight;
 
   M5Cardputer.Display.setCursor(x, cursorY);
-  M5Cardputer.Display.print("Text " + String(gp_text_scale) + "/3");
+  M5Cardputer.Display.print("Txt " + String(gp_text_scale) + "  Light " + (gp_lcd_backlight_enabled ? String("on") : String("off")));
   cursorY += lineHeight;
 
   M5Cardputer.Display.setCursor(x, cursorY);
-  M5Cardputer.Display.print("Record " + String(gp_record_seconds) + "s");
+  M5Cardputer.Display.print(String("Wx ") + (gpWeatherCoordinatesReady() ? "ok" : "miss") +
+                            "  Cam " + (String(gp_camera_base_url).length() ? "ok" : "miss"));
   cursorY += lineHeight;
 
   M5Cardputer.Display.setCursor(x, cursorY);
-  M5Cardputer.Display.print(String("Weather ") + (gpWeatherCoordinatesReady() ? "ready" : "missing"));
-  cursorY += lineHeight;
-
-  M5Cardputer.Display.setCursor(x, cursorY);
-  M5Cardputer.Display.print(String("Camera ") + (String(gp_camera_base_url).length() ? "ready" : "missing"));
-  cursorY += lineHeight;
-
-  M5Cardputer.Display.setCursor(x, cursorY);
-  M5Cardputer.Display.print(String("Net ") + (gp_peer_mode_enabled ? "ON" : "OFF"));
-  cursorY += lineHeight;
-
-  M5Cardputer.Display.setCursor(x, cursorY);
-  M5Cardputer.Display.print(String("Peer ") + (gpPeerSettingsReady() ? "ready" : "missing"));
-  cursorY += lineHeight;
-
-  String model = modelShortLabel();
-  M5Cardputer.Display.setCursor(x, cursorY);
-  M5Cardputer.Display.print("Model " + model);
+  M5Cardputer.Display.print(String("Peer ") + (gp_peer_mode_enabled ? "ON" : "OFF") +
+                            "  " + (gpPeerSettingsReady() ? "ready" : "missing"));
   cursorY += lineHeight;
 
   M5Cardputer.Display.setTextColor(COLOR_DIM, COLOR_PANEL);
@@ -1380,6 +1368,8 @@ static bool submitMessageForReply(const String &text, bool clearInputOnSuccess) 
     return false;
   }
 
+  gpSetCompanionPendingPrompt(message);
+
   String reply;
   String error;
   bool usedWeatherRoute = false;
@@ -1389,6 +1379,7 @@ static bool submitMessageForReply(const String &text, bool clearInputOnSuccess) 
     setToast("Checking camera...", 1200);
     renderUi();
     if (!captureEsp32CamPhoto(savedPath, error)) {
+      gpSetCompanionErrorState();
       setToast(error.length() ? error : "Camera capture failed.", 3000);
       return false;
     }
@@ -1408,6 +1399,7 @@ static bool submitMessageForReply(const String &text, bool clearInputOnSuccess) 
     gpSetLcdLastPrompt(message);
     usedWeatherRoute = true;
     if (!gpWeatherCoordinatesReady()) {
+      gpSetCompanionErrorState();
       setToast("Add weather lat/lon in setup.", 3000);
       return false;
     }
@@ -1416,6 +1408,7 @@ static bool submitMessageForReply(const String &text, bool clearInputOnSuccess) 
 
     String weatherSummary;
     if (!gpFetchWeatherSummary(weatherSummary, error)) {
+      gpSetCompanionErrorState();
       setToast(error.length() ? error : "Weather fetch failed.", 3000);
       return false;
     }
@@ -1423,6 +1416,7 @@ static bool submitMessageForReply(const String &text, bool clearInputOnSuccess) 
     setToast("Asking Groq...", 1200);
     renderUi();
     if (!gpSendWeatherChatMessage(message, weatherSummary, reply, error)) {
+      gpSetCompanionErrorState();
       setToast(error.length() ? error : "Groq weather request failed.", 3000);
       return false;
     }
@@ -1434,6 +1428,7 @@ static bool submitMessageForReply(const String &text, bool clearInputOnSuccess) 
       ? gpSendPeerChatMessage(message, reply, error)
       : gpSendChatMessage(message, reply, error);
     if (!ok) {
+      gpSetCompanionErrorState();
       setToast(error.length() ? error : (gp_peer_mode_enabled ? "Peer request failed." : "Groq request failed."), 3000);
       return false;
     }
@@ -2033,6 +2028,61 @@ static void showSetupPortalInstructions() {
   M5Cardputer.Display.print("then save & reboot.");
 }
 
+static String companionModelTag() {
+  return gpCurrentModelTag();
+}
+
+static String companionPersonaLabel() {
+  int personalityIndex = gpCurrentPersonalityPresetIndex();
+  if (personalityIndex < 0) {
+    return "Custom";
+  }
+  return gpPersonalityPresetLabelAt(static_cast<size_t>(personalityIndex));
+}
+
+static String buildCompanionChatJson() {
+  JsonDocument doc;
+  doc["ready"] = WiFi.status() == WL_CONNECTED;
+  doc["status"] = gp_companion_status;
+  doc["device"] = "groqputer";
+  doc["model"] = gp_model[0] ? gp_model : GP_DEFAULT_MODEL;
+  doc["modelTag"] = companionModelTag();
+  doc["persona"] = companionPersonaLabel();
+  doc["latestUser"] = gp_last_user_message;
+  doc["latestReply"] = gp_last_reply_message;
+  doc["messagePairs"] = gp_message_pairs;
+  doc["updatedAtMs"] = gp_last_chat_update_ms;
+  doc["ip"] = WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : "";
+
+  String payload;
+  serializeJson(doc, payload);
+  return payload;
+}
+
+static void handleCompanionChatApi() {
+  if (!gp_companion_server) {
+    return;
+  }
+  gp_companion_server->send(200, "application/json", buildCompanionChatJson());
+}
+
+static void ensureCompanionServer() {
+  if (WiFi.status() != WL_CONNECTED || gp_companion_server) {
+    return;
+  }
+
+  gp_companion_server = new WebServer(80);
+  gp_companion_server->on("/api/companion/chat", HTTP_GET, handleCompanionChatApi);
+  gp_companion_server->on("/api/companion/status", HTTP_GET, handleCompanionChatApi);
+  gp_companion_server->begin();
+}
+
+static void pollCompanionServer() {
+  if (gp_companion_server) {
+    gp_companion_server->handleClient();
+  }
+}
+
 void setup() {
   auto cfg = M5.config();
   M5Cardputer.begin(cfg, true);
@@ -2086,6 +2136,8 @@ void loop() {
   pollReplyAutoScroll();
 
   gpEnsureWifiConnected();
+  ensureCompanionServer();
+  pollCompanionServer();
 
   if (millis() - lastPowerCheckMs >= 1500) {
     lastPowerCheckMs = millis();

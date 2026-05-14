@@ -22,6 +22,70 @@ static size_t gp_message_pairs = 0;
 static String gp_cached_weather_key = "";
 static String gp_cached_weather_summary = "";
 static unsigned long gp_cached_weather_at_ms = 0;
+static String gp_last_user_message = "";
+static String gp_last_reply_message = "";
+static String gp_companion_status = "idle";
+static unsigned long gp_last_chat_update_ms = 0;
+
+static void gpRefreshLatestChatTurnFromHistory() {
+  gp_last_user_message = "";
+  gp_last_reply_message = "";
+  gp_companion_status = "idle";
+  gp_last_chat_update_ms = 0;
+
+  JsonDocument doc;
+  if (deserializeJson(doc, gp_chat_history)) {
+    return;
+  }
+  JsonArray history = doc.as<JsonArray>();
+  if (history.isNull()) {
+    return;
+  }
+
+  String pendingUser;
+  for (JsonVariant value : history) {
+    String role = String(value["role"] | "");
+    String content = String(value["content"] | "");
+    content.trim();
+    if (!content.length()) {
+      continue;
+    }
+    if (role == "user") {
+      pendingUser = content;
+    } else if (role == "assistant") {
+      gp_last_user_message = pendingUser;
+      gp_last_reply_message = content;
+      pendingUser = "";
+    }
+  }
+
+  if (gp_last_reply_message.length()) {
+    gp_companion_status = "reply_ready";
+  }
+}
+
+static void gpSetCompanionPendingPrompt(const String &userMessage) {
+  gp_last_user_message = userMessage;
+  gp_last_user_message.trim();
+  gp_companion_status = gp_last_user_message.length() ? "thinking" : "idle";
+  gp_last_chat_update_ms = millis();
+}
+
+static void gpSetCompanionReply(const String &userMessage, const String &replyMessage) {
+  gp_last_user_message = userMessage;
+  gp_last_reply_message = replyMessage;
+  gp_last_user_message.trim();
+  gp_last_reply_message.trim();
+  gp_companion_status = gp_last_reply_message.length() ? "reply_ready" : "idle";
+  gp_last_chat_update_ms = millis();
+}
+
+static void gpSetCompanionErrorState() {
+  if (gp_last_user_message.length()) {
+    gp_companion_status = "error";
+    gp_last_chat_update_ms = millis();
+  }
+}
 
 static void gpLoadChatHistory() {
   Preferences prefs;
@@ -29,6 +93,7 @@ static void gpLoadChatHistory() {
   gp_chat_history = prefs.getString("chatHistory", "[]");
   gp_message_pairs = prefs.getUInt("msgPairs", 0);
   prefs.end();
+  gpRefreshLatestChatTurnFromHistory();
 }
 
 static void gpPersistChatHistory() {
@@ -42,6 +107,10 @@ static void gpPersistChatHistory() {
 static void gpResetChatHistory() {
   gp_chat_history = "[]";
   gp_message_pairs = 0;
+  gp_last_user_message = "";
+  gp_last_reply_message = "";
+  gp_companion_status = "idle";
+  gp_last_chat_update_ms = millis();
   gpPersistChatHistory();
 }
 
@@ -70,6 +139,7 @@ static void gpAppendChatHistoryPair(const String &userMessage, const String &rep
 
   gp_chat_history = "";
   serializeJson(history, gp_chat_history);
+  gpSetCompanionReply(userMessage, replyMessage);
   gpPersistChatHistory();
 }
 

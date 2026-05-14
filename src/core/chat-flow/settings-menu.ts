@@ -98,6 +98,14 @@ function getCompactHeaderLabel(value: string): string {
 
 function getCompactScreensaverLabel(value: string): string {
   switch (value) {
+    case "random-shift":
+      return "Random";
+    case "bouncing-balls":
+      return "Balls";
+    case "kaleidoscope":
+      return "Kscope";
+    case "tetris-rain":
+      return "Tetris";
     case "matrix-binary":
       return "Binary";
     case "matrix-blue":

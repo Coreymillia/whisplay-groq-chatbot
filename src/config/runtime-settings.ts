@@ -36,7 +36,11 @@ export type ScreensaverMode =
   | "matrix-blue"
   | "retro-geometry"
   | "plasma"
-  | "neon-rain";
+  | "neon-rain"
+  | "random-shift"
+  | "bouncing-balls"
+  | "kaleidoscope"
+  | "tetris-rain";
 
 export interface RuntimeSettings {
   groqApiKey: string;
@@ -164,6 +168,10 @@ export const SCREENSAVER_MODES: ScreensaverMode[] = [
   "retro-geometry",
   "plasma",
   "neon-rain",
+  "random-shift",
+  "bouncing-balls",
+  "kaleidoscope",
+  "tetris-rain",
 ];
 const VALID_VOICE_MODES = new Set<VoiceMode>([
   "text-only",
@@ -210,6 +218,10 @@ const VALID_SCREENSAVER_MODES = new Set<ScreensaverMode>([
   "retro-geometry",
   "plasma",
   "neon-rain",
+  "random-shift",
+  "bouncing-balls",
+  "kaleidoscope",
+  "tetris-rain",
 ]);
 
 function normalizeVoiceMode(value: unknown): VoiceMode {
@@ -746,6 +758,14 @@ export function getCameraRotationLabel(value: number): string {
 
 export function getScreensaverModeLabel(value: string): string {
   switch (value) {
+    case "random-shift":
+      return "Random Shift";
+    case "bouncing-balls":
+      return "Bouncing Balls";
+    case "kaleidoscope":
+      return "Kaleidoscope";
+    case "tetris-rain":
+      return "Tetris Rain";
     case "matrix-binary":
       return "Binary Matrix";
     case "matrix-blue":

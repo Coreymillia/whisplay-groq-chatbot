@@ -32,6 +32,19 @@ status_font_size=20
 emoji_font_size=40
 battery_font_size=13
 IDLE_RENDER_INTERVAL = 0.5
+IDLE_COMPATIBLE_STATUSES = {"idle", "last reply"}
+RANDOM_SCREENSAVER_INTERVAL_SEC = 120
+RANDOM_SCREENSAVER_MODES = (
+    "matrix",
+    "matrix-binary",
+    "matrix-blue",
+    "retro-geometry",
+    "plasma",
+    "neon-rain",
+    "bouncing-balls",
+    "kaleidoscope",
+    "tetris-rain",
+)
 
 # Global variables
 current_status = "Hello"
@@ -153,6 +166,13 @@ class RenderThread(threading.Thread):
         self.header_vu_history = [0.0] * 48
         self.header_vu_phase = 0.0
         self.header_vu_level = 0.0
+        self.bouncing_balls = [self.create_bouncing_ball(self.whisplay.LCD_HEIGHT) for _ in range(7)]
+        self.kaleido_rotation = 0.0
+        self.kaleido_elements = [self.create_kaleido_element(self.whisplay.LCD_HEIGHT) for _ in range(14)]
+        self.tetris_pieces = []
+        self.tetris_spawn_timer = 0
+        self.random_screensaver_mode = random.choice(RANDOM_SCREENSAVER_MODES)
+        self.random_screensaver_started_at = time.time()
 
     def render_init_screen(self):
         # Display logo on startup
@@ -426,7 +446,7 @@ class RenderThread(threading.Thread):
         return (
             current_screensaver_mode != "off"
             and current_idle_timeout_sec > 0
-            and current_status == "idle"
+            and current_status in IDLE_COMPATIBLE_STATUSES
             and not current_image_path
             and (time.time() - last_activity_at) >= current_idle_timeout_sec
         )
@@ -434,7 +454,7 @@ class RenderThread(threading.Thread):
     def should_blank_screen(self):
         return (
             current_screen_blank_timeout_sec > 0
-            and current_status == "idle"
+            and current_status in IDLE_COMPATIBLE_STATUSES
             and not current_image_path
             and (time.time() - last_activity_at) >= current_screen_blank_timeout_sec
         )
@@ -443,7 +463,7 @@ class RenderThread(threading.Thread):
         if (
             current_screensaver_mode == "off"
             or current_idle_timeout_sec <= 0
-            or current_status != "idle"
+            or current_status not in IDLE_COMPATIBLE_STATUSES
             or current_image_path
         ):
             return None
@@ -453,7 +473,7 @@ class RenderThread(threading.Thread):
     def get_screen_blank_wait_timeout(self):
         if (
             current_screen_blank_timeout_sec <= 0
-            or current_status != "idle"
+            or current_status not in IDLE_COMPATIBLE_STATUSES
             or current_image_path
         ):
             return None
@@ -727,6 +747,254 @@ class RenderThread(threading.Thread):
                     fill=(r, g, b, 255),
                 )
 
+    def create_bouncing_ball(self, area_height):
+        radius = random.randint(6, 13)
+        return {
+            "x": random.uniform(radius + 4, self.whisplay.LCD_WIDTH - radius - 4),
+            "y": random.uniform(radius + 4, area_height - radius - 4),
+            "vx": random.choice([-1, 1]) * random.uniform(0.8, 2.2),
+            "vy": random.choice([-1, 1]) * random.uniform(0.8, 2.2),
+            "radius": radius,
+            "color": random.choice([
+                (255, 0, 255),
+                (0, 255, 255),
+                (255, 255, 0),
+                (0, 255, 90),
+                (255, 120, 0),
+                (120, 160, 255),
+            ]),
+            "trail": [],
+            "glow_phase": random.uniform(0, math.pi * 2),
+        }
+
+    def update_bouncing_balls(self, balls, area_height):
+        for ball in balls:
+            ball["trail"].append((ball["x"], ball["y"]))
+            if len(ball["trail"]) > 10:
+                ball["trail"].pop(0)
+            ball["x"] += ball["vx"]
+            ball["y"] += ball["vy"]
+            radius = ball["radius"]
+            if ball["x"] - radius <= 0 or ball["x"] + radius >= self.whisplay.LCD_WIDTH:
+                ball["vx"] *= -1
+                ball["x"] = max(radius, min(self.whisplay.LCD_WIDTH - radius, ball["x"]))
+            if ball["y"] - radius <= 0 or ball["y"] + radius >= area_height:
+                ball["vy"] *= -1
+                ball["y"] = max(radius, min(area_height - radius, ball["y"]))
+            ball["glow_phase"] += 0.11
+
+    def draw_bouncing_balls(self, draw, width, area_height, y_offset=0):
+        self.update_bouncing_balls(self.bouncing_balls, area_height)
+        for ball in self.bouncing_balls:
+            trail = ball["trail"]
+            for index, (tx, ty) in enumerate(trail):
+                fade = (index + 1) / max(1, len(trail))
+                r, g, b = ball["color"]
+                trail_color = (
+                    int(r * fade * 0.28),
+                    int(g * fade * 0.28),
+                    int(b * fade * 0.28),
+                    255,
+                )
+                size = max(2, int(ball["radius"] * fade * 0.55))
+                draw.ellipse(
+                    [
+                        int(tx) - size,
+                        y_offset + int(ty) - size,
+                        int(tx) + size,
+                        y_offset + int(ty) + size,
+                    ],
+                    fill=trail_color,
+                )
+        for ball in self.bouncing_balls:
+            x = int(ball["x"])
+            y = y_offset + int(ball["y"])
+            radius = ball["radius"]
+            glow = 0.5 + 0.5 * math.sin(ball["glow_phase"])
+            glow_radius = radius + 3
+            r, g, b = ball["color"]
+            glow_color = (
+                int(r * 0.18 * glow),
+                int(g * 0.18 * glow),
+                int(b * 0.18 * glow),
+                255,
+            )
+            draw.ellipse(
+                [x - glow_radius, y - glow_radius, x + glow_radius, y + glow_radius],
+                outline=glow_color,
+                width=2,
+            )
+            draw.ellipse(
+                [x - radius, y - radius, x + radius, y + radius],
+                fill=ball["color"] + (255,),
+                outline=(255, 255, 255, 255),
+                width=1,
+            )
+            highlight = max(2, radius // 3)
+            draw.ellipse(
+                [x - radius // 3 - highlight, y - radius // 3 - highlight, x - radius // 3 + highlight, y - radius // 3 + highlight],
+                fill=(255, 255, 255, 120),
+            )
+
+    def create_kaleido_element(self, area_height):
+        max_distance = math.hypot(self.whisplay.LCD_WIDTH, area_height) * 0.65
+        return {
+            "angle": random.uniform(0, math.pi / 8),
+            "distance": random.uniform(16, max_distance),
+            "color": random.choice([
+                (255, 0, 140),
+                (128, 0, 255),
+                (0, 180, 255),
+                (0, 255, 200),
+                (255, 220, 0),
+                (255, 120, 0),
+            ]),
+            "size": random.randint(5, 16),
+            "shape": random.choice(["circle", "diamond", "square", "star"]),
+            "rotation": random.uniform(0, math.pi * 2),
+            "rotation_speed": random.uniform(-0.08, 0.08),
+            "pulse_phase": random.uniform(0, math.pi * 2),
+            "pulse_speed": random.uniform(0.04, 0.12),
+            "life": random.randint(260, 540),
+        }
+
+    def update_kaleidoscope(self, area_height):
+        max_distance = math.hypot(self.whisplay.LCD_WIDTH, area_height) * 0.72
+        self.kaleido_rotation += 0.018
+        self.kaleido_elements[:] = [item for item in self.kaleido_elements if item["life"] > 0]
+        while len(self.kaleido_elements) < 14:
+            self.kaleido_elements.append(self.create_kaleido_element(area_height))
+        for item in self.kaleido_elements:
+            item["rotation"] += item["rotation_speed"]
+            item["pulse_phase"] += item["pulse_speed"]
+            item["distance"] += random.uniform(-0.6, 0.6)
+            item["distance"] = max(12, min(max_distance, item["distance"]))
+            item["angle"] += random.uniform(-0.01, 0.01)
+            item["life"] -= 1
+
+    def draw_kaleido_shape(self, draw, x, y, size, shape, color, rotation):
+        if shape == "circle":
+            draw.ellipse([x - size, y - size, x + size, y + size], fill=color)
+            return
+        if shape == "diamond":
+            points = [(x, y - size), (x + size, y), (x, y + size), (x - size, y)]
+            draw.polygon(points, fill=color)
+            return
+        if shape == "square":
+            draw.rectangle([x - size, y - size, x + size, y + size], fill=color)
+            return
+        points = []
+        for index in range(8):
+            angle = rotation + index * (math.pi / 4)
+            radius = size if index % 2 == 0 else size * 0.45
+            points.append((int(x + math.cos(angle) * radius), int(y + math.sin(angle) * radius)))
+        draw.polygon(points, fill=color)
+
+    def draw_kaleidoscope(self, draw, width, area_height, y_offset=0):
+        self.update_kaleidoscope(area_height)
+        center_x = width / 2.0
+        center_y = y_offset + area_height / 2.0
+        segments = 8
+        segment_angle = (math.pi * 2.0) / segments
+        for item in self.kaleido_elements:
+            pulse = 1.0 + 0.25 * math.sin(item["pulse_phase"])
+            size = max(3, int(item["size"] * pulse))
+            for seg_index in range(segments):
+                for direction in (1, -1):
+                    angle = self.kaleido_rotation + (seg_index * segment_angle) + (item["angle"] * direction)
+                    x = int(center_x + math.cos(angle) * item["distance"])
+                    y = int(center_y + math.sin(angle) * item["distance"])
+                    self.draw_kaleido_shape(
+                        draw,
+                        x,
+                        y,
+                        size,
+                        item["shape"],
+                        item["color"] + (220,),
+                        item["rotation"],
+                    )
+
+    def create_tetris_piece(self, area_height):
+        block = 14
+        shapes = [
+            [(0, 1), (1, 1), (2, 1), (3, 1)],
+            [(0, 0), (0, 1), (1, 1), (2, 1)],
+            [(2, 0), (0, 1), (1, 1), (2, 1)],
+            [(1, 0), (2, 0), (1, 1), (2, 1)],
+            [(1, 0), (2, 0), (0, 1), (1, 1)],
+            [(1, 0), (0, 1), (1, 1), (2, 1)],
+            [(0, 0), (1, 0), (1, 1), (2, 1)],
+        ]
+        return {
+            "blocks": random.choice(shapes),
+            "x": random.randint(-1, max(1, (self.whisplay.LCD_WIDTH // block) - 4)),
+            "y": random.uniform(-8, -2),
+            "speed": random.uniform(0.18, 0.46),
+            "drift_phase": random.uniform(0, math.pi * 2),
+            "color": random.choice([
+                (0, 255, 255),
+                (255, 255, 0),
+                (180, 0, 255),
+                (0, 255, 90),
+                (255, 110, 0),
+                (0, 120, 255),
+                (255, 0, 120),
+            ]),
+        }
+
+    def update_tetris_rain(self, area_height):
+        if self.tetris_spawn_timer <= 0:
+            self.tetris_pieces.append(self.create_tetris_piece(area_height))
+            self.tetris_spawn_timer = random.randint(6, 16)
+        else:
+            self.tetris_spawn_timer -= 1
+        survivors = []
+        for piece in self.tetris_pieces:
+            piece["y"] += piece["speed"]
+            piece["drift_phase"] += 0.04
+            max_y = max(block_y for _, block_y in piece["blocks"])
+            if (piece["y"] + max_y) * 14 < area_height + 24:
+                survivors.append(piece)
+        self.tetris_pieces = survivors[-18:]
+
+    def draw_tetris_rain(self, draw, width, area_height, y_offset=0):
+        self.update_tetris_rain(area_height)
+        block = 14
+        for piece in self.tetris_pieces:
+            x_offset = math.sin(piece["drift_phase"]) * 4.0
+            for block_x, block_y in piece["blocks"]:
+                px = int((piece["x"] + block_x) * block + x_offset)
+                py = y_offset + int((piece["y"] + block_y) * block)
+                if py > y_offset + area_height or px > width or px + block < 0:
+                    continue
+                fill = piece["color"] + (255,)
+                edge = (255, 255, 255, 180)
+                draw.rounded_rectangle(
+                    [px, py, px + block - 2, py + block - 2],
+                    radius=2,
+                    fill=fill,
+                    outline=edge,
+                    width=1,
+                )
+                draw.line(
+                    [(px + 2, py + 2), (px + block - 5, py + 2)],
+                    fill=(255, 255, 255, 120),
+                    width=1,
+                )
+
+    def resolve_active_screensaver_mode(self):
+        if current_screensaver_mode != "random-shift":
+            return current_screensaver_mode
+        now = time.time()
+        if (
+            self.random_screensaver_mode not in RANDOM_SCREENSAVER_MODES
+            or (now - self.random_screensaver_started_at) >= RANDOM_SCREENSAVER_INTERVAL_SEC
+        ):
+            choices = [mode for mode in RANDOM_SCREENSAVER_MODES if mode != self.random_screensaver_mode]
+            self.random_screensaver_mode = random.choice(choices or list(RANDOM_SCREENSAVER_MODES))
+            self.random_screensaver_started_at = now
+        return self.random_screensaver_mode
+
     def render_visual_mode(self, mode, image, draw, width, height, status, y_offset=0, header=False):
         if mode == "matrix":
             columns = self.header_green_matrix_columns if header else self.green_matrix_columns
@@ -751,6 +1019,12 @@ class RenderThread(threading.Thread):
         elif mode == "neon-rain":
             streams = self.header_neon_streams if header else self.neon_streams
             self.draw_neon_streams(image, streams, y_offset, height)
+        elif not header and mode == "bouncing-balls":
+            self.draw_bouncing_balls(draw, width, height, y_offset)
+        elif not header and mode == "kaleidoscope":
+            self.draw_kaleidoscope(draw, width, height, y_offset)
+        elif not header and mode == "tetris-rain":
+            self.draw_tetris_rain(draw, width, height, y_offset)
         elif mode == "vu-bars":
             self.draw_vu_bars(draw, width, height, y_offset)
         elif mode == "vu-scope":
@@ -838,7 +1112,8 @@ class RenderThread(threading.Thread):
         draw.line(points, fill=(110, 170, 255, 235), width=2)
 
     def render_screensaver_frame(self, image, draw, width, height, status):
-        self.render_visual_mode(current_screensaver_mode, image, draw, width, height, status)
+        active_mode = self.resolve_active_screensaver_mode()
+        self.render_visual_mode(active_mode, image, draw, width, height, status)
 
     def draw_matrix_region(self, draw, width, height, font, speed, y_offset):
         charset = "01ABCDEF"
