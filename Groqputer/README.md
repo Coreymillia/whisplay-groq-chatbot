@@ -46,6 +46,8 @@ Working now:
 - NWS weather routed through the active persona
 - ESP32-CAM capture with on-device photo browser
 - wireless companion-display API for external viewers
+- boot-to-Matrix screensaver
+- idle screensaver system with saved mode + timeout
 - merged M5Burner-ready firmware image
 
 Current experimental feature:
@@ -89,6 +91,8 @@ Using the wrong flash mode can produce a merged image that flashes successfully 
    - personality prompt
    - optional ESP32-CAM URL for remote photo capture
    - optional weather latitude / longitude for NWS forecast + alerts
+   - screensaver mode for idle use
+   - idle screensaver delay in seconds
    - optional custom bot saves from that current prompt
    - max record seconds
    - optional **This Device URL**
@@ -136,6 +140,7 @@ http://<groqputer-ip>/api/companion/chat
 - **Fn+B** = bot settings
 - **Fn+V** = custom personality flow
 - **Fn+P** = ask for the weather
+- **Fn+X** = start screensaver preview
 - **Fn+G** = capture photo from ESP32-CAM to SD
 - **Fn+I** = open saved photo browser
 - **Fn+T** = rotate current photo in the browser
@@ -146,6 +151,34 @@ http://<groqputer-ip>/api/companion/chat
 - **Fn+[** / **Fn+]** = slower / faster shared scroll speed
 - **Fn+1** / **Fn+2** = LCD backlight off / on
 - **Fn++** / **Fn+-** = Cardputer text size up / down
+- **Any key / BtnA tap while screensaver is active** = wake back to chat
+
+### Screensavers
+
+Groqputer now boots into a **Matrix** saver by default after setup is complete. After that, idle behavior can be controlled from the setup AP or the on-device **Settings** screen.
+
+Current saver set:
+
+- **Matrix**
+- **Random Shuffle**
+- **Bouncing Balls**
+- **Kaleidoscope**
+- **Tetris Rain**
+- **Starfield**
+- **Critical**
+- **Plasma**
+
+On-device controls:
+
+- open **Settings** with **Fn+S**
+- use **Fn+;** / **Fn+.** to move between **Saver** and **Idle saver**
+- use **Fn+,** / **Fn+/** to change the selected value
+- use **Fn+X** to preview the currently selected saver immediately
+
+Set **Idle Screensaver Delay** to:
+
+- **0** to disable idle screensaver activation
+- any positive value to return to the selected saver after inactivity
 
 ### Weather
 

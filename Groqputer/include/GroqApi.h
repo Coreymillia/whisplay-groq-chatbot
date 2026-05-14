@@ -13,6 +13,8 @@ static const char GP_GROQ_WHISPER_HOST[] = "api.groq.com";
 static const char GP_GROQ_WHISPER_PATH[] = "/openai/v1/audio/transcriptions";
 static const char GP_GROQ_WHISPER_MODEL[] = "whisper-large-v3-turbo";
 static const size_t GP_MAX_HISTORY_PAIRS = 12;
+static const uint16_t GP_CHAT_MAX_TOKENS = 700;
+static const uint16_t GP_WEATHER_MAX_TOKENS = 450;
 static const unsigned long GP_PEER_REPLY_TIMEOUT_MS = 45000;
 static const unsigned long GP_PEER_POLL_INTERVAL_MS = 700;
 static const unsigned long GP_WEATHER_CACHE_MS = 10UL * 60UL * 1000UL;
@@ -621,7 +623,7 @@ static bool gpSendWeatherChatMessage(
 
   doc["model"] = gp_model[0] ? gp_model : GP_DEFAULT_MODEL;
   doc["temperature"] = 0.7;
-  doc["max_tokens"] = 300;
+  doc["max_tokens"] = GP_WEATHER_MAX_TOKENS;
 
   String payload;
   serializeJson(doc, payload);
@@ -695,7 +697,7 @@ static bool gpSendChatMessage(const String &userMessage, String &replyOut, Strin
 
   doc["model"] = gp_model[0] ? gp_model : GP_DEFAULT_MODEL;
   doc["temperature"] = 0.7;
-  doc["max_tokens"] = 300;
+  doc["max_tokens"] = GP_CHAT_MAX_TOKENS;
 
   String payload;
   serializeJson(doc, payload);

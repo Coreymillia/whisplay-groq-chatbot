@@ -18,6 +18,10 @@ static const uint8_t GP_MAX_RECORD_SECONDS = 15;
 static const uint16_t GP_DEFAULT_LCD_SCROLL_MS = 350;
 static const uint16_t GP_MIN_LCD_SCROLL_MS = 150;
 static const uint16_t GP_MAX_LCD_SCROLL_MS = 900;
+static const uint16_t GP_DEFAULT_IDLE_SAVER_SEC = 60;
+static const uint16_t GP_MIN_IDLE_SAVER_SEC = 0;
+static const uint16_t GP_MAX_IDLE_SAVER_SEC = 600;
+static const char GP_DEFAULT_SAVER_MODE[] = "matrix";
 
 struct GpModelOption {
   const char *value;
@@ -28,6 +32,11 @@ struct GpPersonalityPreset {
   const char *id;
   const char *label;
   const char *prompt;
+};
+
+struct GpScreensaverOption {
+  const char *value;
+  const char *label;
 };
 
 static constexpr GpModelOption GP_MODEL_OPTIONS[] = {
@@ -101,6 +110,17 @@ static constexpr GpPersonalityPreset GP_PERSONALITY_PRESETS[] = {
   },
 };
 
+static constexpr GpScreensaverOption GP_SCREENSAVER_OPTIONS[] = {
+  {"matrix", "Matrix"},
+  {"random-shift", "Random Shuffle"},
+  {"bouncing-balls", "Bouncing Balls"},
+  {"kaleidoscope", "Kaleidoscope"},
+  {"tetris-rain", "Tetris Rain"},
+  {"starfield", "Starfield"},
+  {"critical", "Critical"},
+  {"plasma", "Plasma"},
+};
+
 static constexpr size_t GP_MAX_CUSTOM_PERSONALITY_PRESETS = 8;
 
 struct GpCustomPersonalityPreset {
@@ -117,9 +137,11 @@ static char gp_connected_device_url[128] = "";
 static char gp_camera_base_url[128] = "";
 static char gp_weather_latitude[24] = "";
 static char gp_weather_longitude[24] = "";
+static char gp_screensaver_mode[24] = "matrix";
 static uint8_t gp_record_seconds = GP_DEFAULT_RECORD_SECONDS;
 static uint8_t gp_text_scale = 1;
 static uint16_t gp_lcd_scroll_ms = GP_DEFAULT_LCD_SCROLL_MS;
+static uint16_t gp_idle_saver_sec = GP_DEFAULT_IDLE_SAVER_SEC;
 static bool gp_lcd_backlight_enabled = true;
 static String gp_personality_prompt = GP_DEFAULT_PERSONALITY;
 static bool gp_has_settings = false;
@@ -143,6 +165,34 @@ static uint16_t gpClampLcdScrollMs(int value) {
   if (value < GP_MIN_LCD_SCROLL_MS) return GP_MIN_LCD_SCROLL_MS;
   if (value > GP_MAX_LCD_SCROLL_MS) return GP_MAX_LCD_SCROLL_MS;
   return static_cast<uint16_t>(value);
+}
+
+static uint16_t gpClampIdleSaverSec(int value) {
+  if (value < GP_MIN_IDLE_SAVER_SEC) return GP_MIN_IDLE_SAVER_SEC;
+  if (value > GP_MAX_IDLE_SAVER_SEC) return GP_MAX_IDLE_SAVER_SEC;
+  return static_cast<uint16_t>(value);
+}
+
+static size_t gpScreensaverOptionCount() {
+  return sizeof(GP_SCREENSAVER_OPTIONS) / sizeof(GP_SCREENSAVER_OPTIONS[0]);
+}
+
+static bool gpIsValidScreensaverMode(const String &value) {
+  for (size_t i = 0; i < gpScreensaverOptionCount(); i++) {
+    if (value == GP_SCREENSAVER_OPTIONS[i].value) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static int gpCurrentScreensaverOptionIndex() {
+  for (size_t i = 0; i < gpScreensaverOptionCount(); i++) {
+    if (strcmp(gp_screensaver_mode, GP_SCREENSAVER_OPTIONS[i].value) == 0) {
+      return static_cast<int>(i);
+    }
+  }
+  return 0;
 }
 
 static String gpEscapeHtml(const String &value) {
@@ -368,12 +418,16 @@ static void gpLoadSettings() {
   String cameraBaseUrl = prefs.getString("cameraUrl", "");
   String weatherLatitude = prefs.getString("weatherLat", "");
   String weatherLongitude = prefs.getString("weatherLon", "");
+  String screensaverMode = prefs.getString("saverMode", GP_DEFAULT_SAVER_MODE);
   gp_record_seconds = gpClampRecordSeconds(
     static_cast<int>(prefs.getUChar("recordSec", GP_DEFAULT_RECORD_SECONDS))
   );
   gp_text_scale = prefs.getUChar("txtsz", 1);
   gp_lcd_scroll_ms = gpClampLcdScrollMs(
     static_cast<int>(prefs.getUInt("lcdspd", GP_DEFAULT_LCD_SCROLL_MS))
+  );
+  gp_idle_saver_sec = gpClampIdleSaverSec(
+    static_cast<int>(prefs.getUInt("idler", GP_DEFAULT_IDLE_SAVER_SEC))
   );
   gp_lcd_backlight_enabled = prefs.getBool("lcdbl", true);
   gp_peer_mode_enabled = prefs.getBool("peerMode", false);
@@ -388,6 +442,10 @@ static void gpLoadSettings() {
   cameraBaseUrl.toCharArray(gp_camera_base_url, sizeof(gp_camera_base_url));
   gpParseCoordinateValue(weatherLatitude, -90.0, 90.0, gp_weather_latitude, sizeof(gp_weather_latitude));
   gpParseCoordinateValue(weatherLongitude, -180.0, 180.0, gp_weather_longitude, sizeof(gp_weather_longitude));
+  if (!gpIsValidScreensaverMode(screensaverMode)) {
+    screensaverMode = GP_DEFAULT_SAVER_MODE;
+  }
+  screensaverMode.toCharArray(gp_screensaver_mode, sizeof(gp_screensaver_mode));
   if (gp_model[0] == '\0') {
     strlcpy(gp_model, GP_DEFAULT_MODEL, sizeof(gp_model));
   }
@@ -413,6 +471,8 @@ static void gpSaveSettings(
   const char *cameraBaseUrl,
   const char *weatherLatitude,
   const char *weatherLongitude,
+  const char *screensaverMode,
+  uint16_t idleSaverSec,
   bool peerModeEnabled
 ) {
   Preferences prefs;
@@ -430,6 +490,13 @@ static void gpSaveSettings(
   prefs.putString("cameraUrl", cameraBaseUrl ? cameraBaseUrl : "");
   prefs.putString("weatherLat", weatherLatitude ? weatherLatitude : "");
   prefs.putString("weatherLon", weatherLongitude ? weatherLongitude : "");
+  prefs.putString(
+    "saverMode",
+    (screensaverMode && gpIsValidScreensaverMode(String(screensaverMode)))
+      ? screensaverMode
+      : GP_DEFAULT_SAVER_MODE
+  );
+  prefs.putUInt("idler", gpClampIdleSaverSec(idleSaverSec));
   prefs.putBool("peerMode", peerModeEnabled);
   prefs.end();
 
@@ -442,8 +509,16 @@ static void gpSaveSettings(
   strlcpy(gp_camera_base_url, cameraBaseUrl ? cameraBaseUrl : "", sizeof(gp_camera_base_url));
   strlcpy(gp_weather_latitude, weatherLatitude ? weatherLatitude : "", sizeof(gp_weather_latitude));
   strlcpy(gp_weather_longitude, weatherLongitude ? weatherLongitude : "", sizeof(gp_weather_longitude));
+  strlcpy(
+    gp_screensaver_mode,
+    (screensaverMode && gpIsValidScreensaverMode(String(screensaverMode)))
+      ? screensaverMode
+      : GP_DEFAULT_SAVER_MODE,
+    sizeof(gp_screensaver_mode)
+  );
   gp_personality_prompt = personality.length() ? personality : GP_DEFAULT_PERSONALITY;
   gp_record_seconds = gpClampRecordSeconds(recordSeconds);
+  gp_idle_saver_sec = gpClampIdleSaverSec(idleSaverSec);
   gp_peer_mode_enabled = peerModeEnabled;
   gp_has_settings = gp_wifi_ssid[0] != '\0' && gp_groq_api_key[0] != '\0';
 }
@@ -496,6 +571,8 @@ static void gpSetPeerModeEnabled(bool enabled) {
     gp_camera_base_url,
     gp_weather_latitude,
     gp_weather_longitude,
+    gp_screensaver_mode,
+    gp_idle_saver_sec,
     enabled
   );
 }
@@ -537,6 +614,8 @@ static void gpSetActiveModel(const char *model) {
     gp_camera_base_url,
     gp_weather_latitude,
     gp_weather_longitude,
+    gp_screensaver_mode,
+    gp_idle_saver_sec,
     gp_peer_mode_enabled
   );
 }
@@ -554,8 +633,61 @@ static void gpSetActivePersonalityPrompt(const String &prompt) {
     gp_camera_base_url,
     gp_weather_latitude,
     gp_weather_longitude,
+    gp_screensaver_mode,
+    gp_idle_saver_sec,
     gp_peer_mode_enabled
   );
+}
+
+static void gpSetActiveScreensaverMode(const char *mode) {
+  gpSaveSettings(
+    gp_wifi_ssid,
+    gp_wifi_pass,
+    gp_groq_api_key,
+    gp_model,
+    gp_personality_prompt,
+    gp_record_seconds,
+    gp_this_device_url,
+    gp_connected_device_url,
+    gp_camera_base_url,
+    gp_weather_latitude,
+    gp_weather_longitude,
+    mode && mode[0] ? mode : GP_DEFAULT_SAVER_MODE,
+    gp_idle_saver_sec,
+    gp_peer_mode_enabled
+  );
+}
+
+static void gpSetIdleSaverSec(uint16_t idleSaverSec) {
+  gpSaveSettings(
+    gp_wifi_ssid,
+    gp_wifi_pass,
+    gp_groq_api_key,
+    gp_model,
+    gp_personality_prompt,
+    gp_record_seconds,
+    gp_this_device_url,
+    gp_connected_device_url,
+    gp_camera_base_url,
+    gp_weather_latitude,
+    gp_weather_longitude,
+    gp_screensaver_mode,
+    idleSaverSec,
+    gp_peer_mode_enabled
+  );
+}
+
+static String gpScreensaverOptionHtml(const char *value, const char *label) {
+  String html = "<option value='";
+  html += value;
+  html += "'";
+  if (strcmp(gp_screensaver_mode, value) == 0) {
+    html += " selected";
+  }
+  html += ">";
+  html += label;
+  html += "</option>";
+  return html;
 }
 
 static void gpSetRuntimePersonalityPrompt(const String &prompt) {
@@ -614,6 +746,15 @@ static String gpBuildPortalHtml() {
   html += "<label>Max Record Seconds</label><input name='recordSec' type='number' value='";
   html += String(gp_record_seconds);
   html += "' min='2' max='15' required>";
+  html += "<label>Boot/Idle Screensaver</label><select name='saverMode'>";
+  for (size_t i = 0; i < gpScreensaverOptionCount(); i++) {
+    html += gpScreensaverOptionHtml(GP_SCREENSAVER_OPTIONS[i].value, GP_SCREENSAVER_OPTIONS[i].label);
+  }
+  html += "</select>";
+  html += "<label>Idle Screensaver Delay (seconds)</label><input name='idleSaverSec' type='number' value='";
+  html += String(gp_idle_saver_sec);
+  html += "' min='0' max='600' required>";
+  html += "<p class='hint'>Groqputer boots into Matrix first, then uses the selected saver after idle. Set 0 to disable idle activation.</p>";
   html += "<label>Personality Prompt</label><textarea name='personality' required>";
   html += gpEscapeHtml(gp_personality_prompt);
   html += "</textarea>";
@@ -688,6 +829,8 @@ static void gpHandlePortalSave() {
   String model = gp_portal_server->arg("model");
   String personality = gp_portal_server->arg("personality");
   uint8_t recordSec = gpClampRecordSeconds(gp_portal_server->arg("recordSec").toInt());
+  String screensaverMode = gp_portal_server->arg("saverMode");
+  uint16_t idleSaverSec = gpClampIdleSaverSec(gp_portal_server->arg("idleSaverSec").toInt());
   bool peerModeEnabled = gp_peer_mode_enabled && thisDeviceUrl.length() && connectedDeviceUrl.length();
   char normalizedWeatherLatitude[sizeof(gp_weather_latitude)] = "";
   char normalizedWeatherLongitude[sizeof(gp_weather_longitude)] = "";
@@ -714,6 +857,10 @@ static void gpHandlePortalSave() {
     }
   }
 
+  if (!gpIsValidScreensaverMode(screensaverMode)) {
+    screensaverMode = GP_DEFAULT_SAVER_MODE;
+  }
+
   gpSaveSettings(
     ssid.c_str(),
     pass.c_str(),
@@ -726,6 +873,8 @@ static void gpHandlePortalSave() {
     cameraBaseUrl.c_str(),
     normalizedWeatherLatitude,
     normalizedWeatherLongitude,
+    screensaverMode.c_str(),
+    idleSaverSec,
     peerModeEnabled
   );
   gp_portal_notice = "";

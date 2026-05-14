@@ -62,6 +62,10 @@ static constexpr int SD_SPI_MISO_PIN = 39;
 static constexpr int SD_SPI_MOSI_PIN = 14;
 static constexpr int SD_SPI_CS_PIN = 12;
 static constexpr size_t CAMERA_DOWNLOAD_CHUNK = 1024;
+static constexpr unsigned long SCREENSAVER_FRAME_MS = 45;
+static constexpr unsigned long SCREENSAVER_WAKE_GUARD_MS = 180;
+static constexpr uint8_t SCREENSAVER_BOOT_HINT_SECONDS = 8;
+static constexpr unsigned long SCREENSAVER_RANDOM_SHIFT_MS = 120000;
 
 enum class ChatPane : uint8_t {
   Incoming,
@@ -70,6 +74,7 @@ enum class ChatPane : uint8_t {
 
 enum class ScreenMode : uint8_t {
   Chat,
+  Screensaver,
   Settings,
   BotSettings,
   Hotkeys,
@@ -80,6 +85,17 @@ enum class ScreenMode : uint8_t {
 enum class BotSettingField : uint8_t {
   Model,
   Personality,
+};
+
+enum class SettingField : uint8_t {
+  Wifi,
+  Model,
+  RecordScroll,
+  TextLight,
+  WeatherCamera,
+  Screensaver,
+  IdleDelay,
+  Peer,
 };
 
 enum class CustomPersonalityStage : uint8_t {
@@ -100,6 +116,7 @@ enum RenderRegion : uint8_t {
 static ChatPane activePane = ChatPane::Incoming;
 static ScreenMode activeScreen = ScreenMode::Chat;
 static BotSettingField activeBotSettingField = BotSettingField::Model;
+static SettingField activeSettingField = SettingField::Screensaver;
 static CustomPersonalityStage activeCustomPersonalityStage = CustomPersonalityStage::Prompt;
 static bool usingExternalPower = true;
 static String customPersonalityPromptBuffer;
@@ -107,6 +124,38 @@ static String customPersonalityNameBuffer;
 static bool sdCardInitAttempted = false;
 static bool sdCardReady = false;
 static WebServer *gp_companion_server = nullptr;
+static unsigned long lastUserActivityMs = 0;
+static unsigned long screensaverDismissUntilMs = 0;
+static unsigned long screensaverStartedMs = 0;
+static unsigned long lastScreensaverFrameMs = 0;
+static bool bootScreensaverActive = false;
+static int activeRandomScreensaverIndex = -1;
+static unsigned long nextRandomScreensaverChangeMs = 0;
+
+struct ScreensaverBall {
+  float x;
+  float y;
+  float dx;
+  float dy;
+  int radius;
+  uint16_t color;
+};
+
+struct ScreensaverStar {
+  float x;
+  float y;
+  float z;
+  uint16_t color;
+};
+
+struct TetrisRainPiece {
+  int x;
+  float y;
+  float speed;
+  uint8_t shape;
+  uint8_t rotation;
+  uint16_t color;
+};
 
 static void markDirty(uint8_t regions) {
   dirtyRegions |= regions;
@@ -121,6 +170,12 @@ static bool captureEsp32CamPhoto(String &savedPathOut, String &errorOut);
 static bool openPhotoViewer(const String &preferredPath, String &errorOut);
 static void ensureCompanionServer();
 static void pollCompanionServer();
+static void renderUi();
+static String selectedScreensaverLabel();
+
+static void noteUserActivity() {
+  lastUserActivityMs = millis();
+}
 
 static int32_t currentBatteryLevel() {
   int32_t level = M5.Power.getBatteryLevel();
@@ -208,9 +263,474 @@ static unsigned long currentReaderAutoScrollIntervalMs() {
 }
 
 static void setToast(const String &message, uint16_t durationMs = 2200) {
+  noteUserActivity();
   toastMessage = message;
   toastUntilMs = millis() + durationMs;
   markDirty(DIRTY_CONTENT | DIRTY_FOOTER | DIRTY_TOAST);
+}
+
+static int font0TextWidth(const String &text) {
+  return static_cast<int>(text.length()) * 6;
+}
+
+static String truncateFont0Text(const String &text, int maxChars) {
+  if (maxChars <= 0) return "";
+  if (text.length() <= static_cast<size_t>(maxChars)) return text;
+  if (maxChars <= 3) return text.substring(0, maxChars);
+  return text.substring(0, maxChars - 3) + "...";
+}
+
+static int settingFieldCount() {
+  return 8;
+}
+
+static int currentSettingFieldIndex() {
+  return static_cast<int>(activeSettingField);
+}
+
+static SettingField settingFieldAt(int index) {
+  return static_cast<SettingField>(constrain(index, 0, settingFieldCount() - 1));
+}
+
+static bool settingFieldEditable(SettingField field) {
+  return field == SettingField::Screensaver || field == SettingField::IdleDelay;
+}
+
+static String settingFieldLabel(SettingField field) {
+  switch (field) {
+    case SettingField::Wifi: return "WiFi";
+    case SettingField::Model: return "Model";
+    case SettingField::RecordScroll: return "Rec/Scr";
+    case SettingField::TextLight: return "Txt/Lgt";
+    case SettingField::WeatherCamera: return "Wx/Cam";
+    case SettingField::Screensaver: return "Saver";
+    case SettingField::IdleDelay: return "Idle";
+    case SettingField::Peer: return "Peer";
+  }
+  return "";
+}
+
+static String settingFieldValue(SettingField field) {
+  switch (field) {
+    case SettingField::Wifi:
+      return WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : String("offline");
+    case SettingField::Model:
+      return modelShortLabel();
+    case SettingField::RecordScroll:
+      return String(gp_record_seconds) + "s / " + String(gp_lcd_scroll_ms);
+    case SettingField::TextLight:
+      return String(gp_text_scale) + " / " + (gp_lcd_backlight_enabled ? String("on") : String("off"));
+    case SettingField::WeatherCamera:
+      return String(gpWeatherCoordinatesReady() ? "ok" : "miss") + " / " +
+             (String(gp_camera_base_url).length() ? "ok" : "miss");
+    case SettingField::Screensaver:
+      return selectedScreensaverLabel();
+    case SettingField::IdleDelay:
+      return String(gp_idle_saver_sec) + " sec";
+    case SettingField::Peer:
+      return String(gp_peer_mode_enabled ? "ON" : "OFF") + " / " +
+             (gpPeerSettingsReady() ? "ready" : "missing");
+  }
+  return "";
+}
+
+static bool screensaverModeIsRandom(const char *mode) {
+  return mode && strcmp(mode, "random-shift") == 0;
+}
+
+static bool isConcreteScreensaverMode(const char *mode) {
+  return mode && mode[0] != '\0' && !screensaverModeIsRandom(mode);
+}
+
+static void chooseRandomScreensaverMode() {
+  int eligibleIndices[16];
+  int eligibleCount = 0;
+  for (size_t i = 0; i < gpScreensaverOptionCount(); i++) {
+    if (!isConcreteScreensaverMode(GP_SCREENSAVER_OPTIONS[i].value)) continue;
+    eligibleIndices[eligibleCount++] = static_cast<int>(i);
+  }
+  if (eligibleCount == 0) {
+    activeRandomScreensaverIndex = 0;
+    return;
+  }
+
+  int nextIndex = eligibleIndices[random(eligibleCount)];
+  if (eligibleCount > 1 && nextIndex == activeRandomScreensaverIndex) {
+    int currentPos = 0;
+    for (int i = 0; i < eligibleCount; i++) {
+      if (eligibleIndices[i] == activeRandomScreensaverIndex) {
+        currentPos = i;
+        break;
+      }
+    }
+    nextIndex = eligibleIndices[(currentPos + 1 + random(eligibleCount - 1)) % eligibleCount];
+  }
+  activeRandomScreensaverIndex = nextIndex;
+}
+
+static const char *selectedScreensaverMode() {
+  return bootScreensaverActive ? GP_DEFAULT_SAVER_MODE : gp_screensaver_mode;
+}
+
+static String selectedScreensaverLabel() {
+  const char *mode = selectedScreensaverMode();
+  for (size_t i = 0; i < gpScreensaverOptionCount(); i++) {
+    if (strcmp(mode, GP_SCREENSAVER_OPTIONS[i].value) == 0) {
+      return GP_SCREENSAVER_OPTIONS[i].label;
+    }
+  }
+  return "Matrix";
+}
+
+static const char *currentScreensaverMode() {
+  const char *mode = selectedScreensaverMode();
+  if (!screensaverModeIsRandom(mode)) {
+    return mode;
+  }
+  if (activeRandomScreensaverIndex < 0 ||
+      activeRandomScreensaverIndex >= static_cast<int>(gpScreensaverOptionCount())) {
+    chooseRandomScreensaverMode();
+  }
+  return GP_SCREENSAVER_OPTIONS[activeRandomScreensaverIndex].value;
+}
+
+static String currentScreensaverLabel() {
+  if (screensaverModeIsRandom(selectedScreensaverMode()) && activeScreen != ScreenMode::Settings) {
+    const char *activeMode = currentScreensaverMode();
+    for (size_t i = 0; i < gpScreensaverOptionCount(); i++) {
+      if (strcmp(activeMode, GP_SCREENSAVER_OPTIONS[i].value) == 0) {
+        return GP_SCREENSAVER_OPTIONS[i].label;
+      }
+    }
+  }
+  return selectedScreensaverLabel();
+}
+
+static void enterScreensaver(bool bootEntry = false) {
+  if (activeScreen == ScreenMode::Screensaver) {
+    if (bootEntry) bootScreensaverActive = true;
+    return;
+  }
+  activeScreen = ScreenMode::Screensaver;
+  bootScreensaverActive = bootEntry;
+  screensaverStartedMs = millis();
+  lastScreensaverFrameMs = 0;
+  if (screensaverModeIsRandom(selectedScreensaverMode())) {
+    chooseRandomScreensaverMode();
+    nextRandomScreensaverChangeMs = screensaverStartedMs + SCREENSAVER_RANDOM_SHIFT_MS;
+  } else {
+    activeRandomScreensaverIndex = -1;
+    nextRandomScreensaverChangeMs = 0;
+  }
+  dirtyRegions = DIRTY_ALL;
+}
+
+static void exitScreensaver() {
+  if (activeScreen != ScreenMode::Screensaver) return;
+  bootScreensaverActive = false;
+  activeScreen = ScreenMode::Chat;
+  screensaverDismissUntilMs = millis() + SCREENSAVER_WAKE_GUARD_MS;
+  noteUserActivity();
+  markDirty(DIRTY_ALL);
+}
+
+static void drawMatrixScreensaver() {
+  static struct {
+    int x;
+    int y;
+    int speed;
+    char chars[20];
+  } streams[12];
+  static bool initialized = false;
+
+  if (!initialized) {
+    for (int i = 0; i < 12; i++) {
+      streams[i].x = random(M5Cardputer.Display.width());
+      streams[i].y = random(-200, 0);
+      streams[i].speed = random(2, 6);
+      for (int j = 0; j < 20; j++) {
+        streams[i].chars[j] = random(48, 90);
+      }
+    }
+    initialized = true;
+  }
+
+  M5Cardputer.Display.fillScreen(BLACK);
+  M5Cardputer.Display.setTextSize(1);
+  for (int i = 0; i < 12; i++) {
+    for (int j = 0; j < 20; j++) {
+      int drawY = streams[i].y + j * 8;
+      if (drawY < 0 || drawY >= M5Cardputer.Display.height()) continue;
+      uint16_t color = j < 2 ? 0xA7FF : (j < 7 ? 0x07E0 : 0x0320);
+      M5Cardputer.Display.setCursor(streams[i].x, drawY);
+      M5Cardputer.Display.setTextColor(color, BLACK);
+      M5Cardputer.Display.print((char)streams[i].chars[j]);
+    }
+    streams[i].y += streams[i].speed;
+    if (streams[i].y > M5Cardputer.Display.height() + 20) {
+      streams[i].y = random(-180, -40);
+      streams[i].x = random(M5Cardputer.Display.width());
+      streams[i].speed = random(2, 6);
+    }
+    if (random(30) == 0) {
+      streams[i].chars[random(20)] = random(48, 90);
+    }
+  }
+}
+
+static void drawBouncingBallsScreensaver() {
+  static ScreensaverBall balls[8];
+  static bool initialized = false;
+  const int w = M5Cardputer.Display.width();
+  const int h = M5Cardputer.Display.height();
+
+  if (!initialized) {
+    const uint16_t colors[] = {RED, GREEN, BLUE, YELLOW, CYAN, MAGENTA, 0xFD20, 0xAFE5};
+    for (int i = 0; i < 8; i++) {
+      balls[i].radius = random(5, 11);
+      balls[i].x = random(balls[i].radius, w - balls[i].radius);
+      balls[i].y = random(balls[i].radius, h - balls[i].radius);
+      balls[i].dx = random(8, 19) / 10.0f * (random(2) ? 1.0f : -1.0f);
+      balls[i].dy = random(8, 19) / 10.0f * (random(2) ? 1.0f : -1.0f);
+      balls[i].color = colors[i % 8];
+    }
+    initialized = true;
+  }
+
+  M5Cardputer.Display.fillScreen(BLACK);
+  for (int i = 0; i < 8; i++) {
+    balls[i].x += balls[i].dx;
+    balls[i].y += balls[i].dy;
+    if (balls[i].x <= balls[i].radius || balls[i].x >= w - balls[i].radius) {
+      balls[i].dx = -balls[i].dx;
+      balls[i].x = constrain(static_cast<int>(balls[i].x), balls[i].radius, w - balls[i].radius);
+    }
+    if (balls[i].y <= balls[i].radius || balls[i].y >= h - balls[i].radius) {
+      balls[i].dy = -balls[i].dy;
+      balls[i].y = constrain(static_cast<int>(balls[i].y), balls[i].radius, h - balls[i].radius);
+    }
+    M5Cardputer.Display.fillCircle(static_cast<int>(balls[i].x), static_cast<int>(balls[i].y), balls[i].radius, balls[i].color);
+  }
+}
+
+static void drawKaleidoscopeScreensaver() {
+  static float timePhase = 0.0f;
+  timePhase += 0.075f;
+
+  const int w = M5Cardputer.Display.width();
+  const int h = M5Cardputer.Display.height();
+  const int cx = w / 2;
+  const int cy = h / 2;
+  const int maxRadius = max(w, h);
+  M5Cardputer.Display.fillScreen(BLACK);
+
+  for (int i = 0; i < 34; i++) {
+    float radius = (0.16f + 0.025f * i) * maxRadius;
+    float baseAngle = timePhase * (0.45f + i * 0.015f) + i * 0.35f;
+    int orbitRadius = 2 + (i % 4);
+    uint8_t red = static_cast<uint8_t>(sin(baseAngle * 1.2f) * 100 + 140);
+    uint8_t green = static_cast<uint8_t>(sin(baseAngle * 1.6f + 2.0f) * 100 + 140);
+    uint8_t blue = static_cast<uint8_t>(sin(baseAngle * 1.1f + 4.0f) * 100 + 140);
+    uint16_t color = M5Cardputer.Display.color565(red, green, blue);
+
+    for (int mirror = 0; mirror < 8; mirror++) {
+      float angle = baseAngle + mirror * (PI / 4.0f);
+      int x = cx + static_cast<int>(cos(angle) * radius);
+      int y = cy + static_cast<int>(sin(angle) * radius);
+      int mx = cx - (x - cx);
+      int my = cy - (y - cy);
+      M5Cardputer.Display.fillCircle(x, y, orbitRadius, color);
+      M5Cardputer.Display.fillCircle(mx, y, orbitRadius, color);
+      M5Cardputer.Display.fillCircle(x, my, orbitRadius, color);
+    }
+  }
+}
+
+static void drawTetrisRainScreensaver() {
+  static TetrisRainPiece pieces[7];
+  static bool initialized = false;
+  static const int shapes[7][4][2] = {
+    {{0, 0}, {1, 0}, {-1, 0}, {2, 0}},
+    {{0, 0}, {1, 0}, {0, 1}, {1, 1}},
+    {{0, 0}, {-1, 0}, {1, 0}, {0, 1}},
+    {{0, 0}, {1, 0}, {0, 1}, {-1, 1}},
+    {{0, 0}, {-1, 0}, {0, 1}, {1, 1}},
+    {{0, 0}, {-1, 0}, {1, 0}, {1, 1}},
+    {{0, 0}, {-1, 0}, {1, 0}, {-1, 1}},
+  };
+  static const uint16_t colors[] = {CYAN, YELLOW, MAGENTA, GREEN, RED, BLUE, 0xFD20};
+  const int block = 6;
+  const int w = M5Cardputer.Display.width();
+  const int h = M5Cardputer.Display.height();
+
+  if (!initialized) {
+    for (int i = 0; i < 7; i++) {
+      pieces[i].x = random(16, w - 16);
+      pieces[i].y = random(-h, 0);
+      pieces[i].speed = random(8, 16) / 10.0f;
+      pieces[i].shape = i;
+      pieces[i].rotation = random(4);
+      pieces[i].color = colors[i];
+    }
+    initialized = true;
+  }
+
+  M5Cardputer.Display.fillScreen(BLACK);
+  for (int i = 0; i < 7; i++) {
+    pieces[i].y += pieces[i].speed;
+    if (pieces[i].y > h + 18) {
+      pieces[i].x = random(16, w - 16);
+      pieces[i].y = random(-60, -12);
+      pieces[i].speed = random(8, 16) / 10.0f;
+      pieces[i].rotation = random(4);
+      pieces[i].shape = random(7);
+      pieces[i].color = colors[pieces[i].shape];
+    }
+
+    for (int blockIndex = 0; blockIndex < 4; blockIndex++) {
+      int px = shapes[pieces[i].shape][blockIndex][0];
+      int py = shapes[pieces[i].shape][blockIndex][1];
+      for (int step = 0; step < pieces[i].rotation; step++) {
+        int nextX = -py;
+        int nextY = px;
+        px = nextX;
+        py = nextY;
+      }
+      int drawX = pieces[i].x + px * block;
+      int drawY = static_cast<int>(pieces[i].y) + py * block;
+      M5Cardputer.Display.fillRect(drawX, drawY, block, block, pieces[i].color);
+      M5Cardputer.Display.drawRect(drawX, drawY, block, block, COLOR_DIM);
+    }
+  }
+}
+
+static void drawStarfieldScreensaver() {
+  static ScreensaverStar stars[72];
+  static bool initialized = false;
+  const int w = M5Cardputer.Display.width();
+  const int h = M5Cardputer.Display.height();
+  const int cx = w / 2;
+  const int cy = h / 2;
+
+  if (!initialized) {
+    const uint16_t palette[] = {WHITE, CYAN, YELLOW, MAGENTA};
+    for (int i = 0; i < 72; i++) {
+      stars[i].x = random(-w, w);
+      stars[i].y = random(-h, h);
+      stars[i].z = random(20, 120);
+      stars[i].color = palette[random(4)];
+    }
+    initialized = true;
+  }
+
+  M5Cardputer.Display.fillScreen(BLACK);
+  for (int i = 0; i < 72; i++) {
+    int x = cx + static_cast<int>((stars[i].x * 96.0f) / stars[i].z);
+    int y = cy + static_cast<int>((stars[i].y * 96.0f) / stars[i].z);
+    int size = max(1, static_cast<int>(120.0f / stars[i].z));
+    if (x >= 0 && x < w && y >= 0 && y < h) {
+      M5Cardputer.Display.fillCircle(x, y, size, stars[i].color);
+    }
+    stars[i].z -= 2.2f;
+    if (stars[i].z <= 2.0f) {
+      stars[i].x = random(-w, w);
+      stars[i].y = random(-h, h);
+      stars[i].z = 120.0f;
+    }
+  }
+}
+
+static void drawCriticalScreensaver() {
+  static float criticalTime = 0.0f;
+  criticalTime += 0.1f;
+  bool flash = (static_cast<int>(criticalTime * 8) % 2) == 0;
+  M5Cardputer.Display.fillScreen(flash ? 0x1800 : BLACK);
+  M5Cardputer.Display.setTextColor(flash ? WHITE : RED, flash ? 0x1800 : BLACK);
+  M5Cardputer.Display.setTextSize(2);
+  M5Cardputer.Display.setCursor(20, 20);
+  M5Cardputer.Display.print("CRITICAL");
+  M5Cardputer.Display.setTextSize(1);
+  M5Cardputer.Display.setCursor(12, 48);
+  M5Cardputer.Display.print("SYSTEM FAILURE IMMINENT");
+  M5Cardputer.Display.setCursor(12, 64);
+  M5Cardputer.Display.print("Temp: " + String(150 + static_cast<int>(sin(criticalTime * 4) * 45)) + "C");
+  M5Cardputer.Display.setCursor(12, 78);
+  M5Cardputer.Display.print("Memory: " + String(95 + static_cast<int>(sin(criticalTime * 2) * 4)) + "%");
+  M5Cardputer.Display.setCursor(12, 92);
+  M5Cardputer.Display.print("Disk: " + String(98 + static_cast<int>(sin(criticalTime * 3) * 2)) + "%");
+  M5Cardputer.Display.setTextColor(0x07E0, flash ? 0x1800 : BLACK);
+  for (int i = 0; i < 3; i++) {
+    M5Cardputer.Display.setCursor(12, 108 + i * 8);
+    int errorCode = 0x8000 + (static_cast<int>(criticalTime * 100) + i * 137) % 0x0FFF;
+    M5Cardputer.Display.printf("ERR 0x%04X", errorCode);
+  }
+}
+
+static void drawPlasmaScreensaver() {
+  static float timePhase = 0.0f;
+  timePhase += 0.08f;
+  const int w = M5Cardputer.Display.width();
+  const int h = M5Cardputer.Display.height();
+  M5Cardputer.Display.fillScreen(BLACK);
+  for (int x = 0; x < w; x += 3) {
+    for (int y = 0; y < h; y += 3) {
+      float value = sin(x * 0.10f + timePhase) +
+                    sin(y * 0.11f + timePhase * 1.3f) +
+                    sin((x + y) * 0.05f + timePhase * 0.7f);
+      uint8_t red = static_cast<uint8_t>(sin(value + timePhase) * 127 + 128);
+      uint8_t green = static_cast<uint8_t>(sin(value + timePhase + 2) * 127 + 128);
+      uint8_t blue = static_cast<uint8_t>(sin(value + timePhase + 4) * 127 + 128);
+      M5Cardputer.Display.fillRect(x, y, 3, 3, M5Cardputer.Display.color565(red, green, blue));
+    }
+  }
+}
+
+static void renderScreensaverFrame(bool force = false) {
+  if (activeScreen != ScreenMode::Screensaver) return;
+  unsigned long now = millis();
+  if (!force && now - lastScreensaverFrameMs < SCREENSAVER_FRAME_MS) return;
+  lastScreensaverFrameMs = now;
+
+  if (!bootScreensaverActive &&
+      screensaverModeIsRandom(selectedScreensaverMode()) &&
+      nextRandomScreensaverChangeMs > 0 &&
+      now >= nextRandomScreensaverChangeMs) {
+    chooseRandomScreensaverMode();
+    nextRandomScreensaverChangeMs = now + SCREENSAVER_RANDOM_SHIFT_MS;
+  }
+
+  const char *mode = currentScreensaverMode();
+  if (strcmp(mode, "bouncing-balls") == 0) {
+    drawBouncingBallsScreensaver();
+  } else if (strcmp(mode, "kaleidoscope") == 0) {
+    drawKaleidoscopeScreensaver();
+  } else if (strcmp(mode, "tetris-rain") == 0) {
+    drawTetrisRainScreensaver();
+  } else if (strcmp(mode, "starfield") == 0) {
+    drawStarfieldScreensaver();
+  } else if (strcmp(mode, "critical") == 0) {
+    drawCriticalScreensaver();
+  } else if (strcmp(mode, "plasma") == 0) {
+    drawPlasmaScreensaver();
+  } else {
+    drawMatrixScreensaver();
+  }
+
+  if (bootScreensaverActive) {
+    M5Cardputer.Display.fillRoundRect(10, 8, 128, 32, 6, 0x0000);
+    M5Cardputer.Display.drawRoundRect(10, 8, 128, 32, 6, COLOR_DIM);
+    M5Cardputer.Display.setTextColor(COLOR_ACCENT, BLACK);
+    M5Cardputer.Display.setCursor(18, 18);
+    M5Cardputer.Display.print("Groqputer");
+    M5Cardputer.Display.setTextColor(COLOR_DIM, BLACK);
+    M5Cardputer.Display.setCursor(18, 30);
+    M5Cardputer.Display.print("Press key to wake");
+  } else if (now - screensaverStartedMs < 1400) {
+    M5Cardputer.Display.fillRoundRect(8, 8, 110, 18, 6, 0x0000);
+    M5Cardputer.Display.setTextColor(COLOR_DIM, BLACK);
+    M5Cardputer.Display.setCursor(14, 20);
+    M5Cardputer.Display.print(currentScreensaverLabel());
+  }
 }
 
 static String normalizeBaseUrl(const String &value) {
@@ -641,45 +1161,48 @@ static String gpCurrentPersonalityLabel() {
 }
 
 static void drawSettingsView(int x, int y, int w, int h) {
-  const int lineHeight = 10;
-  int cursorY = y;
+  const int lineHeight = 11;
+  const int titleY = y;
+  const int bodyY = y + 14;
+  const int hintY = y + h - 10;
+  const int bodyH = max(1, hintY - bodyY - 2);
+  const int totalRows = settingFieldCount();
+  const int selectedIndex = currentSettingFieldIndex();
+  const int visibleRows = max(1, min(totalRows, bodyH / lineHeight));
+  const int startRow = constrain(selectedIndex - (visibleRows / 2), 0, max(0, totalRows - visibleRows));
+  const int endRow = min(totalRows, startRow + visibleRows);
+  const int labelWidth = 50;
+
   M5Cardputer.Display.setTextColor(COLOR_OK, COLOR_PANEL);
-  M5Cardputer.Display.setCursor(x, cursorY);
+  M5Cardputer.Display.setCursor(x, titleY);
   M5Cardputer.Display.print("SETTINGS");
-  cursorY += lineHeight + 2;
+  M5Cardputer.Display.drawFastHLine(x, y + 11, w, COLOR_DIM);
 
-  M5Cardputer.Display.setTextColor(COLOR_TEXT, COLOR_PANEL);
-  M5Cardputer.Display.setCursor(x, cursorY);
-  M5Cardputer.Display.print(String("WiFi ") + (WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : String("offline")));
-  cursorY += lineHeight;
+  for (int row = startRow; row < endRow; row++) {
+    SettingField field = settingFieldAt(row);
+    bool selected = row == selectedIndex;
+    int rowY = bodyY + ((row - startRow) * lineHeight);
 
-  M5Cardputer.Display.setCursor(x, cursorY);
-  M5Cardputer.Display.print("Model " + modelShortLabel());
-  cursorY += lineHeight;
+    M5Cardputer.Display.setTextColor(selected ? COLOR_WARN : COLOR_DIM, COLOR_PANEL);
+    M5Cardputer.Display.setCursor(x, rowY);
+    M5Cardputer.Display.print(selected ? "> " : "  ");
+    M5Cardputer.Display.print(settingFieldLabel(field));
 
-  M5Cardputer.Display.setCursor(x, cursorY);
-  M5Cardputer.Display.print("Rec " + String(gp_record_seconds) + "s  Scr " + String(gp_lcd_scroll_ms));
-  cursorY += lineHeight;
+    String value = truncateFont0Text(settingFieldValue(field), max(4, (w - labelWidth) / 6));
+    M5Cardputer.Display.setTextColor(settingFieldEditable(field) ? (selected ? COLOR_WARN : COLOR_TEXT) : COLOR_TEXT, COLOR_PANEL);
+    M5Cardputer.Display.setCursor(x + labelWidth, rowY);
+    M5Cardputer.Display.print(value);
+  }
 
-  M5Cardputer.Display.setCursor(x, cursorY);
-  M5Cardputer.Display.print("Txt " + String(gp_text_scale) + "  Light " + (gp_lcd_backlight_enabled ? String("on") : String("off")));
-  cursorY += lineHeight;
-
-  M5Cardputer.Display.setCursor(x, cursorY);
-  M5Cardputer.Display.print(String("Wx ") + (gpWeatherCoordinatesReady() ? "ok" : "miss") +
-                            "  Cam " + (String(gp_camera_base_url).length() ? "ok" : "miss"));
-  cursorY += lineHeight;
-
-  M5Cardputer.Display.setCursor(x, cursorY);
-  M5Cardputer.Display.print(String("Peer ") + (gp_peer_mode_enabled ? "ON" : "OFF") +
-                            "  " + (gpPeerSettingsReady() ? "ready" : "missing"));
-  cursorY += lineHeight;
-
+  String hint = String(selectedIndex + 1) + "/" + String(totalRows);
+  if (startRow > 0) hint += " ^";
+  if (endRow < totalRows) hint += " v";
+  if (!settingFieldEditable(settingFieldAt(selectedIndex))) {
+    hint += "  info";
+  }
   M5Cardputer.Display.setTextColor(COLOR_DIM, COLOR_PANEL);
-  M5Cardputer.Display.setCursor(x, min(y + h - 22, cursorY + 2));
-  M5Cardputer.Display.print("Fn+1 off Fn+2 on");
-  M5Cardputer.Display.setCursor(x, y + h - 10);
-  M5Cardputer.Display.print("Fn+S close Fn+C net");
+  M5Cardputer.Display.setCursor(x, hintY);
+  M5Cardputer.Display.print(hint);
 }
 
 static void drawBotSettingsView(int x, int y, int w, int h) {
@@ -732,11 +1255,13 @@ static void drawHotkeysView(int x, int y, int w, int h) {
 
   M5Cardputer.Display.setTextColor(COLOR_TEXT, COLOR_PANEL);
   const char *lines[] = {
+    "Any key wakes saver",
     "Fn+H close sheet",
     "Fn+M bot  Fn+O you",
     "Fn+,/ turns",
     "Fn+;. read up/down",
     "Fn+[/] scroll speed",
+    "Fn+X saver preview",
     "Fn+T photo rotate",
     "Fn+V custom bot",
     "Fn+S settings",
@@ -1031,12 +1556,11 @@ static String currentReaderText() {
 }
 
 static String currentReaderHint() {
-  String hint = "Turn ";
-  hint += currentTurnIndicator();
+  String hint = currentTurnIndicator();
   if (activePane == ChatPane::Incoming) {
-    hint += "  Fn+O YOU";
+    hint += "  Fn+O";
   } else {
-    hint += "  Fn+M BOT";
+    hint += "  Fn+M";
   }
   return hint;
 }
@@ -1071,8 +1595,9 @@ static void drawReaderView(int x, int y, int w, int h) {
   M5Cardputer.Display.setCursor(x, headerY + 2);
   M5Cardputer.Display.print(title);
   M5Cardputer.Display.setTextColor(COLOR_DIM, COLOR_PANEL);
-  M5Cardputer.Display.setCursor(x + 34, headerY + 2);
-  M5Cardputer.Display.print(currentReaderHint());
+  String readerHint = currentReaderHint();
+  M5Cardputer.Display.setCursor(max(x + 22, x + w - font0TextWidth(readerHint) - 2), headerY + 2);
+  M5Cardputer.Display.print(readerHint);
   M5Cardputer.Display.drawFastHLine(x, y + 12, w, COLOR_DIM);
 
   M5Cardputer.Display.setTextColor(COLOR_TEXT, COLOR_PANEL);
@@ -1087,8 +1612,9 @@ static void drawReaderView(int x, int y, int w, int h) {
 
   if (incomingView && maxOffset > 0) {
     M5Cardputer.Display.setTextColor(COLOR_DIM, COLOR_PANEL);
-    M5Cardputer.Display.setCursor(x + w - 42, y + h - 10);
-    M5Cardputer.Display.print(String(activeReplyScrollOffset + 1) + "/" + String(maxOffset + 1));
+    String pageIndicator = String(activeReplyScrollOffset + 1) + "/" + String(maxOffset + 1);
+    M5Cardputer.Display.setCursor(max(x + 4, x + w - font0TextWidth(pageIndicator) - 2), y + h - 10);
+    M5Cardputer.Display.print(pageIndicator);
   } else if (composingDraft && startLine > 0) {
     M5Cardputer.Display.setTextColor(COLOR_DIM, COLOR_PANEL);
     M5Cardputer.Display.setCursor(x + w - 16, y + h - 10);
@@ -1193,7 +1719,7 @@ static void drawFooter(int screenW, int screenH) {
     M5Cardputer.Display.print(gp_record_seconds);
     M5Cardputer.Display.print("s");
   } else if (activeScreen == ScreenMode::Settings) {
-    M5Cardputer.Display.print("Fn+S CLOSE  Fn+C NET");
+    M5Cardputer.Display.print("Fn+;/. ROW Fn+,// SET");
   } else if (activeScreen == ScreenMode::BotSettings) {
     M5Cardputer.Display.print("Fn+B BOT  Fn+;/. NAV");
   } else if (activeScreen == ScreenMode::Hotkeys) {
@@ -1206,6 +1732,8 @@ static void drawFooter(int screenW, int screenH) {
     }
   } else if (activeScreen == ScreenMode::PhotoViewer) {
     M5Cardputer.Display.print("Fn+I CLOSE Fn+,/ PHOTOS Fn+T ROT");
+  } else if (activeScreen == ScreenMode::Screensaver) {
+    M5Cardputer.Display.print("Any key wakes Groqputer");
   } else {
     if (activePane == ChatPane::Incoming) {
       M5Cardputer.Display.print("Fn+;. read  Fn+,/ turn");
@@ -1235,6 +1763,9 @@ static String modelShortLabel() {
 }
 
 static void renderUi() {
+  if (activeScreen == ScreenMode::Screensaver) {
+    return;
+  }
   const int screenW = M5Cardputer.Display.width();
   const int screenH = M5Cardputer.Display.height();
 
@@ -1357,6 +1888,7 @@ static bool shouldCapturePhoto(const String &value) {
 }
 
 static bool submitMessageForReply(const String &text, bool clearInputOnSuccess) {
+  noteUserActivity();
   String message = text;
   message.trim();
   if (!message.length()) {
@@ -1451,6 +1983,7 @@ static void submitCurrentInput() {
 
 static void startRecording() {
   if (recordingActive) return;
+  noteUserActivity();
   if (!gpEnsureWifiConnected()) {
     setToast("WiFi is not connected.");
     return;
@@ -1483,6 +2016,7 @@ static void startRecording() {
 
 static void finishRecording() {
   if (!recordingActive) return;
+  noteUserActivity();
   recordingActive = false;
   M5Cardputer.Mic.end();
   markDirty(DIRTY_FOOTER);
@@ -1577,6 +2111,59 @@ static void cycleBotSettingField(int delta) {
   if (delta == 0) return;
   activeBotSettingField = (delta > 0) ? BotSettingField::Personality : BotSettingField::Model;
   markDirty(DIRTY_CONTENT | DIRTY_FOOTER);
+}
+
+static void cycleSettingField(int delta) {
+  if (delta == 0) return;
+  int count = settingFieldCount();
+  int index = currentSettingFieldIndex();
+  index = (index + delta + count) % count;
+  activeSettingField = settingFieldAt(index);
+  markDirty(DIRTY_CONTENT | DIRTY_FOOTER);
+}
+
+static void cycleSettingsValue(int delta) {
+  if (delta == 0) return;
+
+  if (activeSettingField == SettingField::Screensaver) {
+    int count = static_cast<int>(gpScreensaverOptionCount());
+    int index = gpCurrentScreensaverOptionIndex();
+    index = (index + delta + count) % count;
+    gpSetActiveScreensaverMode(GP_SCREENSAVER_OPTIONS[index].value);
+    activeRandomScreensaverIndex = -1;
+    nextRandomScreensaverChangeMs = 0;
+    markDirty(DIRTY_CONTENT);
+    setToast(String("Saver: ") + GP_SCREENSAVER_OPTIONS[index].label);
+    return;
+  }
+
+  if (activeSettingField == SettingField::IdleDelay) {
+    static const uint16_t idleOptions[] = {0, 15, 30, 60, 120, 300, 600};
+    const int optionCount = static_cast<int>(sizeof(idleOptions) / sizeof(idleOptions[0]));
+    int optionIndex = 0;
+    for (int i = 0; i < optionCount; i++) {
+      if (gp_idle_saver_sec <= idleOptions[i]) {
+        optionIndex = i;
+        break;
+      }
+      optionIndex = i;
+    }
+    optionIndex = (optionIndex + delta + optionCount) % optionCount;
+    gpSetIdleSaverSec(idleOptions[optionIndex]);
+    markDirty(DIRTY_CONTENT);
+    setToast(String("Idle saver: ") + String(gp_idle_saver_sec) + "s");
+    return;
+  }
+
+  if (activeSettingField == SettingField::Model) {
+    setToast("Use Fn+B for model.");
+  } else if (activeSettingField == SettingField::Wifi ||
+             activeSettingField == SettingField::WeatherCamera ||
+             activeSettingField == SettingField::Peer) {
+    setToast("Edit in setup AP.");
+  } else {
+    setToast("Info row only.");
+  }
 }
 
 static void cycleBotSettingValue(int delta) {
@@ -1723,6 +2310,8 @@ static bool handleRepeatableFnAction(char c) {
   if (c == ';') {
     if (activeScreen == ScreenMode::BotSettings) {
       cycleBotSettingField(-1);
+    } else if (activeScreen == ScreenMode::Settings) {
+      cycleSettingField(-1);
     } else if (activeScreen == ScreenMode::Chat) {
       scrollCurrentReply(-TURN_SCROLL_STEP,
                          M5Cardputer.Display.width() - (CONTENT_MARGIN * 2) - 12,
@@ -1736,6 +2325,8 @@ static bool handleRepeatableFnAction(char c) {
   if (c == '.') {
     if (activeScreen == ScreenMode::BotSettings) {
       cycleBotSettingField(1);
+    } else if (activeScreen == ScreenMode::Settings) {
+      cycleSettingField(1);
     } else if (activeScreen == ScreenMode::Chat) {
       scrollCurrentReply(TURN_SCROLL_STEP,
                          M5Cardputer.Display.width() - (CONTENT_MARGIN * 2) - 12,
@@ -1749,6 +2340,8 @@ static bool handleRepeatableFnAction(char c) {
   if (c == ',') {
     if (activeScreen == ScreenMode::BotSettings) {
       cycleBotSettingValue(-1);
+    } else if (activeScreen == ScreenMode::Settings) {
+      cycleSettingsValue(-1);
     } else if (activeScreen == ScreenMode::PhotoViewer) {
       navigatePhotoViewer(-1);
     } else if (activeScreen == ScreenMode::Chat) {
@@ -1762,6 +2355,8 @@ static bool handleRepeatableFnAction(char c) {
   if (c == '/') {
     if (activeScreen == ScreenMode::BotSettings) {
       cycleBotSettingValue(1);
+    } else if (activeScreen == ScreenMode::Settings) {
+      cycleSettingsValue(1);
     } else if (activeScreen == ScreenMode::PhotoViewer) {
       navigatePhotoViewer(1);
     } else if (activeScreen == ScreenMode::Chat) {
@@ -1799,6 +2394,20 @@ static void handleKeyboard() {
     if (!changed) return;
     return;
   }
+
+  if (millis() < screensaverDismissUntilMs) {
+    return;
+  }
+
+  if (activeScreen == ScreenMode::Screensaver) {
+    exitScreensaver();
+    fnComboConsumed = false;
+    heldFnRepeatKey = 0;
+    heldFnRepeatAfterMs = 0;
+    return;
+  }
+
+  noteUserActivity();
 
   Keyboard_Class::KeysState status = M5Cardputer.Keyboard.keysState();
   if (status.fn) {
@@ -1868,6 +2477,7 @@ static void handleKeyboard() {
         handledFn = true;
       } else if (c == 's' || c == 'S') {
         activeScreen = activeScreen == ScreenMode::Settings ? ScreenMode::Chat : ScreenMode::Settings;
+        activeSettingField = SettingField::Screensaver;
         markDirty(DIRTY_CONTENT | DIRTY_FOOTER);
         handledFn = true;
       } else if (c == 'b' || c == 'B') {
@@ -1923,6 +2533,11 @@ static void handleKeyboard() {
         handledFn = true;
       } else if (c == 'p' || c == 'P') {
         submitMessageForReply("What's the weather?", false);
+        handledFn = true;
+      } else if (c == 'x' || c == 'X') {
+        if (!recordingActive) {
+          enterScreensaver(false);
+        }
         handledFn = true;
       } else if (c == '1') {
         setLcdBacklightEnabled(false);
@@ -2106,17 +2721,23 @@ void setup() {
   gpConnect(false);
   gpLoadChatHistory();
   rebuildTurnPagesFromPersistedChat();
+  noteUserActivity();
   if (gp_has_settings) {
     if (chatTurnPages.empty()) {
       setToast("Groqputer ready.");
     } else {
       jumpToLatestTurn();
     }
+    enterScreensaver(true);
   } else {
     gpSetLcdIncomingMessage("Run setup AP to add WiFi and Groq key.");
   }
   markDirty(DIRTY_ALL);
-  renderUi();
+  if (activeScreen == ScreenMode::Screensaver) {
+    renderScreensaverFrame(true);
+  } else {
+    renderUi();
+  }
 }
 
 void loop() {
@@ -2129,7 +2750,9 @@ void loop() {
   M5Cardputer.update();
   handleKeyboard();
 
-  if (!recordingActive && M5Cardputer.BtnA.wasPressed()) {
+  if (activeScreen == ScreenMode::Screensaver && M5Cardputer.BtnA.wasPressed()) {
+    exitScreensaver();
+  } else if (!recordingActive && millis() >= screensaverDismissUntilMs && M5Cardputer.BtnA.wasPressed()) {
     startRecording();
   }
   pollRecording();
@@ -2175,7 +2798,20 @@ void loop() {
     markDirty(DIRTY_CONTENT | DIRTY_FOOTER | DIRTY_TOAST);
   }
 
-  if (dirtyRegions != DIRTY_NONE) {
+  if (
+    gp_has_settings &&
+    activeScreen != ScreenMode::Screensaver &&
+    !recordingActive &&
+    gp_idle_saver_sec > 0 &&
+    millis() >= screensaverDismissUntilMs &&
+    millis() - lastUserActivityMs >= static_cast<unsigned long>(gp_idle_saver_sec) * 1000UL
+  ) {
+    enterScreensaver(false);
+  }
+
+  if (activeScreen == ScreenMode::Screensaver) {
+    renderScreensaverFrame();
+  } else if (dirtyRegions != DIRTY_NONE) {
     renderUi();
   }
 
