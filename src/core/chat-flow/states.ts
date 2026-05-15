@@ -65,8 +65,12 @@ import { llmFuncMap } from "../../config/llm-tools";
 import {
   CAMERA_SOURCES,
   getCameraSourceLabel,
+  getHeaderModeLabel,
+  getHatTextColorLabel,
   getIdleTimeoutLabel,
   getRuntimeSettings,
+  HEADER_MODES,
+  HAT_TEXT_COLORS,
   getVoiceModeLabel,
   saveRuntimeSettings,
   VOLUME_LEVEL_OPTIONS,
@@ -259,6 +263,18 @@ const settingsIntentPatterns = [
   /^\s*(?:settings|open\s+settings|settings\s+menu)\s*[.!?]*$/i,
 ];
 
+const styleFontIntentPatterns = [
+  /^\s*(?:change|switch|cycle)\s+(?:the\s+)?font\s*[.!?]*$/i,
+  /^\s*(?:change|switch|cycle)\s+(?:the\s+)?text\s+(?:style|color)\s*[.!?]*$/i,
+  /^\s*(?:change|switch|cycle)\s+(?:the\s+)?display\s+style\s*[.!?]*$/i,
+];
+
+const styleThemeIntentPatterns = [
+  /^\s*(?:change|switch|cycle)\s+(?:the\s+)?theme\s*[.!?]*$/i,
+  /^\s*(?:change|switch|cycle)\s+(?:the\s+)?header\s*[.!?]*$/i,
+  /^\s*(?:change|switch|cycle)\s+(?:the\s+)?header\s+theme\s*[.!?]*$/i,
+];
+
 const voiceHelpIntentPatterns = [
   /^\s*(?:help|voice\s+commands|show\s+voice\s+commands|voice\s+command\s+list)\s*[.!?]*$/i,
 ];
@@ -432,6 +448,32 @@ function shouldShutdown(prompt: string): boolean {
 function shouldOpenSettings(prompt: string): boolean {
   const trimmed = prompt.trim();
   return settingsIntentPatterns.some((pattern) => pattern.test(trimmed));
+}
+
+function shouldCycleHatTextStyle(prompt: string): boolean {
+  const trimmed = prompt.trim();
+  return styleFontIntentPatterns.some((pattern) => pattern.test(trimmed));
+}
+
+function shouldCycleHeaderTheme(prompt: string): boolean {
+  const trimmed = prompt.trim();
+  return styleThemeIntentPatterns.some((pattern) => pattern.test(trimmed));
+}
+
+function getNextHatTextColor(current: string): string {
+  const currentIndex = HAT_TEXT_COLORS.findIndex((value) => value === current);
+  if (currentIndex === -1) {
+    return HAT_TEXT_COLORS[0];
+  }
+  return HAT_TEXT_COLORS[(currentIndex + 1) % HAT_TEXT_COLORS.length];
+}
+
+function getNextHeaderMode(current: string): string {
+  const currentIndex = HEADER_MODES.findIndex((value) => value === current);
+  if (currentIndex === -1) {
+    return HEADER_MODES[0];
+  }
+  return HEADER_MODES[(currentIndex + 1) % HEADER_MODES.length];
 }
 
 function shouldOpenVoiceHelp(prompt: string): boolean {
@@ -1252,6 +1294,26 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
     };
     if (shouldOpenSettings(ctx.asrText)) {
       ctx.openSettingsMenu();
+      return;
+    }
+    if (shouldCycleHatTextStyle(ctx.asrText)) {
+      const nextColor = getNextHatTextColor(getRuntimeSettings().hatTextColor);
+      saveRuntimeSettings({ hatTextColor: nextColor });
+      display({
+        hat_text_color: nextColor,
+        text: `[style]Text ${getHatTextColorLabel(nextColor)}.`,
+      });
+      finishDirectMessage(`Text style ${getHatTextColorLabel(nextColor)}.`);
+      return;
+    }
+    if (shouldCycleHeaderTheme(ctx.asrText)) {
+      const nextHeader = getNextHeaderMode(getRuntimeSettings().headerMode);
+      saveRuntimeSettings({ headerMode: nextHeader });
+      display({
+        header_mode: nextHeader,
+        text: `[style]Header ${getHeaderModeLabel(nextHeader)}.`,
+      });
+      finishDirectMessage(`Theme ${getHeaderModeLabel(nextHeader)}.`);
       return;
     }
     if (shouldOpenVoiceHelp(ctx.asrText)) {

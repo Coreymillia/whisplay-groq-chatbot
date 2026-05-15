@@ -13,6 +13,14 @@ export const VOICE_COMMAND_HELP_ENTRIES: VoiceCommandHelpEntry[] = [
     summary: "open settings",
   },
   {
+    id: "style-font",
+    summary: "change font / text style",
+  },
+  {
+    id: "style-theme",
+    summary: "change theme / header",
+  },
+  {
     id: "voice-on",
     summary: "talk to me / voice on",
   },
