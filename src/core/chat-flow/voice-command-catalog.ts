@@ -45,6 +45,14 @@ export const VOICE_COMMAND_HELP_ENTRIES: VoiceCommandHelpEntry[] = [
     summary: "volume up / volume down",
   },
   {
+    id: "scroll-speed-set",
+    summary: "scroll faster / scroll speed 5",
+  },
+  {
+    id: "scroll-speed-step",
+    summary: "scroll slower / faster scroll",
+  },
+  {
     id: "screen-timeout-set",
     summary: "screen timeout 1-10 min",
   },

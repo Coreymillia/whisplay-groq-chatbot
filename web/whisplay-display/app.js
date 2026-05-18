@@ -53,6 +53,8 @@ const voiceModeSelect = document.getElementById("voiceModeSelect");
 const volumeLevelSelect = document.getElementById("volumeLevelSelect");
 const recordTimeSelect = document.getElementById("recordTimeSelect");
 const scrollSpeedSelect = document.getElementById("scrollSpeedSelect");
+const hatScrollSpeedSelect = document.getElementById("hatScrollSpeedSelect");
+const hatFontSizeSelect = document.getElementById("hatFontSizeSelect");
 const hatTextColorSelect = document.getElementById("hatTextColorSelect");
 const uiThemeSelect = document.getElementById("uiThemeSelect");
 const cameraSourceSelect = document.getElementById("cameraSourceSelect");
@@ -150,6 +152,7 @@ let botNetModelOptions = [];
 let volumeLevelOptions = [];
 let recordTimeoutOptions = [];
 let scrollSpeedOptions = [];
+let hatScrollSpeedOptions = [];
 let idleTimeoutOptions = [];
 
 const DEFAULT_HEADER_MODE = "emoji";
@@ -1309,6 +1312,38 @@ function populateScrollSpeedOptions(selectedValue) {
   scrollSpeedSelect.value = fallbackValue;
 }
 
+function populateHatScrollSpeedOptions(selectedValue) {
+  if (!hatScrollSpeedSelect) return;
+  hatScrollSpeedSelect.innerHTML = "";
+  hatScrollSpeedOptions.forEach((value) => {
+    const option = document.createElement("option");
+    option.value = String(value);
+    option.textContent = `${value} - ${formatScrollSpeedLabel(value)}`;
+    hatScrollSpeedSelect.appendChild(option);
+  });
+  const fallbackValue = String(
+    Number.isFinite(selectedValue) ? selectedValue : 5,
+  );
+  if (![...hatScrollSpeedSelect.options].some((option) => option.value === fallbackValue)) {
+    const option = document.createElement("option");
+    option.value = fallbackValue;
+    option.textContent = `${fallbackValue} - ${formatScrollSpeedLabel(parseInt(fallbackValue, 10))}`;
+    hatScrollSpeedSelect.appendChild(option);
+  }
+  hatScrollSpeedSelect.value = fallbackValue;
+}
+
+function populateHatFontSizeOptions(selectedValue) {
+  if (!hatFontSizeSelect) return;
+  // The select already has options in HTML, just set the value
+  const fallbackValue = selectedValue || "medium";
+  if (hatFontSizeSelect.querySelector(`option[value="${fallbackValue}"]`)) {
+    hatFontSizeSelect.value = fallbackValue;
+  } else {
+    hatFontSizeSelect.value = "medium";
+  }
+}
+
 function formatIdleTimeoutLabel(value) {
   return value <= 0 ? "Off" : `${Math.round(value / 60)} minute${value === 60 ? "" : "s"}`;
 }
@@ -1396,6 +1431,8 @@ function applySettings(settings) {
   populateVolumeLevelOptions(settings.volumeLevel || 9);
   populateRecordTimeoutOptions(settings.manualRecordMaxSec || 15);
   populateScrollSpeedOptions(settings.scrollSpeedLevel || 5);
+  populateHatScrollSpeedOptions(settings.hatScrollSpeedLevel || 5);
+  populateHatFontSizeOptions(settings.hatFontSize || "medium");
   if (hatTextColorSelect) {
     hatTextColorSelect.value = settings.hatTextColor || DEFAULT_HAT_TEXT_COLOR;
   }
@@ -1487,6 +1524,9 @@ async function loadSettings() {
     scrollSpeedOptions = Array.isArray(payload.scrollSpeedOptions)
       ? payload.scrollSpeedOptions
       : [];
+    hatScrollSpeedOptions = Array.isArray(payload.hatScrollSpeedOptions)
+      ? payload.hatScrollSpeedOptions
+      : scrollSpeedOptions;
     recordTimeoutOptions = Array.isArray(payload.recordTimeoutOptions)
       ? payload.recordTimeoutOptions
       : [];
@@ -1918,6 +1958,8 @@ async function saveSettings({ clearGroqApiKey = false } = {}) {
     volumeLevel: parseInt(volumeLevelSelect?.value || "9", 10),
     manualRecordMaxSec: parseInt(recordTimeSelect?.value || "15", 10),
     scrollSpeedLevel: parseInt(scrollSpeedSelect?.value || "5", 10),
+    hatScrollSpeedLevel: parseInt(hatScrollSpeedSelect?.value || "5", 10),
+    hatFontSize: hatFontSizeSelect?.value || "medium",
     hatTextColor: hatTextColorSelect?.value || DEFAULT_HAT_TEXT_COLOR,
     uiTheme: uiThemeSelect?.value || DEFAULT_UI_THEME,
     cameraSource: cameraSourceSelect?.value || DEFAULT_CAMERA_SOURCE,

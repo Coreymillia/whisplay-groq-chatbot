@@ -71,6 +71,7 @@ import {
   getRuntimeSettings,
   HEADER_MODES,
   HAT_TEXT_COLORS,
+  HAT_SCROLL_SPEED_OPTIONS,
   getVoiceModeLabel,
   saveRuntimeSettings,
   VOLUME_LEVEL_OPTIONS,
@@ -305,6 +306,14 @@ const volumeDownIntentPatterns = [
   /^\s*(?:volume\s+down|turn\s+(?:the\s+)?volume\s+down|decrease\s+(?:the\s+)?volume|lower\s+(?:the\s+)?volume|quieter)\s*[.!?]*$/i,
 ];
 
+const scrollSpeedUpIntentPatterns = [
+  /^\s*(?:scroll\s+(?:faster|faster|speed|speed\s+up)|faster\s+scroll|speed\s+up|scroll\s+up)\s*[.!?]*$/i,
+];
+
+const scrollSpeedDownIntentPatterns = [
+  /^\s*(?:scroll\s+(?:slower|slow)|slower\s+scroll|speed\s+down|scroll\s+down)\s*[.!?]*$/i,
+];
+
 const playMusicIntentPatterns = [
   /^\s*(?:play|start)(?:\s+the)?\s+(?:music|songs?|mp3s?)\s*[.!?]*$/i,
 ];
@@ -535,6 +544,34 @@ function parseVolumeCommand(
     return { action: "step", delta: 1 };
   }
   if (volumeDownIntentPatterns.some((pattern) => pattern.test(trimmed))) {
+    return { action: "step", delta: -1 };
+  }
+
+  return null;
+}
+
+function parseScrollSpeedCommand(
+  prompt: string,
+): { action: "set"; value: number } | { action: "step"; delta: -1 | 1 } | null {
+  const trimmed = prompt.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const setMatch = trimmed.match(
+    /^\s*(?:set\s+)?scroll(?:\s+speed)?(?:\s+(?:to\s+)?)?(10|[1-9])\s*[.!?]*$/i,
+  );
+  if (setMatch) {
+    return {
+      action: "set",
+      value: parseInt(setMatch[1], 10),
+    };
+  }
+
+  if (scrollSpeedUpIntentPatterns.some((pattern) => pattern.test(trimmed))) {
+    return { action: "step", delta: 1 };
+  }
+  if (scrollSpeedDownIntentPatterns.some((pattern) => pattern.test(trimmed))) {
     return { action: "step", delta: -1 };
   }
 
@@ -1396,6 +1433,25 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
       const appliedLevel = setVolumeByLevel(nextLevel);
       saveRuntimeSettings({ volumeLevel: appliedLevel });
       finishDirectMessage(`Volume ${appliedLevel} out of 10.`);
+      return;
+    }
+    const scrollSpeedCommand = parseScrollSpeedCommand(ctx.asrText);
+    if (scrollSpeedCommand) {
+      let nextLevel = getRuntimeSettings().hatScrollSpeedLevel;
+      if (scrollSpeedCommand.action === "set") {
+        nextLevel = scrollSpeedCommand.value;
+      } else {
+        nextLevel = Math.max(
+          HAT_SCROLL_SPEED_OPTIONS[0],
+          Math.min(
+            HAT_SCROLL_SPEED_OPTIONS[HAT_SCROLL_SPEED_OPTIONS.length - 1],
+            nextLevel + scrollSpeedCommand.delta,
+          ),
+        );
+      }
+      saveRuntimeSettings({ hatScrollSpeedLevel: nextLevel });
+      display({ hat_scroll_speed_factor: nextLevel / 5 });
+      finishDirectMessage(`Scroll speed ${nextLevel} out of 10.`);
       return;
     }
     const screenTimeoutCommand = parseScreenTimeoutCommand(ctx.asrText);
