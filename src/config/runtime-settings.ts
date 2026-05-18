@@ -43,6 +43,16 @@ export type ScreensaverMode =
   | "tetris-rain";
 
 export type HatFontSize = "small" | "medium" | "large";
+export type HatFontFamily =
+  | "default"
+  | "sans"
+  | "mono"
+  | "noto-mono"
+  | "liberation-sans"
+  | "liberation-mono"
+  | "jetbrains-mono"
+  | "ibm-plex-mono"
+  | "press-start-2p";
 
 export interface RuntimeSettings {
   groqApiKey: string;
@@ -54,6 +64,7 @@ export interface RuntimeSettings {
   scrollSpeedLevel: number;
   hatScrollSpeedLevel: number;
   hatFontSize: HatFontSize;
+  hatFontFamily: HatFontFamily;
   voiceMode: VoiceMode;
   uiTheme: UITheme;
   cameraSource: CameraSource;
@@ -82,6 +93,7 @@ export interface RuntimeSettingsUpdate {
   scrollSpeedLevel?: number;
   hatScrollSpeedLevel?: number;
   hatFontSize?: HatFontSize;
+  hatFontFamily?: HatFontFamily;
   voiceMode?: string;
   uiTheme?: string;
   cameraSource?: string;
@@ -111,6 +123,7 @@ const DEFAULT_VOLUME_LEVEL = 9;
 const DEFAULT_SCROLL_SPEED_LEVEL = 5;
 const DEFAULT_HAT_SCROLL_SPEED_LEVEL = 5;
 const DEFAULT_HAT_FONT_SIZE: HatFontSize = "medium";
+const DEFAULT_HAT_FONT_FAMILY: HatFontFamily = "default";
 const DEFAULT_UI_THEME: UITheme = "default";
 const DEFAULT_CAMERA_SOURCE: CameraSource = "pi-camera";
 const DEFAULT_ESP32_CAM_URL = "http://esp32-cam.local";
@@ -130,6 +143,17 @@ export const VOLUME_LEVEL_OPTIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 export const SCROLL_SPEED_OPTIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 export const HAT_SCROLL_SPEED_OPTIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 export const HAT_FONT_SIZE_OPTIONS: HatFontSize[] = ["small", "medium", "large"];
+export const HAT_FONT_FAMILY_OPTIONS: HatFontFamily[] = [
+  "default",
+  "sans",
+  "mono",
+  "noto-mono",
+  "liberation-sans",
+  "liberation-mono",
+  "jetbrains-mono",
+  "ibm-plex-mono",
+  "press-start-2p",
+];
 export const IDLE_TIMEOUT_OPTIONS = [0, 60, 120, 180, 240, 300, 360, 420, 480, 540, 600];
 export const SCREEN_BLANK_TIMEOUT_OPTIONS = [...IDLE_TIMEOUT_OPTIONS];
 export const ROOM_MONITOR_INTERVAL_OPTIONS = [0, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600];
@@ -239,6 +263,17 @@ const VALID_HAT_FONT_SIZES = new Set<HatFontSize>([
   "medium",
   "large",
 ]);
+const VALID_HAT_FONT_FAMILIES = new Set<HatFontFamily>([
+  "default",
+  "sans",
+  "mono",
+  "noto-mono",
+  "liberation-sans",
+  "liberation-mono",
+  "jetbrains-mono",
+  "ibm-plex-mono",
+  "press-start-2p",
+]);
 
 function normalizeVoiceMode(value: unknown): VoiceMode {
   if (typeof value === "string" && VALID_VOICE_MODES.has(value as VoiceMode)) {
@@ -329,6 +364,16 @@ function normalizeHatFontSize(value: unknown): HatFontSize {
     return value as HatFontSize;
   }
   return DEFAULT_HAT_FONT_SIZE;
+}
+
+function normalizeHatFontFamily(value: unknown): HatFontFamily {
+  if (
+    typeof value === "string" &&
+    VALID_HAT_FONT_FAMILIES.has(value as HatFontFamily)
+  ) {
+    return value as HatFontFamily;
+  }
+  return DEFAULT_HAT_FONT_FAMILY;
 }
 
 function normalizeUITheme(value: unknown): UITheme {
@@ -472,6 +517,7 @@ function sanitizeSettings(input: Partial<RuntimeSettings> | null | undefined): R
     scrollSpeedLevel: normalizeScrollSpeedLevel(input?.scrollSpeedLevel),
     hatScrollSpeedLevel: normalizeHatScrollSpeedLevel(input?.hatScrollSpeedLevel),
     hatFontSize: normalizeHatFontSize(input?.hatFontSize),
+    hatFontFamily: normalizeHatFontFamily(input?.hatFontFamily),
     voiceMode: normalizeVoiceMode(input?.voiceMode),
     uiTheme: normalizeUITheme(input?.uiTheme),
     cameraSource: normalizeCameraSource(input?.cameraSource),
@@ -567,6 +613,10 @@ export function saveRuntimeSettings(
 
   if (typeof update.hatFontSize === "string") {
     next.hatFontSize = normalizeHatFontSize(update.hatFontSize);
+  }
+
+  if (typeof update.hatFontFamily === "string") {
+    next.hatFontFamily = normalizeHatFontFamily(update.hatFontFamily);
   }
 
   if (typeof update.voiceMode === "string") {
@@ -852,6 +902,9 @@ export function getPublicRuntimeSettings(): {
   musicShuffle: boolean;
   volumeLevel: number;
   scrollSpeedLevel: number;
+  hatScrollSpeedLevel: number;
+  hatFontSize: HatFontSize;
+  hatFontFamily: HatFontFamily;
   voiceMode: VoiceMode;
   uiTheme: UITheme;
   cameraSource: CameraSource;
@@ -880,6 +933,9 @@ export function getPublicRuntimeSettings(): {
     musicShuffle: settings.musicShuffle,
     volumeLevel: settings.volumeLevel,
     scrollSpeedLevel: settings.scrollSpeedLevel,
+    hatScrollSpeedLevel: settings.hatScrollSpeedLevel,
+    hatFontSize: settings.hatFontSize,
+    hatFontFamily: settings.hatFontFamily,
     voiceMode: settings.voiceMode,
     uiTheme: settings.uiTheme,
     cameraSource: settings.cameraSource,

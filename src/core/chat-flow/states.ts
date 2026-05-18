@@ -1450,7 +1450,7 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
         );
       }
       saveRuntimeSettings({ hatScrollSpeedLevel: nextLevel });
-      display({ hat_scroll_speed_factor: nextLevel / 5 });
+      display({ hat_scroll_speed_factor: nextLevel });
       finishDirectMessage(`Scroll speed ${nextLevel} out of 10.`);
       return;
     }

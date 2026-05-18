@@ -73,10 +73,53 @@ HAT_SCROLL_SPEED_PIXELS_PER_SEC = {
 }
 current_hat_scroll_speed_level = 5
 current_hat_font_size = "medium"
+current_hat_font_family = "default"
 HAT_FONT_SIZE_CONFIG = {
     "small": {"line_height": 16, "font_scale": 0.8},
     "medium": {"line_height": 20, "font_scale": 1.0},
     "large": {"line_height": 26, "font_scale": 1.3},
+}
+HAT_FONT_FAMILY_CANDIDATES = {
+    "default": [],
+    "sans": [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+    ],
+    "mono": [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSansMono-Regular.ttf",
+        "/usr/share/fonts/truetype/liberation2/LiberationMono-Regular.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf",
+    ],
+    "noto-mono": [
+        "/usr/share/fonts/truetype/noto/NotoSansMono-Regular.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+    ],
+    "liberation-sans": [
+        "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    ],
+    "liberation-mono": [
+        "/usr/share/fonts/truetype/liberation2/LiberationMono-Regular.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+    ],
+    "jetbrains-mono": [
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts", "JetBrainsMono-Regular.ttf"),
+        "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+    ],
+    "ibm-plex-mono": [
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts", "IBMPlexMono-Regular.ttf"),
+        "/usr/share/fonts/truetype/liberation2/LiberationMono-Regular.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+    ],
+    "press-start-2p": [
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts", "PressStart2P-Regular.ttf"),
+        "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+    ],
 }
 last_scroll_frame_time = None
 current_scroll_sync_char_end = None
@@ -127,11 +170,12 @@ def to_device_scroll_speed(requested_speed, scroll_speed_factor):
     return min(MAX_SCROLL_SPEED, max(0.0, effective_speed))
 
 
-def resolve_font_path(custom_font_path=None):
+def resolve_font_path(custom_font_path=None, font_family="default"):
     script_dir = os.path.dirname(os.path.abspath(__file__))
     repo_root = os.path.dirname(script_dir)
     candidates = [
-        custom_font_path,
+        *([custom_font_path] if font_family == "default" else []),
+        *HAT_FONT_FAMILY_CANDIDATES.get(font_family, []),
         os.path.join(script_dir, "NotoSansSC-Bold.ttf"),
         os.path.join(repo_root, "NotoSansSC-Bold.ttf"),
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
@@ -151,29 +195,34 @@ def note_activity():
     last_activity_at = time.time()
 
 class RenderThread(threading.Thread):
-    def __init__(self, whisplay, font_path, fps=30):
+    def __init__(self, whisplay, custom_font_path=None, fps=30):
         super().__init__()
         self.whisplay = whisplay
-        self.font_path = font_path
+        self.custom_font_path = custom_font_path
+        self.font_path = None
         self.fps = fps
         self.render_init_screen()
         # Clear logo after 1 second and start running loop
         time.sleep(1)
         self.running = True
-        self.status_font = ImageFont.truetype(self.font_path, status_font_size)
-        self.emoji_font = ImageFont.truetype(self.font_path, emoji_font_size)
-        self.battery_font = ImageFont.truetype(self.font_path, battery_font_size)
-        self.main_text_font = ImageFont.truetype(self.font_path, 20)
-        self.music_time_font = ImageFont.truetype(self.font_path, 10)
-        self.header_matrix_font = ImageFont.truetype(self.font_path, 14)
-        self.screensaver_matrix_font = ImageFont.truetype(self.font_path, 16)
+        self.status_font = None
+        self.emoji_font = None
+        self.battery_font = None
+        self.main_text_font = None
+        self.music_time_font = None
+        self.header_matrix_font = None
+        self.screensaver_matrix_font = None
         self.header_effect_height = emoji_font_size + 6
-        self.main_text_line_height = self.main_text_font.getmetrics()[0] + self.main_text_font.getmetrics()[1]
+        self.main_text_line_height = 20
         self.text_cache_image = None
         self.current_render_text = ""
         self.current_render_style = ""
+        self.current_render_font_key = ""
         self.pending_auto_scroll_after_hold = False
         self.render_event = threading.Event()
+        self.loaded_hat_font_family = None
+        self.loaded_hat_font_size = None
+        self.refresh_fonts(force=True)
         self.green_matrix_columns = self.create_rain_columns(10, "01ABCDEF", self.whisplay.LCD_HEIGHT)
         self.binary_matrix_columns = self.create_rain_columns(7, "01", self.whisplay.LCD_HEIGHT)
         self.blue_matrix_columns = self.create_rain_columns(8, "01ABCDEF[]{}<>+-*/", self.whisplay.LCD_HEIGHT)
@@ -195,6 +244,38 @@ class RenderThread(threading.Thread):
         self.random_screensaver_mode = random.choice(RANDOM_SCREENSAVER_MODES)
         self.random_screensaver_started_at = time.time()
 
+    def refresh_fonts(self, force=False):
+        global current_hat_font_family, current_hat_font_size
+        next_family = current_hat_font_family if current_hat_font_family in HAT_FONT_FAMILY_CANDIDATES else "default"
+        next_size = current_hat_font_size if current_hat_font_size in HAT_FONT_SIZE_CONFIG else "medium"
+        if (
+            not force
+            and self.loaded_hat_font_family == next_family
+            and self.loaded_hat_font_size == next_size
+        ):
+            return
+        self.font_path = resolve_font_path(self.custom_font_path, next_family)
+        size_config = HAT_FONT_SIZE_CONFIG.get(next_size, HAT_FONT_SIZE_CONFIG["medium"])
+        main_text_px = max(14, int(round(20 * size_config["font_scale"])))
+        self.status_font = ImageFont.truetype(self.font_path, status_font_size)
+        self.emoji_font = ImageFont.truetype(self.font_path, emoji_font_size)
+        self.battery_font = ImageFont.truetype(self.font_path, battery_font_size)
+        self.main_text_font = ImageFont.truetype(self.font_path, main_text_px)
+        self.music_time_font = ImageFont.truetype(self.font_path, 10)
+        self.header_matrix_font = ImageFont.truetype(self.font_path, 14)
+        self.screensaver_matrix_font = ImageFont.truetype(self.font_path, 16)
+        self.main_text_line_height = max(
+            int(size_config["line_height"]),
+            self.main_text_font.getmetrics()[0] + self.main_text_font.getmetrics()[1],
+        )
+        self.text_cache_image = None
+        self.current_render_text = ""
+        self.current_render_style = ""
+        self.current_render_font_key = ""
+        TextUtils.clean_line_image_cache()
+        self.loaded_hat_font_family = next_family
+        self.loaded_hat_font_size = next_size
+
     def render_init_screen(self):
         # Display logo on startup
         logo_path = os.path.join("img", "logo.png")
@@ -207,6 +288,7 @@ class RenderThread(threading.Thread):
 
     def render_frame(self, status, emoji, text, scroll_top, battery_level, battery_color):
         global current_scroll_speed, current_image_path, current_image, camera_mode
+        self.refresh_fonts()
         self.pending_auto_scroll_after_hold = False
         if camera_mode:
             return False  # Skip rendering if in camera mode
@@ -377,9 +459,15 @@ class RenderThread(threading.Thread):
         # render_text
         render_text = "\n".join(line for _, line in display_lines)
         render_style = str(current_hat_text_color or "white")
-        if self.current_render_text != render_text or self.current_render_style != render_style:
+        render_font_key = f"{self.loaded_hat_font_family}:{self.loaded_hat_font_size}"
+        if (
+            self.current_render_text != render_text
+            or self.current_render_style != render_style
+            or self.current_render_font_key != render_font_key
+        ):
             self.current_render_text = render_text
             self.current_render_style = render_style
+            self.current_render_font_key = render_font_key
             show_text_image = Image.new("RGBA", (self.whisplay.LCD_WIDTH, render_y + len(display_lines) * line_height), (0, 0, 0, 255))
             show_text_draw = ImageDraw.Draw(show_text_image)
             for line_index, line in display_lines:
@@ -1304,7 +1392,7 @@ class RenderThread(threading.Thread):
         self.render_event.set()
 
 def update_display_data(status=None, emoji=None, text=None,
-                   scroll_speed=None, scroll_speed_factor=None, hat_scroll_speed_factor=None, hat_font_size=None, scroll_sync=None, battery_level=None, battery_color=None, image_path=None,
+                   scroll_speed=None, scroll_speed_factor=None, hat_scroll_speed_factor=None, hat_font_size=None, hat_font_family=None, scroll_sync=None, battery_level=None, battery_color=None, image_path=None,
                    network_connected=None, vpn_connected=None, rag_icon_visible=None, image_icon_visible=None, transaction_id=None,
                    wifi_signal_level=None, groq_requests_today=None, audio_level=None,
                    music_progress=None, music_duration_ms=None, header_mode=None,
@@ -1313,6 +1401,7 @@ def update_display_data(status=None, emoji=None, text=None,
     global current_status, current_emoji, current_text, current_battery_level
     global current_battery_color, current_scroll_top, current_scroll_speed, current_image_path
     global current_scroll_speed_factor, current_hat_scroll_speed_level, current_hat_font_size
+    global current_hat_font_family
     global current_scroll_sync_char_end, current_scroll_sync_duration_ms
     global current_scroll_sync_target_top, current_scroll_sync_speed
     global current_scroll_sync_hold_until
@@ -1341,6 +1430,7 @@ def update_display_data(status=None, emoji=None, text=None,
         or hat_text_color is not None
         or hat_scroll_speed_factor is not None
         or hat_font_size is not None
+        or hat_font_family is not None
     ):
         note_activity()
 
@@ -1421,6 +1511,15 @@ def update_display_data(status=None, emoji=None, text=None,
                 print(f"[Display] Invalid hat_font_size: {hat_font_size}, using medium")
         except (TypeError, ValueError):
             print(f"[Display] Invalid hat_font_size payload: {hat_font_size}")
+    if hat_font_family is not None:
+        try:
+            family = str(hat_font_family)
+            if family in HAT_FONT_FAMILY_CANDIDATES:
+                current_hat_font_family = family
+            else:
+                print(f"[Display] Invalid hat_font_family: {hat_font_family}, using default")
+        except (TypeError, ValueError):
+            print(f"[Display] Invalid hat_font_family payload: {hat_font_family}")
     if network_connected is not None:
         current_network_connected = network_connected
     if wifi_signal_level is not None:
@@ -1546,6 +1645,9 @@ def handle_client(client_socket, addr, whisplay):
                     brightness = content.get("brightness", None)
                     scroll_speed = content.get("scroll_speed", None)
                     scroll_speed_factor = content.get("scroll_speed_factor", None)
+                    hat_scroll_speed_factor = content.get("hat_scroll_speed_factor", None)
+                    hat_font_size = content.get("hat_font_size", None)
+                    hat_font_family = content.get("hat_font_family", None)
                     scroll_sync = content.get("scroll_sync", None)
                     response_to_client = content.get("response", None)
                     battery_level = content.get("battery_level", None)
@@ -1616,10 +1718,16 @@ def handle_client(client_socket, addr, whisplay):
                                (vpn_connected is not None) or \
                               (rag_icon_visible is not None) or (image_icon_visible is not None) or (scroll_sync is not None) or \
                                (music_progress is not None) or (music_duration_ms is not None) or \
-                               (header_mode is not None) or (screensaver_mode is not None) or (idle_timeout_sec is not None) or \
-                               (screen_blank_timeout_sec is not None) or (hat_text_color is not None):
+                                (header_mode is not None) or (screensaver_mode is not None) or (idle_timeout_sec is not None) or \
+                                (screen_blank_timeout_sec is not None) or (hat_text_color is not None) or \
+                                (hat_scroll_speed_factor is not None) or (hat_font_size is not None) or \
+                                (hat_font_family is not None):
                         update_display_data(status=status, emoji=emoji,
-                                     text=text, scroll_speed=scroll_speed, scroll_speed_factor=scroll_speed_factor, scroll_sync=scroll_sync,
+                                     text=text, scroll_speed=scroll_speed, scroll_speed_factor=scroll_speed_factor,
+                                                    hat_scroll_speed_factor=hat_scroll_speed_factor,
+                                                    hat_font_size=hat_font_size,
+                                                    hat_font_family=hat_font_family,
+                                                    scroll_sync=scroll_sync,
                                      battery_level=battery_level, battery_color=battery_tuple,
                                                     image_path=image_path, network_connected=network_connected,
                                                     wifi_signal_level=wifi_signal_level,
@@ -1692,7 +1800,7 @@ if __name__ == "__main__":
     custom_font_path = os.getenv("CUSTOM_FONT_PATH", None)
     
     # start render thread
-    render_thread = RenderThread(whisplay, resolve_font_path(custom_font_path), fps=30)
+    render_thread = RenderThread(whisplay, custom_font_path, fps=30)
     render_thread.start()
     start_socket_server(render_thread, host='0.0.0.0', port=12345)
     

@@ -23,6 +23,7 @@ export interface Status {
   scroll_speed_factor: number;
   hat_scroll_speed_factor: number;
   hat_font_size: string;
+  hat_font_family: string;
   scroll_sync?: {
     char_end: number;
     duration_ms: number;
@@ -59,8 +60,9 @@ function getInitialStatus(): Status {
     text_input_enabled: false,
     scroll_speed: 3,
     scroll_speed_factor: getScrollSpeedFactor(settings.scrollSpeedLevel),
-    hat_scroll_speed_factor: getScrollSpeedFactor(settings.hatScrollSpeedLevel),
+    hat_scroll_speed_factor: settings.hatScrollSpeedLevel,
     hat_font_size: settings.hatFontSize,
+    hat_font_family: settings.hatFontFamily,
     scroll_sync: undefined,
     brightness: 100,
     RGB: "#00FF30",
@@ -149,6 +151,9 @@ export class WhisplayDisplay {
             hat_text_color: settings.hatTextColor,
             scroll_speed: this.currentStatus.scroll_speed,
             scroll_speed_factor: getScrollSpeedFactor(settings.scrollSpeedLevel),
+            hat_scroll_speed_factor: settings.hatScrollSpeedLevel,
+            hat_font_size: settings.hatFontSize,
+            hat_font_family: settings.hatFontFamily,
           });
         },
         onImageUploaded: (imagePath) => {
@@ -436,6 +441,7 @@ export class WhisplayDisplay {
       scroll_speed_factor,
       hat_scroll_speed_factor,
       hat_font_size,
+      hat_font_family,
       RGB,
       brightness,
       scroll_sync,
@@ -477,6 +483,7 @@ export class WhisplayDisplay {
     this.currentStatus.scroll_speed_factor = scroll_speed_factor;
     this.currentStatus.hat_scroll_speed_factor = hat_scroll_speed_factor;
     this.currentStatus.hat_font_size = hat_font_size;
+    this.currentStatus.hat_font_family = hat_font_family;
     this.currentStatus.RGB = RGB;
     this.currentStatus.brightness = brightness;
     this.currentStatus.scroll_sync = scroll_sync;

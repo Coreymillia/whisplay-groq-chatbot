@@ -55,6 +55,7 @@ const recordTimeSelect = document.getElementById("recordTimeSelect");
 const scrollSpeedSelect = document.getElementById("scrollSpeedSelect");
 const hatScrollSpeedSelect = document.getElementById("hatScrollSpeedSelect");
 const hatFontSizeSelect = document.getElementById("hatFontSizeSelect");
+const hatFontFamilySelect = document.getElementById("hatFontFamilySelect");
 const hatTextColorSelect = document.getElementById("hatTextColorSelect");
 const uiThemeSelect = document.getElementById("uiThemeSelect");
 const cameraSourceSelect = document.getElementById("cameraSourceSelect");
@@ -145,6 +146,7 @@ const DEFAULT_UI_THEME = "default";
 const DEFAULT_CAMERA_SOURCE = "pi-camera";
 const DEFAULT_ESP32_CAM_URL = "http://esp32-cam.local";
 const DEFAULT_HAT_TEXT_COLOR = "white";
+const DEFAULT_HAT_FONT_FAMILY = "default";
 const DEFAULT_CAMERA_ROTATION_DEG = "0";
 const CUSTOM_PERSONALITY_PRESET_ID = "custom";
 let personalityPresets = [];
@@ -1344,6 +1346,16 @@ function populateHatFontSizeOptions(selectedValue) {
   }
 }
 
+function populateHatFontFamilyOptions(selectedValue) {
+  if (!hatFontFamilySelect) return;
+  const fallbackValue = selectedValue || DEFAULT_HAT_FONT_FAMILY;
+  if (hatFontFamilySelect.querySelector(`option[value="${fallbackValue}"]`)) {
+    hatFontFamilySelect.value = fallbackValue;
+  } else {
+    hatFontFamilySelect.value = DEFAULT_HAT_FONT_FAMILY;
+  }
+}
+
 function formatIdleTimeoutLabel(value) {
   return value <= 0 ? "Off" : `${Math.round(value / 60)} minute${value === 60 ? "" : "s"}`;
 }
@@ -1433,6 +1445,7 @@ function applySettings(settings) {
   populateScrollSpeedOptions(settings.scrollSpeedLevel || 5);
   populateHatScrollSpeedOptions(settings.hatScrollSpeedLevel || 5);
   populateHatFontSizeOptions(settings.hatFontSize || "medium");
+  populateHatFontFamilyOptions(settings.hatFontFamily || DEFAULT_HAT_FONT_FAMILY);
   if (hatTextColorSelect) {
     hatTextColorSelect.value = settings.hatTextColor || DEFAULT_HAT_TEXT_COLOR;
   }
@@ -1960,6 +1973,7 @@ async function saveSettings({ clearGroqApiKey = false } = {}) {
     scrollSpeedLevel: parseInt(scrollSpeedSelect?.value || "5", 10),
     hatScrollSpeedLevel: parseInt(hatScrollSpeedSelect?.value || "5", 10),
     hatFontSize: hatFontSizeSelect?.value || "medium",
+    hatFontFamily: hatFontFamilySelect?.value || DEFAULT_HAT_FONT_FAMILY,
     hatTextColor: hatTextColorSelect?.value || DEFAULT_HAT_TEXT_COLOR,
     uiTheme: uiThemeSelect?.value || DEFAULT_UI_THEME,
     cameraSource: cameraSourceSelect?.value || DEFAULT_CAMERA_SOURCE,

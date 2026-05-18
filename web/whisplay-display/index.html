@@ -461,6 +461,24 @@
               </div>
 
               <div class="settings-field">
+                <label class="field-label" for="hatFontFamilySelect">HAT Font</label>
+                <select class="settings-select" id="hatFontFamilySelect">
+                  <option value="default">Default Sans</option>
+                  <option value="sans">DejaVu Sans</option>
+                  <option value="mono">DejaVu Sans Mono</option>
+                  <option value="noto-mono">Noto Sans Mono</option>
+                  <option value="liberation-sans">Liberation Sans</option>
+                  <option value="liberation-mono">Liberation Mono</option>
+                  <option value="jetbrains-mono">JetBrains Mono</option>
+                  <option value="ibm-plex-mono">IBM Plex Mono</option>
+                  <option value="press-start-2p">Press Start 2P</option>
+                </select>
+                <div class="field-hint">
+                  Uses bundled or system fonts on the Pi and falls back automatically if a font is unavailable.
+                </div>
+              </div>
+
+              <div class="settings-field">
                 <label class="field-label" for="uiThemeSelect">UI Theme</label>
                 <select class="settings-select" id="uiThemeSelect">
                   <option value="default">Default</option>

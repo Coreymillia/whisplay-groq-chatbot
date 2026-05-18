@@ -1008,6 +1008,7 @@ export class WebDisplayServer implements WebAudioBridgeServer {
         scrollSpeedLevel: getBodyNumber(body, "scrollSpeedLevel"),
         hatScrollSpeedLevel: getBodyNumber(body, "hatScrollSpeedLevel"),
         hatFontSize: getBodyString(body, "hatFontSize") as any,
+        hatFontFamily: getBodyString(body, "hatFontFamily") as any,
         voiceMode: getBodyString(body, "voiceMode"),
         uiTheme: getBodyString(body, "uiTheme"),
         cameraSource: getBodyString(body, "cameraSource"),
