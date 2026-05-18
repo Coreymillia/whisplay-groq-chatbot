@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+export DISPLAY="${DISPLAY:-:0}"
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+
+APP_DIR="$HOME/GroqBotNet"
+URL="${GROQBOTNET_HDMI_URL:-http://127.0.0.1:18990/hdmi}"
+BLANK_TIMEOUT_SEC="${GROQBOTNET_HDMI_BLANK_TIMEOUT_SEC:-300}"
+DISABLE_BLANKING="${GROQBOTNET_HDMI_DISABLE_BLANKING:-false}"
+
+pick_browser() {
+  local candidate=""
+  for candidate in chromium-browser chromium firefox-esr firefox; do
+    if command -v "$candidate" >/dev/null 2>&1; then
+      command -v "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
+if ! BROWSER_BIN="$(pick_browser)"; then
+  echo "No supported browser found. Install chromium-browser or firefox-esr."
+  exit 1
+fi
+
+until curl --silent --show-error --max-time 2 --output /dev/null "$URL"; do
+  sleep 1
+done
+
+if command -v xset >/dev/null 2>&1; then
+  if [[ "$DISABLE_BLANKING" == "true" || "$BLANK_TIMEOUT_SEC" == "0" ]]; then
+    xset -dpms >/dev/null 2>&1 || true
+    xset s off >/dev/null 2>&1 || true
+    xset s noblank >/dev/null 2>&1 || true
+  else
+    xset +dpms >/dev/null 2>&1 || true
+    xset s "$BLANK_TIMEOUT_SEC" "$BLANK_TIMEOUT_SEC" >/dev/null 2>&1 || true
+    xset dpms "$BLANK_TIMEOUT_SEC" "$BLANK_TIMEOUT_SEC" "$BLANK_TIMEOUT_SEC" >/dev/null 2>&1 || true
+  fi
+fi
+
+while true; do
+  case "$BROWSER_BIN" in
+    *chromium*)
+      "$BROWSER_BIN" \
+        --kiosk \
+        --disable-infobars \
+        --noerrdialogs \
+        --disable-session-crashed-bubble \
+        --check-for-update-interval=31536000 \
+        --autoplay-policy=no-user-gesture-required \
+        --overscroll-history-navigation=0 \
+        --disable-features=TranslateUI \
+        "$URL" || true
+      ;;
+    *firefox*)
+      "$BROWSER_BIN" \
+        --kiosk \
+        --new-instance \
+        "$URL" || true
+      ;;
+    *)
+      "$BROWSER_BIN" "$URL" || true
+      ;;
+  esac
+  sleep 2
+done

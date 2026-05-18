@@ -21,6 +21,8 @@ export interface Status {
   text_input_enabled?: boolean;
   scroll_speed: number;
   scroll_speed_factor: number;
+  hat_scroll_speed_factor: number;
+  hat_font_size: string;
   scroll_sync?: {
     char_end: number;
     duration_ms: number;
@@ -57,6 +59,8 @@ function getInitialStatus(): Status {
     text_input_enabled: false,
     scroll_speed: 3,
     scroll_speed_factor: getScrollSpeedFactor(settings.scrollSpeedLevel),
+    hat_scroll_speed_factor: getScrollSpeedFactor(settings.hatScrollSpeedLevel),
+    hat_font_size: settings.hatFontSize,
     scroll_sync: undefined,
     brightness: 100,
     RGB: "#00FF30",
@@ -430,6 +434,8 @@ export class WhisplayDisplay {
       text_input_enabled,
       scroll_speed,
       scroll_speed_factor,
+      hat_scroll_speed_factor,
+      hat_font_size,
       RGB,
       brightness,
       scroll_sync,
@@ -469,6 +475,8 @@ export class WhisplayDisplay {
     this.currentStatus.text_input_enabled = text_input_enabled;
     this.currentStatus.scroll_speed = scroll_speed;
     this.currentStatus.scroll_speed_factor = scroll_speed_factor;
+    this.currentStatus.hat_scroll_speed_factor = hat_scroll_speed_factor;
+    this.currentStatus.hat_font_size = hat_font_size;
     this.currentStatus.RGB = RGB;
     this.currentStatus.brightness = brightness;
     this.currentStatus.scroll_sync = scroll_sync;

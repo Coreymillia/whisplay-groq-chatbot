@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import random
 import signal
 import textwrap
 import threading
@@ -38,6 +39,8 @@ class Config:
     backlight_pin: str
     font_regular: str
     font_bold: str
+    screensaver_timeout_sec: float
+    screensaver_frame_interval: float
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -56,6 +59,12 @@ class Config:
                 "FONT_BOLD",
                 "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
             ).strip(),
+            screensaver_timeout_sec=float(
+                os.getenv("GROQBOTNET_SCREENSAVER_TIMEOUT_SEC", "45")
+            ),
+            screensaver_frame_interval=float(
+                os.getenv("GROQBOTNET_SCREENSAVER_FRAME_INTERVAL", "0.14")
+            ),
         )
 
 
@@ -96,6 +105,55 @@ class GroqBotNetDisplay:
         self.message_lines: list[str] = []
         self.scroll_index = 0
         self.last_scroll = 0.0
+        self.last_activity = time.monotonic()
+        self.last_screensaver_frame = 0.0
+        self.matrix_columns: list[int] = []
+
+    def _render_matrix_screensaver(self, image: Image.Image, draw: ImageDraw.ImageDraw) -> None:
+        cell_w = 10
+        cell_h = 14
+        cols = max(1, self.width // cell_w)
+        rows = max(1, self.height // cell_h)
+
+        if len(self.matrix_columns) != cols:
+            self.matrix_columns = [random.randint(-rows, 0) for _ in range(cols)]
+
+        draw.rectangle((0, 0, self.width, self.height), fill=BLACK)
+        draw.text((6, 4), "GroqBotNet", fill=DIM, font=self.font_medium)
+        draw.text((self.width - 78, 4), "MATRIX", fill=GREEN, font=self.font_small)
+
+        now = time.monotonic()
+        if now - self.last_screensaver_frame >= self.config.screensaver_frame_interval:
+            self.matrix_columns = [value + 1 for value in self.matrix_columns]
+            for i, value in enumerate(self.matrix_columns):
+                if value - 10 > rows:
+                    self.matrix_columns[i] = random.randint(-rows, 0)
+            self.last_screensaver_frame = now
+
+        for col_idx, head_row in enumerate(self.matrix_columns):
+            x = col_idx * cell_w + 2
+            for tail in range(10):
+                row = head_row - tail
+                if row < 0 or row >= rows:
+                    continue
+                y = row * cell_h + 20
+                if y > self.height - 8:
+                    continue
+                if tail == 0:
+                    color = (200, 255, 200)
+                elif tail < 4:
+                    color = (80, 220, 120)
+                else:
+                    color = (30, 120, 60)
+                char = random.choice("01#@$%&*")
+                draw.text((x, y), char, fill=color, font=self.font_small)
+
+        draw.text(
+            (8, self.height - 18),
+            datetime.now().strftime("%H:%M:%S"),
+            fill=(40, 150, 80),
+            font=self.font_small,
+        )
 
     @staticmethod
     def _load_font(path: str, size: int):
@@ -164,11 +222,25 @@ class GroqBotNetDisplay:
 
         mode, speaker, message_text, status = self.select_message(payload)
         key = f"{mode}|{speaker}|{message_text}|{status}"
+        now = time.monotonic()
         if key != self.message_id:
             self.message_id = key
             self.message_lines = self._wrap_text(draw, message_text, self.width - 16)
             self.scroll_index = 0
-            self.last_scroll = time.monotonic()
+            self.last_scroll = now
+            self.last_activity = now
+
+        if status != "idle":
+            self.last_activity = now
+
+        if (
+            self.config.screensaver_timeout_sec > 0
+            and status == "idle"
+            and (now - self.last_activity) >= self.config.screensaver_timeout_sec
+        ):
+            self._render_matrix_screensaver(image, draw)
+            self._disp.image(image)
+            return
 
         draw.rectangle((0, 0, self.width, 22), fill=BLUE)
         draw.text((6, 4), "GroqBotNet", fill=WHITE, font=self.font_title)

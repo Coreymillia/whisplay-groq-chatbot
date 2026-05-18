@@ -42,6 +42,8 @@ export type ScreensaverMode =
   | "kaleidoscope"
   | "tetris-rain";
 
+export type HatFontSize = "small" | "medium" | "large";
+
 export interface RuntimeSettings {
   groqApiKey: string;
   geminiApiKey: string;
@@ -50,6 +52,8 @@ export interface RuntimeSettings {
   musicShuffle: boolean;
   volumeLevel: number;
   scrollSpeedLevel: number;
+  hatScrollSpeedLevel: number;
+  hatFontSize: HatFontSize;
   voiceMode: VoiceMode;
   uiTheme: UITheme;
   cameraSource: CameraSource;
@@ -76,6 +80,8 @@ export interface RuntimeSettingsUpdate {
   musicShuffle?: boolean;
   volumeLevel?: number;
   scrollSpeedLevel?: number;
+  hatScrollSpeedLevel?: number;
+  hatFontSize?: HatFontSize;
   voiceMode?: string;
   uiTheme?: string;
   cameraSource?: string;
@@ -103,6 +109,8 @@ const DEFAULT_VOICE_MODE: VoiceMode = "text-only";
 const DEFAULT_MUSIC_SHUFFLE = false;
 const DEFAULT_VOLUME_LEVEL = 9;
 const DEFAULT_SCROLL_SPEED_LEVEL = 5;
+const DEFAULT_HAT_SCROLL_SPEED_LEVEL = 5;
+const DEFAULT_HAT_FONT_SIZE: HatFontSize = "medium";
 const DEFAULT_UI_THEME: UITheme = "default";
 const DEFAULT_CAMERA_SOURCE: CameraSource = "pi-camera";
 const DEFAULT_ESP32_CAM_URL = "http://esp32-cam.local";
@@ -120,6 +128,8 @@ const DEFAULT_WEATHER_LONGITUDE = null;
 export const RECORD_TIMEOUT_OPTIONS = [10, 15, 20, 30, 45, 60];
 export const VOLUME_LEVEL_OPTIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 export const SCROLL_SPEED_OPTIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+export const HAT_SCROLL_SPEED_OPTIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+export const HAT_FONT_SIZE_OPTIONS: HatFontSize[] = ["small", "medium", "large"];
 export const IDLE_TIMEOUT_OPTIONS = [0, 60, 120, 180, 240, 300, 360, 420, 480, 540, 600];
 export const SCREEN_BLANK_TIMEOUT_OPTIONS = [...IDLE_TIMEOUT_OPTIONS];
 export const ROOM_MONITOR_INTERVAL_OPTIONS = [0, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600];
@@ -224,6 +234,12 @@ const VALID_SCREENSAVER_MODES = new Set<ScreensaverMode>([
   "tetris-rain",
 ]);
 
+const VALID_HAT_FONT_SIZES = new Set<HatFontSize>([
+  "small",
+  "medium",
+  "large",
+]);
+
 function normalizeVoiceMode(value: unknown): VoiceMode {
   if (typeof value === "string" && VALID_VOICE_MODES.has(value as VoiceMode)) {
     return value as VoiceMode;
@@ -298,6 +314,21 @@ function normalizeScrollSpeedLevel(value: unknown): number {
     return DEFAULT_SCROLL_SPEED_LEVEL;
   }
   return Math.max(1, Math.min(10, Math.round(numeric)));
+}
+
+function normalizeHatScrollSpeedLevel(value: unknown): number {
+  const numeric = typeof value === "number" ? value : parseInt(String(value), 10);
+  if (!Number.isFinite(numeric)) {
+    return DEFAULT_HAT_SCROLL_SPEED_LEVEL;
+  }
+  return Math.max(1, Math.min(10, Math.round(numeric)));
+}
+
+function normalizeHatFontSize(value: unknown): HatFontSize {
+  if (typeof value === "string" && VALID_HAT_FONT_SIZES.has(value as HatFontSize)) {
+    return value as HatFontSize;
+  }
+  return DEFAULT_HAT_FONT_SIZE;
 }
 
 function normalizeUITheme(value: unknown): UITheme {
@@ -439,6 +470,8 @@ function sanitizeSettings(input: Partial<RuntimeSettings> | null | undefined): R
         : DEFAULT_MUSIC_SHUFFLE,
     volumeLevel: normalizeVolumeLevel(input?.volumeLevel),
     scrollSpeedLevel: normalizeScrollSpeedLevel(input?.scrollSpeedLevel),
+    hatScrollSpeedLevel: normalizeHatScrollSpeedLevel(input?.hatScrollSpeedLevel),
+    hatFontSize: normalizeHatFontSize(input?.hatFontSize),
     voiceMode: normalizeVoiceMode(input?.voiceMode),
     uiTheme: normalizeUITheme(input?.uiTheme),
     cameraSource: normalizeCameraSource(input?.cameraSource),
@@ -526,6 +559,14 @@ export function saveRuntimeSettings(
 
   if (typeof update.scrollSpeedLevel === "number") {
     next.scrollSpeedLevel = normalizeScrollSpeedLevel(update.scrollSpeedLevel);
+  }
+
+  if (typeof update.hatScrollSpeedLevel === "number") {
+    next.hatScrollSpeedLevel = normalizeHatScrollSpeedLevel(update.hatScrollSpeedLevel);
+  }
+
+  if (typeof update.hatFontSize === "string") {
+    next.hatFontSize = normalizeHatFontSize(update.hatFontSize);
   }
 
   if (typeof update.voiceMode === "string") {

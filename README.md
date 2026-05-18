@@ -21,8 +21,8 @@ This project starts from the official PiSugar Whisplay chatbot, but is being tai
 - **Bot on HAT:** working
 - **Microphone:** working
 - **Speaker / WM8960 audio path:** working
-- **Raspberry Pi Camera Module v2.1:** working on the local Pi camera path
-- **Raspberry Pi Camera Module 3:** planned, not yet hardware-validated in this fork
+- **Raspberry Pi Camera Module v2.1:** tested, validated, and confirmed working on the local Pi camera path
+- **Raspberry Pi Camera Module 3:** planned as a future upgrade, not yet hardware-validated in this fork
 - **Spoken replies / TTS:** confirmed working with `espeak-ng`
 - **Spoken photo capture:** working
 - **Captured still image on HAT display:** working
@@ -30,7 +30,9 @@ This project starts from the official PiSugar Whisplay chatbot, but is being tai
 - **Companion Cardputer client:** working as an early rough-start build, with text chat confirmed and more settings/UI work planned
 - **Groqputer standalone Cardputer firmware:** standalone Groq Cardputer firmware now running in this repo, with a full-screen incoming/outgoing reader, battery in the header, direct Groq chat/Whisper, saved custom personalities from the AP or Cardputer, optional 16x2 I2C LCD output, on-device bot settings, and early same-LAN Whisplay relay testing
 - **Core2Groq unified M5Core2 firmware:** early dual-mode Core2 build now running in this repo, combining the existing OTR radio project with a new Groq bot mode, touch-first controls, and a path toward future BotNet connectivity
+- **Core1Display wireless external display:** working as a lightweight M5Stack Core / Core1 display mirror for both Groqputer and Whisplay over the local network with polling, auto-follow mode, button-driven reader UI, and idle screensaver support
 - **Standalone GroqBotNet Pi Zero node:** working as a separate same-network experiment with browser chat plus Mini PiTFT output
+- **Raspberry Pi 3 GroqBotNetHub host:** tested, validated, and confirmed working as a LAN-hosted relay hub for online BotNet connectivity and peer relay support
 - **Web simulator/debug UI:** still available at `http://<host-or-pi-ip>:17880`
 
 ## Current feature highlights
@@ -269,7 +271,7 @@ That means `Groqputer/` is **not** trying to be a full Whisplay port. It is mean
 - **Optional external LCD:** a 16x2 I2C HD44780 LCD with backpack can mirror compact status on line 1 and scroll incoming bot replies on line 2.
 - **Local LCD tuning:** the Cardputer can adjust the LCD marquee speed, remember LCD backlight on/off, and save those preferences in local storage.
 - **Peer-device groundwork:** the setup AP now includes **This Device URL** and **Connected Device URL**, and Groqputer can test a simple one-shot same-LAN relay path against a Whisplay node.
-- **M5Burner-ready image:** `Groqputer/Groqputer_M5Cardputer-MERGED.bin` is now included as a merged bootloader+partition+app firmware image for easier flashing workflows.
+- **M5Burner-ready image:** `Groqputer/Groqputer_M5Cardputer-MERGED.bin` is now included as a merged bootloader+partition+app firmware image for easier flashing workflows; after flashing, the Cardputer may stay blank for a short while during first boot, so give it about a minute before assuming the image failed.
 
 ### Current Groqputer setup / test notes
 
@@ -373,6 +375,28 @@ The current Core2Groq target is:
 - expand the on-device Core2 settings menu with better personality/model selection
 - keep radio mode stable while bot mode matures
 - eventually connect the Core2 bot into the same broader **BotNet / Whisplay** experiments used elsewhere in this repo
+
+## Why `Core1Display/` is also in this repo
+
+This repo now also includes `Core1Display/`, a lightweight **M5Stack Core / Core1 display mirror** firmware for wireless remote viewing of chat output.
+
+- **Core1Display is a simple network-polling companion display, not a chatbot**
+- **Whisplay and Groqputer remain the primary chatbot targets**
+- **the goal is to provide an always-on, low-footprint display for following conversations on other devices**
+
+Keeping it in this repo makes sense because it extends the same multi-device vision:
+
+- Whisplay browser at `http://<ip>:17880`
+- Groqputer touchscreen at `http://<ip>:8000`
+- Core1Display networked polling display for hands-free chat viewing
+
+The current Core1Display implementation includes:
+
+- **Dual-source polling:** can follow both Groqputer and Whisplay endpoints with configurable URLs
+- **Auto-follow mode:** automatically switches to whichever backend changed most recently
+- **Button-driven UI:** simple up/down/select navigation for scrolling through message history
+- **Idle screensavers:** animated Matrix, Ripple, and Entropy patterns for power-save display
+- **Setup AP:** like other projects, it uses a captive portal for initial Wi-Fi and URL configuration
 
 ## Why `GroqBotNet/` is also in this repo
 

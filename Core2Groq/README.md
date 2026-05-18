@@ -1,10 +1,15 @@
-# Core2Groq 📻🤖
+# Core2Groq 🤖📻
 
-Unified **M5Stack Core2** firmware that keeps the OTR radio project and now adds a **Groq chatbot mode** beside it.
+**Core2Groq** is a chatbot-first **M5Stack Core2** firmware built for the **M5Burner** style of install: flash one merged image, save Wi-Fi and your Groq key, then use the device as a handheld Groq bot.
 
-The radio side still comes from [M5RadioStream](../M5RadioStream) (Core1 Basic), upgraded with **16-bit I2S audio** for clean standalone playback on the Core2 speaker.
+The main focus is the **touchscreen chatbot experience**:
 
-Original concept: **[winRadio by Volos Projects](https://github.com/VolosR/WaveshareRadioStream)**
+- direct **Groq chat**
+- direct **Groq Whisper** voice transcription
+- local **setup AP**
+- editable **personality prompt**
+- on-device **personality / model / scroll** controls
+- optional **radio mode** as a side feature when you want it
 
 ---
 
@@ -14,50 +19,139 @@ Original concept: **[winRadio by Volos Projects](https://github.com/VolosR/Waves
 
 ---
 
-## Key Upgrade Over Core1 Version
+## What it does
 
-| | Core1 Basic | **Core2** |
-|---|---|---|
-| Audio output | 8-bit internal DAC | **16-bit I2S → NS4168 amp** |
-| Background hiss | Constant (hardware floor) | **Dramatically reduced** |
-| Touch input | Physical buttons only | **Capacitive touch + physical** |
-| Haptic feedback | None | **Vibration motor on every tap** |
-| PSRAM | None | **4MB** |
+- boots into **Bot mode** by default when a Groq key is configured
+- uses the Core2 touchscreen for day-to-day chat control
+- records voice from the device and sends it through Groq Whisper
+- shows the latest **bot** reply or **you** transcript on the main screen
+- keeps local settings in NVS so the setup only has to be done once
+- lets you open **Radio mode** when you want a simple side feature without replacing the bot
 
 ---
 
-## Current controls
+## Flash with M5Burner
 
-### Radio mode
+Use **`Core2Groq_M5Core2-MERGED.bin`** and flash it to offset **`0x0`**.
 
-Both the **on-screen touch footer** and **physical virtual buttons** work:
+This merged image includes the bootloader, partitions, boot app, and the current Core2Groq firmware in one file.
 
-| Touch Zone | Button | Normal Mode | Settings Mode |
-|---|---|---|---|
-| [SET] | BtnA (short) | Open sound settings | — |
-| [STA] | BtnB | Cycle station (1.5s debounce) | Select next parameter |
-| [VOL] | BtnC (short) | Cycle volume 0–10 (0=mute) | Increase value |
-| — | **BtnC (hold 1s)** | **Toggle screen on/off** | — |
-| [BACK] | BtnA | — | Exit settings |
+### Quick setup after flashing
 
-### Bot mode
+1. Boot the Core2.
+2. On first boot, or by holding **BtnA** during the splash, open the setup AP.
+3. Connect your phone or computer to:
+   - **`Core2Groq_Setup`**
+4. Open:
+   - **`http://192.168.4.1`**
+5. Save:
+   - 2.4 GHz Wi-Fi credentials
+   - Groq API key
+   - default boot mode (**Bot** or **Radio**)
+6. Reboot and start chatting.
 
-- Boots into **Bot mode** by default when a Groq key is configured
+Settings are stored locally and survive power cycles.
+
+---
+
+## Bot controls
+
 - bottom capacitive **REC** button records for the configured max time
 - bottom capacitive **STOP** button stops an active recording
 - bottom capacitive **HOLD** button records while held and stops on release
 - top-center **BOT / YOU** chip toggles between the latest bot reply and the latest user transcript
 - on-screen **SET** opens the bot settings menu
-- settings menu currently includes:
+- bot settings currently include:
   - **Setup**
-  - **Personality** preset cycling
-  - **Model** cycling
+  - **Personality**
+  - **Model**
   - **Auto-scroll speed**
+- on-screen **NEW** clears the current chat
 - on-screen **RADIO** switches into radio mode
-- on-screen **NEW** clears the current bot chat
-- long replies now **auto-scroll and repeat**
-- tapping the reply panel can still manually bump the scroll position if needed
-- in radio mode, tap the **BOT** button in the header to return
+- long replies auto-scroll, and tapping the reply area can still manually bump the scroll position
+
+---
+
+## Writing a good persona
+
+The best personas are usually **short, specific, and useful**.
+
+### Good persona structure
+
+1. **Role** - who the bot is
+2. **Tone** - how it should sound
+3. **Answer style** - concise, detailed, step-by-step, playful, etc.
+4. **Limits** - what it should avoid
+5. **Special behavior** - how it should handle troubleshooting, images, or encouragement
+
+### Reliable pattern
+
+```text
+You are a practical handheld assistant.
+Sound calm, clear, and helpful.
+Keep replies concise unless the user asks for more detail.
+When troubleshooting, give the most likely cause first.
+Do not ramble or bury the answer in character flavor.
+```
+
+### Tips
+
+- give the bot a **job**, not just a vibe
+- ask for a clear **reply length or style**
+- add one or two **hard limits** like:
+  - do not ramble
+  - do not be rude
+  - do not get so in-character that the answer becomes unclear
+- if you want humor or personality, say that it should still stay **useful first**
+
+### Avoid
+
+- long backstories that do not change behavior
+- too many conflicting traits in one prompt
+- vague prompts like **"be cool"** or **"be funny"** with no guidance on how to help
+
+### Example personas
+
+**Encouraging builder**
+
+```text
+You are a warm electronics project coach.
+Sound grounded, supportive, and honest.
+Keep replies concise and practical.
+Notice what is already working before suggesting the next fix.
+Do not use fake hype or empty praise.
+```
+
+**Pocket technician**
+
+```text
+You are a pocket troubleshooting assistant.
+Sound direct, capable, and calm.
+Keep replies short and step-by-step.
+When debugging, start with the most likely failure point.
+Do not ramble or over-explain simple checks.
+```
+
+---
+
+## Current controls
+
+### Bot mode
+
+- **REC** = record for the configured max time
+- **STOP** = stop an active recording
+- **HOLD** = record while held, stop on release
+- **BOT / YOU** = swap between the current reply and your latest transcript
+- **SET** = open the settings menu
+- **NEW** = clear the current chat
+- **RADIO** = switch into radio mode
+
+### Settings menu
+
+- **Setup**
+- **Personality**
+- **Model**
+- **Auto-scroll speed**
 
 ---
 
@@ -95,26 +189,7 @@ Notes:
 
 ---
 
-## Stations (ROKiT Radio Network — OTR classics, 48 kbps MP3)
-
-| # | Station | Highlights |
-|---|---|---|
-| 1 | 1940s Radio | Big band, wartime era |
-| 2 | American Comedy | Fibber McGee & Molly, Jack Benny, You Bet Your Life |
-| 3 | American Classics | Drama anthology |
-| 4 | Jazz Central | Swing & jazz |
-| 5 | Comedy Gold | Burns & Allen, Red Skelton |
-| 6 | Mystery Radio | Suspense, Inner Sanctum |
-| 7 | Crime & Suspense | Dragnet, Philip Marlowe |
-| 8 | Crime Radio | Sam Spade, Boston Blackie |
-| 9 | Adventure Stories | The Lone Ranger, Zorro |
-| 10 | Drama Radio | Lux Radio Theatre |
-| 11 | Nostalgia Lane | Mixed OTR variety |
-| 12 | Science Fiction | X Minus One, Dimension X |
-
----
-
-## Build & Flash
+## Build & Flash from source
 
 ```bash
 # Build and upload directly
@@ -124,33 +199,25 @@ pio run --target upload
 pio device monitor --baud 115200
 ```
 
-### Flash with M5Burner
-Use **`Core2Groq_M5Core2-MERGED.bin`** — flash to offset `0x0`.
-
-This merged image includes the bootloader, partitions, boot app, and the current Core2Groq firmware in one file.
-
 ---
 
-## First Boot / Setup AP
+## Radio mode
 
-On first boot (or hold **BtnA** during the 3-second splash), a captive portal opens:
+Core2Groq still includes a simple **radio mode**, but it is now a side feature instead of the main focus.
 
-1. Connect phone/PC to WiFi network **`Core2Groq_Setup`**
-2. Open browser → `192.168.4.1`
-3. Enter:
-   - 2.4 GHz WiFi credentials
-   - Groq API key for bot mode
-   - default boot mode (**Bot** or **Radio**)
-4. Save and reboot
+- tap **RADIO** from bot mode to switch over
+- tap **BOT** in the header to come back
+- radio mode is meant to be lightweight and easy to use, not the center of the project
+- if you never use the radio, Core2Groq still makes sense as a chatbot-only handheld
 
-Settings are stored in NVS and survive power cycles.
+Basic radio controls:
 
----
+- **SET** = sound settings
+- **STA** = next station
+- **VOL** = volume
+- **BACK** = leave radio settings
 
-## Planned Features
-
-- continue polishing the touchscreen bot UI
-- keep radio playback simple and reliable as a standalone speaker-based player
+The radio side was originally inspired by **[winRadio by Volos Projects](https://github.com/VolosR/WaveshareRadioStream)**, but this Core2 firmware is now being documented and positioned primarily as a **bot project first**.
 
 ---
 

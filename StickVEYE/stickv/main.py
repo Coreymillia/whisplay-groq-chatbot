@@ -18,13 +18,26 @@ YOLO2_ANCHOR = (
 )
 
 TRACKING_REPORT_MS = 2500
+MOTION_REPORT_MS = 1800
+COLOR_REPORT_MS = 1800
 OVERLAY_REFRESH_MS = 160
+MOTION_SAMPLE_STEP_X = 16
+MOTION_SAMPLE_STEP_Y = 16
+MOTION_DIFF_THRESHOLD = 20
+MOTION_MIN_CHANGED = 8
+COLOR_PIXELS_THRESHOLD = 120
+COLOR_AREA_THRESHOLD = 120
 PREVIEW_WIDTH = 80
 PREVIEW_HEIGHT = 60
 PREVIEW_SAMPLE_STEP_X = 4
 PREVIEW_SAMPLE_STEP_Y = 4
 PREVIEW_CHUNK_BYTES = 32
 PREVIEW_CHUNK_DELAY_MS = 2
+COLOR_TARGETS = (
+    ("RED", (0, 80, 40, 80, 15, 80), (255, 0, 0)),
+    ("GREEN", (0, 80, -120, -10, 0, 30), (0, 255, 0)),
+    ("BLUE", (0, 80, 30, 100, -120, -60), (0, 0, 255)),
+)
 
 # Current direct-link test wiring: StickV GPIO35 -> Cardputer G1, GPIO34 -> Cardputer G2.
 fm.register(UART_TX_PIN, fm.fpioa.UART2_TX, force=True)
@@ -46,6 +59,14 @@ last_overlay_ms = 0
 last_report_ms = 0
 last_face_count = 0
 detection_enabled = True
+motion_enabled = False
+color_enabled = False
+motion_prev_samples = None
+last_motion_count = 0
+last_motion_report_ms = 0
+last_color_name = "NONE"
+last_color_count = 0
+last_color_report_ms = 0
 
 task_fd = None
 model_source = "NONE"
@@ -104,7 +125,14 @@ def summarize_faces(faces):
 
 def send_status(face_count):
     model_state = "READY" if task_fd else "MISSING"
-    send_line("STATUS:" + model_state + ":" + model_source + ":FACES:" + str(face_count))
+    send_line(
+        "STATUS:" + model_state + ":" + model_source
+        + ":FACES:" + str(face_count)
+        + ":MOTION:" + ("ON" if motion_enabled else "OFF")
+        + ":" + str(last_motion_count)
+        + ":COLOR:" + ("ON" if color_enabled else "OFF")
+        + ":" + last_color_name
+    )
 
 
 def send_face_event(prefix, face_count, face):
@@ -118,6 +146,89 @@ def send_face_event(prefix, face_count, face):
         )
     else:
         send_line(prefix + ":" + str(face_count))
+
+
+def pixel_luma(pixel):
+    if isinstance(pixel, tuple) or isinstance(pixel, list):
+        return ((pixel[0] * 30) + (pixel[1] * 59) + (pixel[2] * 11)) // 100
+    return pixel & 0xFF
+
+
+def analyze_motion(img):
+    global motion_prev_samples
+
+    samples = []
+    changed = 0
+    min_x = img.width()
+    min_y = img.height()
+    max_x = -1
+    max_y = -1
+    samples_per_row = (img.width() + MOTION_SAMPLE_STEP_X - 1) // MOTION_SAMPLE_STEP_X
+
+    for y in range(0, img.height(), MOTION_SAMPLE_STEP_Y):
+        src_y = y + (MOTION_SAMPLE_STEP_Y // 2)
+        if src_y >= img.height():
+            src_y = img.height() - 1
+        for x in range(0, img.width(), MOTION_SAMPLE_STEP_X):
+            src_x = x + (MOTION_SAMPLE_STEP_X // 2)
+            if src_x >= img.width():
+                src_x = img.width() - 1
+            samples.append(pixel_luma(img.get_pixel(src_x, src_y)))
+
+    if motion_prev_samples is None or len(motion_prev_samples) != len(samples):
+        motion_prev_samples = samples
+        return 0, None
+
+    for i in range(len(samples)):
+        if abs(samples[i] - motion_prev_samples[i]) >= MOTION_DIFF_THRESHOLD:
+            changed += 1
+            sample_y = (i // samples_per_row) * MOTION_SAMPLE_STEP_Y
+            sample_x = (i % samples_per_row) * MOTION_SAMPLE_STEP_X
+            if sample_x < min_x:
+                min_x = sample_x
+            if sample_y < min_y:
+                min_y = sample_y
+            if sample_x > max_x:
+                max_x = sample_x
+            if sample_y > max_y:
+                max_y = sample_y
+
+    motion_prev_samples = samples
+    if changed < MOTION_MIN_CHANGED:
+        return changed, None
+
+    box_w = (max_x - min_x) + MOTION_SAMPLE_STEP_X
+    box_h = (max_y - min_y) + MOTION_SAMPLE_STEP_Y
+    return changed, (min_x, min_y, box_w, box_h)
+
+
+def analyze_color(img):
+    best_name = "NONE"
+    best_count = 0
+    best_blob = None
+    best_color = (255, 255, 255)
+    best_area = -1
+
+    for name, threshold, draw_color in COLOR_TARGETS:
+        blobs = img.find_blobs([threshold], pixels_threshold=COLOR_PIXELS_THRESHOLD,
+                               area_threshold=COLOR_AREA_THRESHOLD, merge=True)
+        if not blobs:
+            continue
+        largest = None
+        largest_area = -1
+        for blob in blobs:
+            area = blob.w() * blob.h()
+            if area > largest_area:
+                largest_area = area
+                largest = blob
+        if largest and largest_area > best_area:
+            best_name = name
+            best_count = len(blobs)
+            best_blob = largest
+            best_color = draw_color
+            best_area = largest_area
+
+    return best_name, best_count, best_blob, best_color
 
 
 def send_preview_frame(img):
@@ -160,6 +271,12 @@ def send_preview_frame(img):
 def handle_command(command, face_count, face, img):
     global last_status_text
     global detection_enabled
+    global motion_enabled
+    global color_enabled
+    global motion_prev_samples
+    global last_motion_count
+    global last_color_name
+    global last_color_count
     if command == "PING":
         last_status_text = "PING->PONG"
         send_line("PONG")
@@ -188,9 +305,23 @@ def handle_command(command, face_count, face, img):
         last_status_text = "DETECT ON" if detection_enabled else "DETECT OFF"
         send_line("DETECT:" + ("ON" if detection_enabled else "OFF"))
         return
+    if command == "MOTION:TOGGLE":
+        motion_enabled = not motion_enabled
+        motion_prev_samples = None
+        last_motion_count = 0
+        last_status_text = "MOTION ON" if motion_enabled else "MOTION OFF"
+        send_line("MOTION:" + ("ON" if motion_enabled else "OFF"))
+        return
+    if command == "COLOR:TOGGLE":
+        color_enabled = not color_enabled
+        last_color_name = "NONE"
+        last_color_count = 0
+        last_status_text = "COLOR ON" if color_enabled else "COLOR OFF"
+        send_line("COLOR:" + ("ON" if color_enabled else "OFF"))
+        return
     if command == "HELP":
         last_status_text = "HELP"
-        send_line("CMDS:PING,STATUS,SNAP,FRAME,EVENT,DETECT:TOGGLE")
+        send_line("CMDS:PING,STATUS,SNAP,FRAME,EVENT,DETECT:TOGGLE,MOTION:TOGGLE,COLOR:TOGGLE")
         return
     last_status_text = "UNKNOWN"
     send_line("ERR:UNKNOWN:" + command)
@@ -218,6 +349,14 @@ while True:
             faces = None
 
     face_count, largest_face = summarize_faces(faces)
+    motion_count = 0
+    motion_box = None
+    color_name, color_count, color_blob, color_draw = "NONE", 0, None, (255, 255, 255)
+
+    if motion_enabled:
+        motion_count, motion_box = analyze_motion(img)
+    if color_enabled:
+        color_name, color_count, color_blob, color_draw = analyze_color(img)
 
     if faces:
         for face in faces:
@@ -227,6 +366,10 @@ while True:
         img.draw_string(4, 26, "Faces: 0", color=(255, 220, 0), scale=1)
     elif not detection_enabled:
         img.draw_string(4, 26, "Detect paused", color=(255, 220, 0), scale=1)
+    if motion_box:
+        img.draw_rectangle(motion_box, color=(255, 255, 0), thickness=2)
+    if color_blob:
+        img.draw_rectangle(color_blob.rect(), color=color_draw, thickness=2)
 
     if task_fd and detection_enabled:
         if face_count > 0 and last_face_count == 0:
@@ -239,6 +382,47 @@ while True:
             send_line("FACE:NONE")
             last_report_ms = now
     last_face_count = face_count
+
+    if motion_enabled:
+        if motion_count > 0:
+            if last_motion_count == 0 or time.ticks_diff(now, last_motion_report_ms) >= MOTION_REPORT_MS:
+                if motion_box:
+                    send_line(
+                        "MOTION:DETECTED:" + str(motion_count)
+                        + ":X:" + str(motion_box[0])
+                        + ":Y:" + str(motion_box[1])
+                        + ":W:" + str(motion_box[2])
+                        + ":H:" + str(motion_box[3])
+                    )
+                else:
+                    send_line("MOTION:DETECTED:" + str(motion_count))
+                last_motion_report_ms = now
+        elif last_motion_count > 0:
+            send_line("MOTION:NONE")
+            last_motion_report_ms = now
+        last_motion_count = motion_count
+
+    if color_enabled:
+        if color_name != "NONE":
+            if color_name != last_color_name or time.ticks_diff(now, last_color_report_ms) >= COLOR_REPORT_MS:
+                if color_blob:
+                    send_line(
+                        "COLOR:DETECTED:" + color_name + ":COUNT:" + str(color_count)
+                        + ":X:" + str(color_blob.x())
+                        + ":Y:" + str(color_blob.y())
+                        + ":W:" + str(color_blob.w())
+                        + ":H:" + str(color_blob.h())
+                    )
+                else:
+                    send_line("COLOR:DETECTED:" + color_name + ":COUNT:" + str(color_count))
+                last_color_report_ms = now
+            last_color_name = color_name
+            last_color_count = color_count
+        elif last_color_name != "NONE":
+            send_line("COLOR:NONE")
+            last_color_report_ms = now
+            last_color_name = "NONE"
+            last_color_count = 0
 
     if time.ticks_diff(now, last_overlay_ms) >= OVERLAY_REFRESH_MS:
         if task_fd:

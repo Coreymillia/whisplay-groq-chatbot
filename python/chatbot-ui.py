@@ -58,6 +58,27 @@ MAX_SCROLL_SPEED = 2.6
 DEFAULT_SCROLL_SPEED_FACTOR = 1.0
 current_scroll_speed = DEFAULT_SCROLL_SPEED
 current_scroll_speed_factor = DEFAULT_SCROLL_SPEED_FACTOR
+# HAT-specific scroll settings (time-based)
+HAT_SCROLL_SPEED_PIXELS_PER_SEC = {
+    1: 15,  # very slow
+    2: 25,
+    3: 35,
+    4: 50,
+    5: 65,  # normal
+    6: 85,
+    7: 110,
+    8: 140,
+    9: 180,
+    10: 220,  # fast
+}
+current_hat_scroll_speed_level = 5
+current_hat_font_size = "medium"
+HAT_FONT_SIZE_CONFIG = {
+    "small": {"line_height": 16, "font_scale": 0.8},
+    "medium": {"line_height": 20, "font_scale": 1.0},
+    "large": {"line_height": 26, "font_scale": 1.3},
+}
+last_scroll_frame_time = None
 current_scroll_sync_char_end = None
 current_scroll_sync_duration_ms = None
 current_scroll_sync_target_top = None
@@ -315,6 +336,7 @@ class RenderThread(threading.Thread):
         global current_scroll_top, current_scroll_sync_char_end
         global current_scroll_sync_duration_ms, current_scroll_sync_target_top
         global current_scroll_sync_speed, current_scroll_sync_hold_until
+        global last_scroll_frame_time, current_hat_scroll_speed_level
         """Render main text content, wrap lines according to screen width, only display currently visible part"""
         if not text:
             self.pending_auto_scroll_after_hold = False
@@ -375,7 +397,7 @@ class RenderThread(threading.Thread):
         # Draw text_cache_image to main_text_image
         main_text_image.paste(self.text_cache_image, (0, -int(current_scroll_top)), self.text_cache_image)
 
-        # Update scroll position
+        # Update scroll position (TIME-BASED, not frame-based)
         if current_scroll_sync_speed is not None and current_scroll_sync_target_top is not None:
             remaining = current_scroll_sync_target_top - current_scroll_top
             if abs(remaining) <= abs(current_scroll_sync_speed):
@@ -389,7 +411,19 @@ class RenderThread(threading.Thread):
             and current_scroll_top < max_scroll_top
             and time.time() >= current_scroll_sync_hold_until
         ):
-            current_scroll_top += scroll_speed
+            # TIME-BASED scrolling: calculate pixels to move based on elapsed time
+            current_time = time.time()
+            if last_scroll_frame_time is None:
+                # First frame, just initialize time
+                pass
+            else:
+                elapsed_sec = current_time - last_scroll_frame_time
+                if elapsed_sec > 0:
+                    # Get pixels per second from current hat scroll speed level (1-10)
+                    pixels_per_sec = HAT_SCROLL_SPEED_PIXELS_PER_SEC.get(current_hat_scroll_speed_level, 65)
+                    pixels_to_move = pixels_per_sec * elapsed_sec
+                    current_scroll_top += pixels_to_move
+            last_scroll_frame_time = current_time
         if current_status == "last reply" and scroll_speed > 0 and max_scroll_top > 0:
             if current_scroll_top >= max_scroll_top:
                 current_scroll_top = 0
@@ -1270,7 +1304,7 @@ class RenderThread(threading.Thread):
         self.render_event.set()
 
 def update_display_data(status=None, emoji=None, text=None,
-                   scroll_speed=None, scroll_speed_factor=None, scroll_sync=None, battery_level=None, battery_color=None, image_path=None,
+                   scroll_speed=None, scroll_speed_factor=None, hat_scroll_speed_factor=None, hat_font_size=None, scroll_sync=None, battery_level=None, battery_color=None, image_path=None,
                    network_connected=None, vpn_connected=None, rag_icon_visible=None, image_icon_visible=None, transaction_id=None,
                    wifi_signal_level=None, groq_requests_today=None, audio_level=None,
                    music_progress=None, music_duration_ms=None, header_mode=None,
@@ -1278,7 +1312,7 @@ def update_display_data(status=None, emoji=None, text=None,
                    hat_text_color=None):
     global current_status, current_emoji, current_text, current_battery_level
     global current_battery_color, current_scroll_top, current_scroll_speed, current_image_path
-    global current_scroll_speed_factor
+    global current_scroll_speed_factor, current_hat_scroll_speed_level, current_hat_font_size
     global current_scroll_sync_char_end, current_scroll_sync_duration_ms
     global current_scroll_sync_target_top, current_scroll_sync_speed
     global current_scroll_sync_hold_until
@@ -1305,6 +1339,8 @@ def update_display_data(status=None, emoji=None, text=None,
         or idle_timeout_sec is not None
         or screen_blank_timeout_sec is not None
         or hat_text_color is not None
+        or hat_scroll_speed_factor is not None
+        or hat_font_size is not None
     ):
         note_activity()
 
@@ -1370,6 +1406,21 @@ def update_display_data(status=None, emoji=None, text=None,
             )
         except (TypeError, ValueError):
             print(f"[Display] Invalid scroll_speed payload: {scroll_speed}")
+    if hat_scroll_speed_factor is not None:
+        try:
+            # hat_scroll_speed_factor is 1-10; convert to pixels/sec
+            level = max(1, min(10, int(hat_scroll_speed_factor)))
+            current_hat_scroll_speed_level = level
+        except (TypeError, ValueError):
+            print(f"[Display] Invalid hat_scroll_speed_factor payload: {hat_scroll_speed_factor}")
+    if hat_font_size is not None:
+        try:
+            if hat_font_size in HAT_FONT_SIZE_CONFIG:
+                current_hat_font_size = hat_font_size
+            else:
+                print(f"[Display] Invalid hat_font_size: {hat_font_size}, using medium")
+        except (TypeError, ValueError):
+            print(f"[Display] Invalid hat_font_size payload: {hat_font_size}")
     if network_connected is not None:
         current_network_connected = network_connected
     if wifi_signal_level is not None:

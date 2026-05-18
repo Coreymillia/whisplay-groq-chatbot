@@ -38,6 +38,13 @@ static size_t previewFrameOffset = 0;
 static uint8_t previewFrame[PREVIEW_FRAME_BYTES];
 static char inboundLineBuffer[128];
 static size_t inboundLineLength = 0;
+static String pendingCommand;
+static bool pendingCommandRecordLog = true;
+static bool resumePreviewPollingAfterReply = false;
+
+static bool isPreviewTransferActive() {
+  return receivingFrame || awaitingFrameTrailer;
+}
 
 static String summarizeInbound(const String &line) {
   if (line.startsWith("FACE:DETECTED")) {
@@ -55,6 +62,46 @@ static String summarizeInbound(const String &line) {
   if (line.startsWith("MODEL:MISSING")) {
     statusColor = COLOR_ERROR;
     return "StickV model missing";
+  }
+  if (line.startsWith("DETECT:ON")) {
+    statusColor = COLOR_OK;
+    return "Aux detection on";
+  }
+  if (line.startsWith("DETECT:OFF")) {
+    statusColor = COLOR_WARN;
+    return "Aux detection off";
+  }
+  if (line.startsWith("MOTION:ON")) {
+    statusColor = COLOR_OK;
+    return "Motion on";
+  }
+  if (line.startsWith("MOTION:OFF")) {
+    statusColor = COLOR_WARN;
+    return "Motion off";
+  }
+  if (line.startsWith("COLOR:ON")) {
+    statusColor = COLOR_OK;
+    return "Color on";
+  }
+  if (line.startsWith("COLOR:OFF")) {
+    statusColor = COLOR_WARN;
+    return "Color off";
+  }
+  if (line.startsWith("MOTION:DETECTED")) {
+    statusColor = COLOR_OK;
+    return "Motion detected";
+  }
+  if (line.startsWith("MOTION:NONE")) {
+    statusColor = COLOR_WARN;
+    return "No motion";
+  }
+  if (line.startsWith("COLOR:DETECTED")) {
+    statusColor = COLOR_OK;
+    return "Color detected";
+  }
+  if (line.startsWith("COLOR:NONE")) {
+    statusColor = COLOR_WARN;
+    return "No color target";
   }
   if (line.startsWith("STATUS:READY") || line.startsWith("STATUS:")) {
     statusColor = COLOR_OK;
@@ -136,10 +183,10 @@ static void drawLogUi() {
   M5Cardputer.Display.drawFastHLine(0, 122, M5Cardputer.Display.width(), COLOR_ACCENT);
   M5Cardputer.Display.setTextColor(COLOR_OK, COLOR_BG);
   M5Cardputer.Display.setCursor(4, 126);
-  M5Cardputer.Display.print("P ping I info S snap F frame");
+  M5Cardputer.Display.print("P I S F V");
   M5Cardputer.Display.setTextColor(COLOR_WARN, COLOR_BG);
   M5Cardputer.Display.setCursor(4, 134);
-  M5Cardputer.Display.print("V auto L log E D C");
+  M5Cardputer.Display.print("L E D M O C");
 }
 
 static void drawPreviewUi() {
@@ -169,7 +216,7 @@ static void drawPreviewUi() {
   M5Cardputer.Display.print(previewPolling ? "Auto preview ON" : "Auto preview OFF");
   M5Cardputer.Display.setTextColor(COLOR_TEXT, COLOR_BG);
   M5Cardputer.Display.setCursor(124, 134);
-  M5Cardputer.Display.print("F frame V auto L log");
+  M5Cardputer.Display.print("M mot O col L log");
 }
 
 static void drawUi() {
@@ -187,6 +234,32 @@ static void noteLocalStatus(const String &status, uint16_t color) {
 }
 
 static void requestPreviewFrame(bool recordLog);
+
+static void transmitCommand(const String &command, bool recordLog) {
+  Serial1.print(command);
+  Serial1.print('\n');
+  if (recordLog) {
+    String summary = "> ";
+    summary += command;
+    pushLogLine(summary);
+  }
+  lastStatus = String("TX ") + command;
+  statusColor = COLOR_ACCENT;
+  Serial.println(String("[StickV TX] ") + command);
+  drawUi();
+}
+
+static void flushPendingCommand() {
+  if (!pendingCommand.length() || isPreviewTransferActive()) {
+    return;
+  }
+
+  String command = pendingCommand;
+  bool recordLog = pendingCommandRecordLog;
+  pendingCommand = "";
+  pendingCommandRecordLog = true;
+  transmitCommand(command, recordLog);
+}
 
 static void finishPreviewFrame(bool ok, const String &detail) {
   receivingFrame = false;
@@ -241,20 +314,35 @@ static void handleInboundLine(const String &line) {
   pushLogLine("< " + line);
   Serial.println("[StickV RX] " + line);
   drawUi();
+
+  if (resumePreviewPollingAfterReply && !pendingCommand.length() &&
+      !isPreviewTransferActive()) {
+    previewPolling = true;
+    resumePreviewPollingAfterReply = false;
+    lastPreviewPollMs = millis();
+  }
 }
 
 static void sendCommand(const char *command, bool recordLog = true) {
-  Serial1.print(command);
-  Serial1.print('\n');
-  if (recordLog) {
-    String summary = "> ";
-    summary += command;
-    pushLogLine(summary);
+  if (isPreviewTransferActive()) {
+    pendingCommand = command;
+    pendingCommandRecordLog = recordLog;
+    if (previewPolling && String(command) != "FRAME") {
+      resumePreviewPollingAfterReply = true;
+      previewPolling = false;
+    }
+    lastStatus = String("Queued ") + command;
+    statusColor = COLOR_WARN;
+    drawUi();
+    return;
   }
-  lastStatus = String("TX ") + command;
-  statusColor = COLOR_ACCENT;
-  Serial.println(String("[StickV TX] ") + command);
-  drawUi();
+
+  if (previewPolling && String(command) != "FRAME") {
+    resumePreviewPollingAfterReply = true;
+    previewPolling = false;
+  }
+
+  transmitCommand(String(command), recordLog);
 }
 
 static void requestPreviewFrame(bool recordLog) {
@@ -296,6 +384,7 @@ static void pollKeyboard() {
       case 'f':
       case 'F':
         previewPolling = false;
+        resumePreviewPollingAfterReply = false;
         previewMode = true;
         requestPreviewFrame(true);
         break;
@@ -303,6 +392,9 @@ static void pollKeyboard() {
       case 'V':
         previewMode = true;
         previewPolling = !previewPolling;
+        if (!previewPolling) {
+          resumePreviewPollingAfterReply = false;
+        }
         if (previewPolling) {
           requestPreviewFrame(true);
         } else {
@@ -312,6 +404,7 @@ static void pollKeyboard() {
       case 'l':
       case 'L':
         previewPolling = false;
+        resumePreviewPollingAfterReply = false;
         previewMode = false;
         drawUi();
         break;
@@ -322,6 +415,14 @@ static void pollKeyboard() {
       case 'd':
       case 'D':
         sendCommand("DETECT:TOGGLE");
+        break;
+      case 'm':
+      case 'M':
+        sendCommand("MOTION:TOGGLE");
+        break;
+      case 'o':
+      case 'O':
+        sendCommand("COLOR:TOGGLE");
         break;
       case 'c':
       case 'C':
@@ -393,6 +494,7 @@ void loop() {
   M5Cardputer.update();
   pollKeyboard();
   pollStickVSerial();
+  flushPendingCommand();
 
   unsigned long now = millis();
   if (previewPolling && !receivingFrame && !awaitingFrameTrailer &&

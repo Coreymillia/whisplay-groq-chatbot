@@ -45,6 +45,7 @@ _service_install() {
 _service_uninstall() {
   require_cmd sudo
   require_cmd systemctl
+  local autostart_file="$HOME/.config/autostart/whisplay-hdmi-kiosk.desktop"
 
   _bold "Uninstalling ${SERVICE_NAME}..."
 
@@ -62,6 +63,11 @@ _service_uninstall() {
   if [ -f "$unit_file" ]; then
     sudo rm -f "$unit_file"
     _bold "Removed ${unit_file}"
+  fi
+
+  if [ -f "$autostart_file" ]; then
+    rm -f "$autostart_file"
+    _bold "Removed ${autostart_file}"
   fi
 
   sudo systemctl daemon-reload
@@ -105,4 +111,3 @@ _service_help() {
   echo "  status    Show current service status"
   echo ""
 }
-

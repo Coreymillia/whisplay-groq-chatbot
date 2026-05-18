@@ -114,7 +114,13 @@ On the Cardputer:
 - `L` returns to the text/log view
 - `E` sends `EVENT`
 - `D` sends `DETECT:TOGGLE`
+- `M` sends `MOTION:TOGGLE`
+- `O` sends `COLOR:TOGGLE`
 - `C` clears the log
+
+While preview mode is active, text commands like `P`, `I`, `S`, `E`, and `D`
+pause frame polling until their reply is received so the host does not mix a
+binary frame read with text UART events.
 
 Expected results:
 
@@ -124,6 +130,8 @@ Expected results:
 - `F` -> Cardputer receives `FRAME:RGB565:80:60:9600`, 9,600 bytes of color image data, then `FRAME:END`
 - `E` -> returns the last UART event line
 - `D` -> `DETECT:ON` or `DETECT:OFF`
+- `M` -> `MOTION:ON` or `MOTION:OFF`
+- `O` -> `COLOR:ON` or `COLOR:OFF`
 
 The preview path is intentionally lightweight:
 
@@ -131,6 +139,8 @@ The preview path is intentionally lightweight:
 - Cardputer scales that to a larger on-screen preview
 - the UART transfer is intentionally chunked and paced for reliability
 - this is meant to be a **usable snapshot poll**, not true live video
+- face detection runs by default; motion and color are opt-in so they can be
+  tested separately if needed
 
 Autonomous StickV events now include:
 
@@ -138,6 +148,10 @@ Autonomous StickV events now include:
 - `FACE:DETECTED:<count>:X:...:Y:...:W:...:H:...`
 - `FACE:TRACKING:<count>:X:...:Y:...:W:...:H:...`
 - `FACE:NONE`
+- `MOTION:DETECTED:<count>:X:...:Y:...:W:...:H:...`
+- `MOTION:NONE`
+- `COLOR:DETECTED:<name>:COUNT:<n>:X:...:Y:...:W:...:H:...`
+- `COLOR:NONE`
 - `MODEL:MISSING:...`
 
 ## Next step
@@ -146,4 +160,5 @@ Once this face-detection test is stable, the next milestone is a **hybrid MaixPy
 
 - keep the current **demo-style StickV local screen**
 - extend UART events toward `FACE:KNOWN:<name>` and `FACE:UNKNOWN`
+- keep the tracker example on SD for later MaixPy v2 use
 - keep Groqputer integration separate until that contract is stable
