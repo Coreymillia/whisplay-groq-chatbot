@@ -50,6 +50,7 @@ const personalityInput = document.getElementById("personalityInput");
 const personalityNameInput = document.getElementById("personalityNameInput");
 const savePersonalityBtn = document.getElementById("savePersonalityBtn");
 const voiceModeSelect = document.getElementById("voiceModeSelect");
+const llmModelSelect = document.getElementById("llmModelSelect");
 const volumeLevelSelect = document.getElementById("volumeLevelSelect");
 const recordTimeSelect = document.getElementById("recordTimeSelect");
 const scrollSpeedSelect = document.getElementById("scrollSpeedSelect");
@@ -151,6 +152,7 @@ const DEFAULT_CAMERA_ROTATION_DEG = "0";
 const CUSTOM_PERSONALITY_PRESET_ID = "custom";
 let personalityPresets = [];
 let botNetModelOptions = [];
+let llmModelOptions = [];
 let volumeLevelOptions = [];
 let recordTimeoutOptions = [];
 let scrollSpeedOptions = [];
@@ -1245,6 +1247,28 @@ function populateBotNetModelOptions(selectedValue) {
   botNetModelSelect.value = fallbackValue;
 }
 
+function populateLlmModelOptions(selectedValue) {
+  if (!llmModelSelect) return;
+  llmModelSelect.innerHTML = "";
+  llmModelOptions.forEach((item) => {
+    const option = document.createElement("option");
+    option.value = item.id;
+    option.textContent = item.label;
+    llmModelSelect.appendChild(option);
+  });
+  const fallbackValue = selectedValue || llmModelOptions[0]?.id || "";
+  if (
+    fallbackValue &&
+    ![...llmModelSelect.options].some((option) => option.value === fallbackValue)
+  ) {
+    const option = document.createElement("option");
+    option.value = fallbackValue;
+    option.textContent = fallbackValue;
+    llmModelSelect.appendChild(option);
+  }
+  llmModelSelect.value = fallbackValue;
+}
+
 function populateRecordTimeoutOptions(selectedValue) {
   if (!recordTimeSelect) return;
   recordTimeSelect.innerHTML = "";
@@ -1439,6 +1463,7 @@ function syncPresetSelectionFromPrompt(prompt) {
 
 function applySettings(settings) {
   if (!settings) return;
+  populateLlmModelOptions(settings.llmModel || "");
   populatePersonalityPresets(settings.personalityPresetId);
   populateVolumeLevelOptions(settings.volumeLevel || 9);
   populateRecordTimeoutOptions(settings.manualRecordMaxSec || 15);
@@ -1462,6 +1487,9 @@ function applySettings(settings) {
   }
   if (voiceModeSelect) {
     voiceModeSelect.value = settings.voiceMode || "text-only";
+  }
+  if (llmModelSelect) {
+    llmModelSelect.value = settings.llmModel || llmModelOptions[0]?.id || "";
   }
   if (musicShuffleCheckbox) {
     musicShuffleCheckbox.checked = Boolean(settings.musicShuffle);
@@ -1551,6 +1579,9 @@ async function loadSettings() {
       : idleTimeoutOptions;
     roomMonitorIntervalOptions = Array.isArray(payload.roomMonitorIntervalOptions)
       ? payload.roomMonitorIntervalOptions
+      : [];
+    llmModelOptions = Array.isArray(payload.llmModelOptions)
+      ? payload.llmModelOptions
       : [];
     applySettings(payload.settings || {});
     settingsLoaded = true;
@@ -1965,6 +1996,7 @@ async function saveSettings({ clearGroqApiKey = false } = {}) {
     groqApiKey: clearGroqApiKey ? "" : (groqKeyInput?.value || "").trim(),
     clearGroqApiKey,
     geminiApiKey: (geminiKeyInput?.value || "").trim(),
+    llmModel: llmModelSelect?.value || llmModelOptions[0]?.id || "",
     personalityPrompt: (personalityInput?.value || "").trim(),
     voiceMode: voiceModeSelect?.value || "text-only",
     musicShuffle: Boolean(musicShuffleCheckbox?.checked),

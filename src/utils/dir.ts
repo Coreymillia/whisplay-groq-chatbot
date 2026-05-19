@@ -52,6 +52,12 @@ ensureDirExists(cameraFeedDir);
 export const musicDir = path.join(dataDir, "music");
 ensureDirExists(musicDir);
 
+export const esp32AgentDir = path.join(dataDir, "esp32-agent");
+ensureDirExists(esp32AgentDir);
+
+export const esp32AgentProjectsDir = path.join(esp32AgentDir, "projects");
+ensureDirExists(esp32AgentProjectsDir);
+
 
 export const knowledgeDir = path.join(__dirname, "../..", "knowledge");
 ensureDirExists(knowledgeDir);

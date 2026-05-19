@@ -5,6 +5,10 @@ import {
   getMatchingPersonalityPreset,
   type PersonalityPreset,
 } from "./personality-presets";
+import {
+  DEFAULT_BOTNET_MODEL,
+  normalizeBotNetModel,
+} from "./botnet-models";
 
 export type VoiceMode = "text-only" | "speak-on-demand" | "voice-chat";
 export type UITheme = "default" | "matrix" | "plasma" | "amber-terminal";
@@ -57,6 +61,7 @@ export type HatFontFamily =
 export interface RuntimeSettings {
   groqApiKey: string;
   geminiApiKey: string;
+  llmModel: string;
   personalityPrompt: string;
   savedPersonalityPresets: PersonalityPreset[];
   musicShuffle: boolean;
@@ -86,6 +91,7 @@ export interface RuntimeSettingsUpdate {
   groqApiKey?: string;
   clearGroqApiKey?: boolean;
   geminiApiKey?: string;
+  llmModel?: string;
   personalityPrompt?: string;
   savedPersonalityPresets?: PersonalityPreset[];
   musicShuffle?: boolean;
@@ -118,6 +124,7 @@ const SETTINGS_PATH = path.resolve(
 );
 
 const DEFAULT_VOICE_MODE: VoiceMode = "text-only";
+const DEFAULT_LLM_MODEL = DEFAULT_BOTNET_MODEL;
 const DEFAULT_MUSIC_SHUFFLE = false;
 const DEFAULT_VOLUME_LEVEL = 9;
 const DEFAULT_SCROLL_SPEED_LEVEL = 5;
@@ -496,12 +503,17 @@ function normalizeCoordinate(
   return Math.max(min, Math.min(max, numeric));
 }
 
+function normalizeLlmModel(value: unknown): string {
+  return normalizeBotNetModel(value ?? DEFAULT_LLM_MODEL);
+}
+
 function sanitizeSettings(input: Partial<RuntimeSettings> | null | undefined): RuntimeSettings {
   return {
     groqApiKey:
       typeof input?.groqApiKey === "string" ? input.groqApiKey.trim() : "",
     geminiApiKey:
       typeof input?.geminiApiKey === "string" ? input.geminiApiKey.trim() : "",
+    llmModel: normalizeLlmModel(input?.llmModel),
     personalityPrompt:
       typeof input?.personalityPrompt === "string"
         ? input.personalityPrompt.trim()
@@ -583,6 +595,10 @@ export function saveRuntimeSettings(
     if (trimmed) {
       next.geminiApiKey = trimmed;
     }
+  }
+
+  if (typeof update.llmModel === "string") {
+    next.llmModel = normalizeLlmModel(update.llmModel);
   }
 
   if (typeof update.personalityPrompt === "string") {
@@ -897,6 +913,7 @@ export function getRoomMonitorIntervalLabel(value: number): string {
 export function getPublicRuntimeSettings(): {
   groqApiKeyConfigured: boolean;
   geminiApiKeyConfigured: boolean;
+  llmModel: string;
   personalityPrompt: string;
   personalityPresetId: string;
   musicShuffle: boolean;
@@ -925,6 +942,7 @@ export function getPublicRuntimeSettings(): {
   return {
     groqApiKeyConfigured: Boolean(settings.groqApiKey),
     geminiApiKeyConfigured: Boolean(settings.geminiApiKey),
+    llmModel: settings.llmModel,
     personalityPrompt: settings.personalityPrompt,
     personalityPresetId: getCurrentPersonalityPresetId(
       settings.personalityPrompt,

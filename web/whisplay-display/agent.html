@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Whisplay ESP32 Agent</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600&family=JetBrains+Mono:wght@400;600&display=swap"
+    rel="stylesheet"
+  />
+  <link rel="stylesheet" href="/agent.css" />
+</head>
+<body>
+  <main class="agent-shell">
+    <section class="agent-sidebar">
+      <div class="agent-card">
+        <div class="agent-card-title">ESP32 Agent</div>
+        <div class="agent-card-subtitle">Sandboxed PlatformIO workspace for persistent CYD projects.</div>
+        <div class="agent-actions-top">
+          <a class="agent-link-button" href="/" target="_blank" rel="noopener">Open Main UI</a>
+        </div>
+      </div>
+
+      <div class="agent-card">
+        <div class="agent-card-title">Create Project</div>
+        <label class="agent-label" for="agentProjectName">Project Name</label>
+        <input id="agentProjectName" class="agent-input" type="text" placeholder="My CYD Project" />
+
+        <label class="agent-label" for="agentPresetSelect">Preset Template</label>
+        <select id="agentPresetSelect" class="agent-select"></select>
+
+        <label class="agent-label" for="agentModelSelect">Device AI Model</label>
+        <select id="agentModelSelect" class="agent-select"></select>
+        <div class="agent-hint">This shared model is used by both the normal chat flow and the ESP32 Agent workspace.</div>
+
+        <button id="agentCreateBtn" class="agent-button" type="button">Create Sandbox Project</button>
+        <input id="agentImportInput" type="file" accept="application/json,.json" hidden />
+        <button id="agentImportBtn" class="agent-button secondary" type="button">Import Project Bundle</button>
+        <div id="agentCreateStatus" class="agent-status">Loading presets…</div>
+      </div>
+
+      <div class="agent-card agent-card-fill">
+        <div class="agent-card-title">Projects</div>
+        <div class="agent-project-actions">
+          <button id="agentRefreshProjectsBtn" class="agent-button secondary" type="button">Refresh</button>
+        </div>
+        <div id="agentProjectsList" class="agent-project-list"></div>
+      </div>
+    </section>
+
+    <section class="agent-main">
+      <div class="agent-card">
+        <div class="agent-toolbar">
+          <div>
+            <div class="agent-card-title" id="agentWorkspaceTitle">No project selected</div>
+            <div class="agent-card-subtitle" id="agentWorkspaceSubtitle">Select or create a sandbox project to begin.</div>
+          </div>
+          <div class="agent-toolbar-actions">
+            <button id="agentSaveModelBtn" class="agent-button secondary" type="button">Save Device Model</button>
+            <button id="agentExportBtn" class="agent-button secondary" type="button">Export Project Bundle</button>
+          </div>
+        </div>
+        <div class="agent-command-grid">
+          <div>
+            <label class="agent-label" for="agentBuildCommand">Build Command</label>
+            <div class="agent-command-row">
+              <input id="agentBuildCommand" class="agent-input agent-code-input" type="text" readonly />
+              <button id="agentCopyBuildBtn" class="agent-button secondary compact" type="button">Copy</button>
+            </div>
+          </div>
+          <div>
+            <label class="agent-label" for="agentUploadCommand">Flash Command</label>
+            <div class="agent-command-row">
+              <input id="agentUploadCommand" class="agent-input agent-code-input" type="text" readonly />
+              <button id="agentCopyUploadBtn" class="agent-button secondary compact" type="button">Copy</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="agent-workspace-grid">
+        <div class="agent-card agent-file-tree-card">
+          <div class="agent-card-title">Files</div>
+          <div id="agentFileTree" class="agent-file-tree"></div>
+        </div>
+
+        <div class="agent-card agent-editor-card">
+          <div class="agent-editor-header">
+            <div>
+              <div class="agent-card-title">Editor</div>
+              <div class="agent-card-subtitle" id="agentEditorPath">Choose a file from the tree.</div>
+            </div>
+            <div class="agent-toolbar-actions">
+              <button id="agentSaveFileBtn" class="agent-button" type="button">Save File</button>
+            </div>
+          </div>
+          <textarea id="agentFileEditor" class="agent-editor" spellcheck="false" placeholder="File contents will appear here…"></textarea>
+          <div id="agentEditorStatus" class="agent-status">No file loaded.</div>
+        </div>
+      </div>
+
+      <div class="agent-card">
+        <div class="agent-editor-header">
+          <div>
+            <div class="agent-card-title">Savepoints</div>
+            <div class="agent-card-subtitle">Capture exact workspace snapshots and restore them later without leaving the sandbox.</div>
+          </div>
+          <div class="agent-toolbar-actions">
+            <button id="agentSavepointBtn" class="agent-button" type="button">Create Savepoint</button>
+          </div>
+        </div>
+        <div class="agent-savepoint-grid">
+          <div>
+            <label class="agent-label" for="agentSavepointLabel">Savepoint Label</label>
+            <input id="agentSavepointLabel" class="agent-input" type="text" placeholder="Before upload retry" />
+          </div>
+          <div>
+            <label class="agent-label" for="agentSavepointNote">Note</label>
+            <input id="agentSavepointNote" class="agent-input" type="text" placeholder="Why this snapshot matters" />
+          </div>
+        </div>
+        <div id="agentSavepointStatus" class="agent-status">No savepoints loaded.</div>
+        <div id="agentSavepointsList" class="agent-project-list"></div>
+      </div>
+
+      <div class="agent-card">
+        <div class="agent-editor-header">
+          <div>
+            <div class="agent-card-title">Paste Build or Flash Error</div>
+            <div class="agent-card-subtitle">Store the latest PlatformIO failure text with the project for the coding agent to use.</div>
+          </div>
+          <div class="agent-toolbar-actions">
+            <button id="agentSaveErrorBtn" class="agent-button secondary" type="button">Save Error Log</button>
+          </div>
+        </div>
+        <textarea id="agentErrorLog" class="agent-editor agent-editor-short" spellcheck="false" placeholder="Paste pio run or upload output here…"></textarea>
+        <div id="agentErrorStatus" class="agent-status">No error log saved.</div>
+      </div>
+    </section>
+  </main>
+  <script src="/agent.js"></script>
+</body>
+</html>

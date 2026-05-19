@@ -78,6 +78,7 @@
           <div class="text-toolbar">
             <button class="button secondary compact" id="newChatBtn" type="button">End Chat</button>
             <a class="button secondary compact" href="/hdmi" target="_blank" rel="noopener">HDMI View</a>
+            <a class="button secondary compact" href="/agent" target="_blank" rel="noopener">ESP32 Agent</a>
             <div class="text-history-controls">
               <select class="settings-select" id="chatHistorySelect">
                 <option value="">Saved chats</option>
@@ -368,6 +369,14 @@
                   <option value="speak-on-demand">Speak on demand</option>
                   <option value="voice-chat">Voice chat</option>
                 </select>
+              </div>
+
+              <div class="settings-field">
+                <label class="field-label" for="llmModelSelect">AI Model</label>
+                <select class="settings-select" id="llmModelSelect"></select>
+                <div class="field-hint">
+                  Shared device model for normal chat and the ESP32 Agent workspace.
+                </div>
               </div>
 
               <div class="settings-field settings-field-wide">

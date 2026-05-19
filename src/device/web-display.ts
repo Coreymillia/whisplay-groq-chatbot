@@ -72,6 +72,24 @@ import {
   getRoomMonitorStatus,
   listRoomMonitorCaptures,
 } from "./room-monitor";
+import {
+  createEsp32AgentProjectCheckpoint,
+  createEsp32AgentProject,
+  exportEsp32AgentProject,
+  getEsp32AgentProject,
+  importEsp32AgentProject,
+  listEsp32AgentProjectCheckpoints,
+  listEsp32AgentPresets,
+  listEsp32AgentProjects,
+  listEsp32AgentProjectFiles,
+  readEsp32AgentProjectErrorLog,
+  readEsp32AgentProjectFile,
+  restoreEsp32AgentProjectCheckpoint,
+  updateEsp32AgentProjectSettings,
+  writeEsp32AgentProjectErrorLog,
+  writeEsp32AgentProjectFile,
+} from "../esp32-agent/workspace";
+import { BOTNET_MODEL_OPTIONS } from "../config/botnet-models";
 
 type ButtonHandler = () => void;
 
@@ -336,6 +354,312 @@ export class WebDisplayServer implements WebAudioBridgeServer {
       ctx.set("Cache-Control", "no-store");
       ctx.type = "text/html";
       ctx.body = fs.createReadStream(path.join(staticRoot, "hdmi.html"));
+    });
+
+    this.router.get("/agent", (ctx) => {
+      ctx.set("Cache-Control", "no-store");
+      ctx.type = "text/html";
+      ctx.body = fs.createReadStream(path.join(staticRoot, "agent.html"));
+    });
+
+    this.router.get("/api/esp32-agent/presets", (ctx) => {
+      ctx.set("Cache-Control", "no-store");
+      ctx.body = {
+        presets: listEsp32AgentPresets(),
+        modelOptions: BOTNET_MODEL_OPTIONS,
+      };
+    });
+
+    this.router.get("/api/esp32-agent/projects", (ctx) => {
+      ctx.set("Cache-Control", "no-store");
+      ctx.body = {
+        projects: listEsp32AgentProjects(),
+      };
+    });
+
+    this.router.post("/api/esp32-agent/projects", (ctx) => {
+      const body = normalizeRequestBody((ctx.request as any).body);
+      try {
+        const project = createEsp32AgentProject({
+          name: getBodyString(body, "name") || "",
+          presetId: getBodyString(body, "presetId") || "",
+          agentModel: getBodyString(body, "agentModel") || undefined,
+        });
+        ctx.body = {
+          ok: true,
+          project,
+        };
+      } catch (error) {
+        ctx.status = 400;
+        ctx.body = {
+          ok: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Failed to create ESP32 agent project.",
+        };
+      }
+    });
+
+    this.router.post("/api/esp32-agent/projects/import", (ctx) => {
+      const body = normalizeRequestBody((ctx.request as any).body);
+      try {
+        const project = importEsp32AgentProject(
+          getBodyString(body, "bundleContent") || "",
+        );
+        ctx.body = {
+          ok: true,
+          project,
+        };
+      } catch (error) {
+        ctx.status = 400;
+        ctx.body = {
+          ok: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Failed to import ESP32 agent project.",
+        };
+      }
+    });
+
+    this.router.get("/api/esp32-agent/projects/:projectId", (ctx) => {
+      ctx.set("Cache-Control", "no-store");
+      try {
+        ctx.body = {
+          project: getEsp32AgentProject(String(ctx.params.projectId || "")),
+        };
+      } catch (error) {
+        ctx.status = 404;
+        ctx.body = {
+          ok: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : "ESP32 agent project not found.",
+        };
+      }
+    });
+
+    this.router.get("/api/esp32-agent/projects/:projectId/export", (ctx) => {
+      ctx.set("Cache-Control", "no-store");
+      try {
+        const exported = exportEsp32AgentProject(String(ctx.params.projectId || ""));
+        ctx.type = "application/json";
+        ctx.set(
+          "Content-Disposition",
+          `attachment; filename="${exported.fileName}"`,
+        );
+        ctx.body = exported.bundle;
+      } catch (error) {
+        ctx.status = 404;
+        ctx.body = {
+          ok: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Failed to export ESP32 agent project.",
+        };
+      }
+    });
+
+    this.router.post("/api/esp32-agent/projects/:projectId/settings", (ctx) => {
+      const body = normalizeRequestBody((ctx.request as any).body);
+      try {
+        const project = updateEsp32AgentProjectSettings({
+          projectId: String(ctx.params.projectId || ""),
+          agentModel: getBodyString(body, "agentModel") || undefined,
+        });
+        ctx.body = {
+          ok: true,
+          project,
+        };
+      } catch (error) {
+        ctx.status = 400;
+        ctx.body = {
+          ok: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Failed to update ESP32 agent project settings.",
+        };
+      }
+    });
+
+    this.router.get("/api/esp32-agent/projects/:projectId/tree", (ctx) => {
+      ctx.set("Cache-Control", "no-store");
+      try {
+        ctx.body = {
+          files: listEsp32AgentProjectFiles(String(ctx.params.projectId || "")),
+        };
+      } catch (error) {
+        ctx.status = 404;
+        ctx.body = {
+          ok: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Failed to load ESP32 agent project tree.",
+        };
+      }
+    });
+
+    this.router.get("/api/esp32-agent/projects/:projectId/checkpoints", (ctx) => {
+      ctx.set("Cache-Control", "no-store");
+      try {
+        ctx.body = {
+          checkpoints: listEsp32AgentProjectCheckpoints(
+            String(ctx.params.projectId || ""),
+          ),
+        };
+      } catch (error) {
+        ctx.status = 404;
+        ctx.body = {
+          ok: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Failed to load ESP32 agent savepoints.",
+        };
+      }
+    });
+
+    this.router.post("/api/esp32-agent/projects/:projectId/checkpoints", (ctx) => {
+      const body = normalizeRequestBody((ctx.request as any).body);
+      try {
+        const result = createEsp32AgentProjectCheckpoint({
+          projectId: String(ctx.params.projectId || ""),
+          label: getBodyString(body, "label") || undefined,
+          note: getBodyString(body, "note") || undefined,
+        });
+        ctx.body = {
+          ok: true,
+          project: result.project,
+          checkpoint: result.checkpoint,
+        };
+      } catch (error) {
+        ctx.status = 400;
+        ctx.body = {
+          ok: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Failed to create ESP32 agent savepoint.",
+        };
+      }
+    });
+
+    this.router.post(
+      "/api/esp32-agent/projects/:projectId/checkpoints/:checkpointId/restore",
+      (ctx) => {
+        try {
+          const result = restoreEsp32AgentProjectCheckpoint({
+            projectId: String(ctx.params.projectId || ""),
+            checkpointId: String(ctx.params.checkpointId || ""),
+          });
+          ctx.body = {
+            ok: true,
+            project: result.project,
+            checkpoint: result.checkpoint,
+          };
+        } catch (error) {
+          ctx.status = 400;
+          ctx.body = {
+            ok: false,
+            error:
+              error instanceof Error
+                ? error.message
+                : "Failed to restore ESP32 agent savepoint.",
+          };
+        }
+      },
+    );
+
+    this.router.get("/api/esp32-agent/projects/:projectId/file", (ctx) => {
+      ctx.set("Cache-Control", "no-store");
+      try {
+        const pathValue = String(ctx.query.path || "");
+        ctx.body = {
+          file: readEsp32AgentProjectFile({
+            projectId: String(ctx.params.projectId || ""),
+            relativePath: pathValue,
+          }),
+        };
+      } catch (error) {
+        ctx.status = 404;
+        ctx.body = {
+          ok: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Failed to read ESP32 agent project file.",
+        };
+      }
+    });
+
+    this.router.post("/api/esp32-agent/projects/:projectId/file", (ctx) => {
+      const body = normalizeRequestBody((ctx.request as any).body);
+      try {
+        const project = writeEsp32AgentProjectFile({
+          projectId: String(ctx.params.projectId || ""),
+          relativePath: getBodyString(body, "path") || "",
+          content: getBodyString(body, "content") || "",
+        });
+        ctx.body = {
+          ok: true,
+          project,
+        };
+      } catch (error) {
+        ctx.status = 400;
+        ctx.body = {
+          ok: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Failed to save ESP32 agent project file.",
+        };
+      }
+    });
+
+    this.router.get("/api/esp32-agent/projects/:projectId/error-log", (ctx) => {
+      ctx.set("Cache-Control", "no-store");
+      try {
+        ctx.body = {
+          content: readEsp32AgentProjectErrorLog(String(ctx.params.projectId || "")),
+        };
+      } catch (error) {
+        ctx.status = 404;
+        ctx.body = {
+          ok: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Failed to load ESP32 agent error log.",
+        };
+      }
+    });
+
+    this.router.post("/api/esp32-agent/projects/:projectId/error-log", (ctx) => {
+      const body = normalizeRequestBody((ctx.request as any).body);
+      try {
+        const project = writeEsp32AgentProjectErrorLog({
+          projectId: String(ctx.params.projectId || ""),
+          content: getBodyString(body, "content") || "",
+        });
+        ctx.body = {
+          ok: true,
+          project,
+        };
+      } catch (error) {
+        ctx.status = 400;
+        ctx.body = {
+          ok: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Failed to save ESP32 agent error log.",
+        };
+      }
     });
 
     this.router.get("/image", (ctx) => {
@@ -1000,6 +1324,7 @@ export class WebDisplayServer implements WebAudioBridgeServer {
       ctx.body = {
         settings: getPublicRuntimeSettings(),
         presets: getPersonalityPresets(settings.savedPersonalityPresets),
+        llmModelOptions: BOTNET_MODEL_OPTIONS,
         volumeLevelOptions: VOLUME_LEVEL_OPTIONS,
         scrollSpeedOptions: SCROLL_SPEED_OPTIONS,
         hatScrollSpeedOptions: HAT_SCROLL_SPEED_OPTIONS,
@@ -1016,6 +1341,7 @@ export class WebDisplayServer implements WebAudioBridgeServer {
         groqApiKey: getBodyString(body, "groqApiKey"),
         clearGroqApiKey: getBodyBoolean(body, "clearGroqApiKey"),
         geminiApiKey: getBodyString(body, "geminiApiKey"),
+        llmModel: getBodyString(body, "llmModel"),
         personalityPrompt: getBodyString(body, "personalityPrompt"),
         musicShuffle: getBodyBoolean(body, "musicShuffle"),
         volumeLevel: getBodyNumber(body, "volumeLevel"),
@@ -1046,6 +1372,7 @@ export class WebDisplayServer implements WebAudioBridgeServer {
         ok: true,
         settings: getPublicRuntimeSettings(),
         presets: getPersonalityPresets(settings.savedPersonalityPresets),
+        llmModelOptions: BOTNET_MODEL_OPTIONS,
         volumeLevelOptions: VOLUME_LEVEL_OPTIONS,
         scrollSpeedOptions: SCROLL_SPEED_OPTIONS,
         hatScrollSpeedOptions: HAT_SCROLL_SPEED_OPTIONS,
