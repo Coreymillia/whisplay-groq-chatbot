@@ -92,6 +92,7 @@ interface WebDisplayOptions {
   onTextInput?: TextInputHandler;
   onSettingsSaved?: (settings: RuntimeSettings) => void;
   onImageUploaded?: (imagePath: string) => void;
+  onCameraPreviewRequested?: () => { ok: boolean; message: string };
 }
 
 function normalizeBodyKey(key: string): string {
@@ -181,6 +182,7 @@ export class WebDisplayServer implements WebAudioBridgeServer {
   private wsClients = new Set<WebSocket>();
   private onSettingsSaved: (settings: RuntimeSettings) => void;
   private onImageUploaded: (imagePath: string) => void;
+  private onCameraPreviewRequested: () => { ok: boolean; message: string };
   private botNet = getBotNetManager();
 
   constructor(options: WebDisplayOptions) {
@@ -192,6 +194,12 @@ export class WebDisplayServer implements WebAudioBridgeServer {
     this.onTextInput = options.onTextInput || (() => {});
     this.onSettingsSaved = options.onSettingsSaved || (() => {});
     this.onImageUploaded = options.onImageUploaded || (() => {});
+    this.onCameraPreviewRequested =
+      options.onCameraPreviewRequested ||
+      (() => ({
+        ok: false,
+        message: "Camera preview is not available.",
+      }));
     this.app = new Koa();
     this.router = new Router();
     this.cameraFramePath = this.resolveCameraFramePath();
@@ -458,6 +466,12 @@ export class WebDisplayServer implements WebAudioBridgeServer {
         imageUrl: `/api/vision/image?ts=${Date.now()}`,
         fileName: path.basename(savedPath),
       };
+    });
+
+    this.router.post("/api/camera/preview/start", (ctx) => {
+      const result = this.onCameraPreviewRequested();
+      ctx.status = result.ok ? 200 : 409;
+      ctx.body = result;
     });
 
     this.router.get("/api/vision/analysis", (ctx) => {

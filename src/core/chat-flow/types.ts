@@ -56,6 +56,7 @@ export interface ChatFlowContext {
   shouldEndAfterAnswer: (text: string) => boolean;
   shouldOpenSettingsMenu: (text: string) => boolean;
   shutdownDevice: () => Promise<void>;
+  openCameraPreview: () => { ok: boolean; message: string };
   streamExternalReply: (
     text: string,
     emoji?: string,

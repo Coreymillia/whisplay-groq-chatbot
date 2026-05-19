@@ -298,6 +298,12 @@ const clearChatIntentPatterns = [
   /^\s*(?:new\s+chat|clear\s+chat|reset\s+chat|start\s+(?:a\s+)?new\s+chat)\s*[.!?]*$/i,
 ];
 
+const cameraPreviewIntentPatterns = [
+  /^\s*(?:live\s+preview|camera\s+preview)\s*[.!?]*$/i,
+  /^\s*(?:open|start|show)\s+(?:the\s+)?(?:live\s+|camera\s+)?preview\s*[.!?]*$/i,
+  /^\s*(?:open|start|show)\s+(?:the\s+)?camera\s*[.!?]*$/i,
+];
+
 const volumeUpIntentPatterns = [
   /^\s*(?:volume\s+up|turn\s+(?:the\s+)?volume\s+up|increase\s+(?:the\s+)?volume|louder)\s*[.!?]*$/i,
 ];
@@ -349,6 +355,14 @@ function shouldRouteToWeather(prompt: string): boolean {
     return false;
   }
   return weatherIntentPatterns.some((pattern) => pattern.test(trimmed));
+}
+
+function shouldOpenCameraPreview(prompt: string): boolean {
+  const trimmed = prompt.trim();
+  if (!trimmed) {
+    return false;
+  }
+  return cameraPreviewIntentPatterns.some((pattern) => pattern.test(trimmed));
 }
 
 function shouldRouteToImageGeneration(prompt: string): boolean {
@@ -721,16 +735,8 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
     const preserveLastReply =
       currentStatus.status === "last reply" && Boolean(currentStatus.text);
     onButtonDoubleClick(() => {
-      if (ctx.hasLastAnswer()) {
-        ctx.replayLastAnswer();
-        return;
-      }
       if (ctx.enableCamera) {
-        const captureImgPath = `${cameraDir}/capture-${moment().format(
-          "YYYYMMDD-HHmmss",
-        )}.jpg`;
-        enterCameraMode(captureImgPath);
-        ctx.transitionTo("camera");
+        ctx.openCameraPreview();
       }
     });
     onButtonPressed(() => {
@@ -759,7 +765,7 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
         ? {}
         : currentStatus.text.endsWith("Listening...") || !currentStatus.text
         ? {
-          text: `Long press to talk${ctx.hasLastAnswer() ? ",\ndouble press to replay" : ctx.enableCamera ? ",\ndouble press for camera" : ""
+          text: `Long press to talk${ctx.enableCamera ? ",\ndouble press for camera" : ""
             }.`,
         }
         : {}),
@@ -1372,6 +1378,16 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
       ctx.clearLastAnswer();
       clearPendingCapturedImgForChat();
       finishDirectMessage("Started a new chat.");
+      return;
+    }
+    if (shouldOpenCameraPreview(ctx.asrText)) {
+      stopPlaying();
+      clearPendingCapturedImgForChat();
+      display({ image_icon_visible: false });
+      const result = ctx.openCameraPreview();
+      if (!result.ok) {
+        finishDirectMessage(result.message);
+      }
       return;
     }
     const musicCommand = getMusicControlCommand(ctx.asrText);

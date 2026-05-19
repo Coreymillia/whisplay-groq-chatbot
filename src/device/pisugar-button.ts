@@ -99,16 +99,16 @@ export async function startPiSugarButtonSupport(): Promise<void> {
     },
     {
       command: `set_button_shell long /bin/bash ${longPressScript}`,
-      description: "Configured long press shutdown action",
-    },
-    {
-      command: "set_button_enable long 1",
-      description: "Enabled long press handler",
+      description: "Configured long press preview action",
     },
   ];
 
   if (webEnabled) {
     commands.push(
+      {
+        command: "set_button_enable long 1",
+        description: "Enabled long press preview handler",
+      },
       {
         command: `set_button_shell single /bin/bash ${shortPressScript}`,
         description: "Configured short press photo action",
@@ -119,10 +119,16 @@ export async function startPiSugarButtonSupport(): Promise<void> {
       },
     );
   } else {
-    commands.push({
-      command: "set_button_enable single 0",
-      description: "Disabled short press handler because web UI is off",
-    });
+    commands.push(
+      {
+        command: "set_button_enable long 0",
+        description: "Disabled long press preview handler because web UI is off",
+      },
+      {
+        command: "set_button_enable single 0",
+        description: "Disabled short press handler because web UI is off",
+      },
+    );
   }
 
   for (const entry of commands) {
@@ -135,6 +141,6 @@ export async function startPiSugarButtonSupport(): Promise<void> {
   }
 
   console.log(
-    `[PiSugar] Optional button support active for ${model}: short press = photo${webEnabled ? "" : " (disabled)"}; long press = shutdown.`,
+    `[PiSugar] Optional button support active for ${model}: short press = photo${webEnabled ? "" : " (disabled)"}; long press = live preview${webEnabled ? "" : " (disabled)"}.`,
   );
 }

@@ -96,6 +96,10 @@ export class WhisplayDisplay {
   private buttonDoubleClickCallback: (() => void) | null = null;
   private buttonDown = false;
   private onCameraCaptureCallback: () => void = () => {};
+  private cameraPreviewRequestCallback: () => { ok: boolean; message: string } = () => ({
+    ok: false,
+    message: "Camera preview is not available.",
+  });
   private textInputCallback: (text: string) => void = () => {};
   private isReady: Promise<void>;
   private pythonProcess: any; // Placeholder for Python process if needed
@@ -163,6 +167,7 @@ export class WhisplayDisplay {
             text: "[camera]Photo captured.",
           });
         },
+        onCameraPreviewRequested: () => this.handleCameraPreviewRequest(),
       });
       this.webDisplay.updateStatus(this.currentStatus);
     }
@@ -358,6 +363,12 @@ export class WhisplayDisplay {
 
   onCameraCapture(callback: () => void): void {
     this.onCameraCaptureCallback = callback;
+  }
+
+  onCameraPreviewRequested(
+    callback: () => { ok: boolean; message: string },
+  ): void {
+    this.cameraPreviewRequestCallback = callback;
   }
 
   onTextInput(callback: (text: string) => void): void {
@@ -564,6 +575,10 @@ export class WhisplayDisplay {
     this.onCameraCaptureCallback();
   }
 
+  private handleCameraPreviewRequest(): { ok: boolean; message: string } {
+    return this.cameraPreviewRequestCallback();
+  }
+
   private handleButtonDoubleClickEvent(): void {
     this.buttonDoubleClickCallback?.();
   }
@@ -763,6 +778,8 @@ export const onButtonDoubleClick =
   displayInstance.onButtonDoubleClick.bind(displayInstance);
 export const onCameraCapture =
   displayInstance.onCameraCapture.bind(displayInstance);
+export const onCameraPreviewRequested =
+  displayInstance.onCameraPreviewRequested.bind(displayInstance);
 export const onTextInput =
   displayInstance.onTextInput.bind(displayInstance);
 export const isButtonDown =

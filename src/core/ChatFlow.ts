@@ -1,3 +1,4 @@
+import moment from "moment";
 import {
   getCurrentTimeTag,
   getRecordFileDurationMs,
@@ -6,6 +7,7 @@ import {
 import {
   display,
   recordConversationTurn,
+  onCameraPreviewRequested,
 } from "../device/display";
 import { recognizeAudio, ttsProcessor } from "../cloud-api/server";
 import { isImMode } from "../cloud-api/llm";
@@ -24,11 +26,13 @@ import type { Status } from "../device/display";
 import { getRuntimeSettings } from "../config/runtime-settings";
 import { STATE_EMOJIS } from "../config/state-emojis";
 import { requestSystemShutdown } from "../device/system-control";
+import { cameraDir } from "../utils/dir";
 import {
   applySettingsMenuAction,
   buildSettingsMenuItems,
   renderSettingsMenu as renderSettingsMenuText,
 } from "./chat-flow/settings-menu";
+import { enterCameraMode } from "./chat-flow/camera-mode";
 
 dotEnv.config();
 
@@ -119,6 +123,7 @@ class ChatFlow implements ChatFlowContext {
     }
 
     this.transitionTo("sleep");
+    onCameraPreviewRequested(() => this.openCameraPreview());
 
     const wakeEnabled = (process.env.WAKE_WORD_ENABLED || "").toLowerCase();
     if (wakeEnabled === "true") {
@@ -404,6 +409,39 @@ class ChatFlow implements ChatFlowContext {
       console.error("Shutdown request failed:", error);
       this.renderSettingsMenu("Shutdown failed");
     }
+  };
+
+  openCameraPreview = (): { ok: boolean; message: string } => {
+    if (!this.enableCamera) {
+      return {
+        ok: false,
+        message: "Camera preview is not available.",
+      };
+    }
+    if (this.currentFlowName === "camera") {
+      return {
+        ok: true,
+        message: "Camera preview is already open.",
+      };
+    }
+
+    this.answerId += 1;
+    this.streamResponser.stop();
+    stopMusicPlayback();
+    this.endWakeSession();
+    this.shutdownConfirmArmed = false;
+    this.ignoreNextSettingsRelease = false;
+
+    const captureImgPath = `${cameraDir}/capture-${moment().format(
+      "YYYYMMDD-HHmmss",
+    )}.jpg`;
+    enterCameraMode(captureImgPath);
+    this.transitionTo("camera");
+
+    return {
+      ok: true,
+      message: "Opening live preview.",
+    };
   };
 
   consumeSettingsReleaseGuard = (): boolean => {

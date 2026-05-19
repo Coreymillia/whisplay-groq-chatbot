@@ -9,17 +9,9 @@ if /usr/bin/curl \
   --show-error \
   --max-time 20 \
   --request POST \
-  "http://${HOST}:${PORT}/api/system/shutdown" \
+  "http://${HOST}:${PORT}/api/camera/preview/start" \
   >/dev/null; then
   exit 0
 fi
 
-if command -v systemctl >/dev/null 2>&1; then
-  exec systemctl poweroff
-fi
-
-if command -v shutdown >/dev/null 2>&1; then
-  exec shutdown -h now
-fi
-
-exec poweroff
+exit 1
