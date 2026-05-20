@@ -59,9 +59,12 @@ This project starts from the official PiSugar Whisplay chatbot, but is being tai
 - **Companion Cardputer controls:** keyboard text send, message viewing, local setup portal, saved text sizes, and a split receive/send screen layout
 - **Experimental GroqBotNet mode:** optional browser-only controls in Whisplay for connecting to a second bot, testing the link, and starting limited same-network bot-to-bot conversations without replacing the normal Whisplay chatbot flow
 - **BotNet model selector:** Whisplay BotNet now has a curated Groq model dropdown in the browser plus a voice shortcut to jump to the next model on-device
+- **Expanded Groq model selector:** the shared browser / ESP32 Agent model selector now includes **Llama 3.1 8B**, **Llama 3.3 70B**, **Llama 4 Scout 17B 16E**, **Qwen3 32B**, **Groq Compound**, **Groq Compound Mini**, **GPT-OSS 20B**, and **GPT-OSS 120B**
 - **Persona Relay mode:** a new GroqBotNet mode where you tell your bot what to send, your local bot rewrites that prompt in character, and the peer bot replies once without falling into an endless loop
 - **Online GroqBotNet groundwork:** Whisplay and the standalone Zero node now both support an **Online Hub** transport with node registration, hub connect/disconnect, and invite create/redeem controls for relay-based internet testing
-- **ESP32 Agent workspace:** `/agent` now provides persistent sandbox projects, a file tree/editor, import/export bundles, savepoints, an Agent-only ESP32 coding personality, Pi-side USB serial-port detection, persistent per-project Agent chat, proposed file operations, and apply-to-sandbox with an automatic savepoint
+- **ESP32 Agent workspace:** `/agent` now provides persistent sandbox projects, a file tree/editor, import/export bundles, savepoints, separate coding and error-fix personalities, Pi-side USB serial-port detection, an in-browser terminal, persistent per-project Agent chat, proposed file operations, and apply-to-sandbox with an automatic savepoint
+- **Safer ESP32 Agent presets:** the Agent now includes **minimal CYD Starter** presets alongside the full Companion CYD presets, plus bot-side guardrails that lock `platformio.ini` from agent edits and reject empty source-file writes
+- **Room monitor gallery split:** the browser now exposes a dedicated **Room Monitor Gallery** with daily folders plus a separate **Saved Gallery** that moves selected files instead of copying them and supports fullscreen slideshow viewing
 
 ## ESP32 Agent workspace
 
@@ -78,14 +81,17 @@ The Pi-hosted browser UI now includes an **ESP32 Agent** page at **`/agent`**. T
 ### Current ESP32 Agent features
 
 - **Persistent sandbox projects:** create and reopen projects without losing work
-- **Preset templates:** initial support starts with **Companion CYD standard** and **Companion CYD inverted**
+- **Preset templates:** includes both **Companion CYD** presets and simpler **CYD Starter** presets for beginner display tasks like fill screen, text, lines, and basic shapes
 - **File system view:** browse and edit sandbox files directly in the browser
 - **Import / export:** move whole projects around as JSON project bundles
 - **Savepoints:** create, list, and restore exact workspace snapshots
 - **Saved error log:** keep the latest PlatformIO build or upload failure text with the project
-- **Agent-only personality:** separate editable ESP32 coding prompt, not shared with the normal chatbot personality
+- **Agent-only personalities:** separate editable ESP32 coding and error-fix prompts, not shared with the normal chatbot personality
 - **Agent chat + apply flow:** ask the coding agent for changes, review proposed file operations, then apply them into the sandbox with an automatic savepoint first
+- **Fix From Saved Error:** reuse the saved PlatformIO error text with the separate error-fix personality to generate a tighter repair proposal
+- **Browser terminal:** run build or upload commands inside the sandbox from the browser and inspect the output without leaving `/agent`
 - **USB serial detection:** the Pi can list detected serial ports for flashing, while board choice remains manual through the preset selector
+- **Guardrails for weak models:** the agent now treats `platformio.ini` as locked, blocks deletes of `src/main.cpp`, and rejects empty writes to source files
 
 ### Current workflow
 
@@ -94,20 +100,22 @@ The Pi-hosted browser UI now includes an **ESP32 Agent** page at **`/agent`**. T
 3. Edit files manually or ask the Agent to propose changes
 4. Review the proposed file operations
 5. Apply them into the sandbox
-6. Build or flash with the generated command, optionally using a saved detected USB serial port
+6. Build or flash with the generated command or the browser terminal, optionally using a saved detected USB serial port
 7. Paste any PlatformIO error output back into the project and iterate
 
 ### Current limitations
 
 - board detection is still **manual by preset**, even when the Pi can see a USB serial device
-- the agent currently proposes and applies file operations, but it is not yet a full terminal/build runner inside the browser
+- weaker free-tier models can still produce bad edits if the prompt is broad or the template is too complex
+- free-tier Groq token limits can be hit quickly when large build logs are pasted back into the agent, so the current best workflow is still to paste only the failing tail of the error
 - context is intentionally trimmed to the file tree plus prioritized key files so lower-token Groq models still work reliably
+- staying on the free tier for now may slow deeper coding-agent testing, so broader ESP32 Agent work may remain partially on hold until the current guardrails and starter templates prove themselves
 
 ### Proposed next ESP32 Agent direction
 
-- add a clearer **project details/history** view so users can resume later without leaving the tab open
-- add a more guided **build / flash workflow** around the existing commands and saved USB port selection
-- keep improving the Agent prompt and apply loop so debugging pasted build errors becomes faster and more reliable
+- keep improving the **CYD Starter** templates so simple display experiments are easier for weaker models to edit safely
+- keep tightening the Agent prompt and apply loop so debugging pasted build errors becomes faster and more reliable without damaging the project
+- revisit deeper coding-agent work after more real free-tier testing, since token-rate limits and weaker model behavior may still cap how far the current browser-first flow can go
 
 ### Future hardware targets
 

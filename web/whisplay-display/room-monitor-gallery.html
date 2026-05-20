@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Whisplay Room Monitor Gallery</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600&display=swap"
+    rel="stylesheet"
+  />
+  <link rel="stylesheet" href="/room-monitor-gallery.css" />
+</head>
+<body data-gallery-view="monitor">
+  <main class="gallery-shell">
+    <section class="gallery-card">
+      <div class="gallery-header">
+        <div>
+          <div class="gallery-title">Room Monitor Gallery</div>
+          <div class="gallery-subtitle">Browse captures by day, select photos in bulk, and move the keepers into the saved gallery.</div>
+        </div>
+        <div class="gallery-actions">
+          <a class="gallery-link secondary" href="/" target="_blank" rel="noopener">Main UI</a>
+          <a class="gallery-link secondary" href="/saved-gallery" target="_blank" rel="noopener">Open Saved Gallery</a>
+        </div>
+      </div>
+      <div class="gallery-toolbar">
+        <button class="gallery-button secondary" id="gallerySelectAllBtn" type="button">Select All on Day</button>
+        <button class="gallery-button secondary" id="galleryClearSelectionBtn" type="button">Clear Selection</button>
+        <button class="gallery-button" id="galleryMoveSelectedBtn" type="button">Move Selected to Saved Gallery</button>
+        <div class="gallery-status" id="gallerySavedCount">0 saved</div>
+      </div>
+      <div class="gallery-status" id="galleryStatus">Loading room monitor folders...</div>
+      <div class="gallery-meta" id="galleryMeta"></div>
+    </section>
+
+    <section class="gallery-layout">
+      <aside class="gallery-card gallery-sidebar" id="galleryDayList"></aside>
+      <section class="gallery-card gallery-main">
+        <div class="gallery-title-row">
+          <div class="gallery-title" id="galleryDayTitle">Room Monitor Day</div>
+        </div>
+        <div class="gallery-photo-grid" id="galleryPhotoGrid"></div>
+      </section>
+    </section>
+  </main>
+  <div class="gallery-viewer" id="galleryViewer">
+    <div class="gallery-viewer-panel">
+      <div class="gallery-viewer-toolbar">
+        <button class="gallery-button secondary" id="galleryViewerPrevBtn" type="button">Previous</button>
+        <button class="gallery-button secondary" id="galleryViewerNextBtn" type="button">Next</button>
+        <select class="gallery-select" id="slideshowInterval">
+          <option value="0.5">0.5s</option>
+          <option value="1">1.0s</option>
+          <option value="1.5">1.5s</option>
+          <option value="2">2.0s</option>
+          <option value="2.5">2.5s</option>
+          <option value="3">3.0s</option>
+          <option value="3.5">3.5s</option>
+          <option value="4">4.0s</option>
+          <option value="4.5">4.5s</option>
+          <option value="5">5.0s</option>
+        </select>
+        <button class="gallery-button" id="slideshowToggleBtn" type="button">Start Slideshow</button>
+        <button class="gallery-button secondary" id="galleryViewerCloseBtn" type="button">Close</button>
+      </div>
+      <img class="gallery-viewer-image" id="galleryViewerImage" alt="" />
+      <div class="gallery-viewer-caption" id="galleryViewerCaption"></div>
+    </div>
+  </div>
+  <script src="/room-monitor-gallery.js"></script>
+</body>
+</html>

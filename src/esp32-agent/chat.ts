@@ -25,6 +25,35 @@ export interface Esp32AgentProposalResponse {
 
 export type Esp32AgentChatMode = "general" | "error_fix";
 
+const AGENT_LOCKED_PATHS = new Set(["platformio.ini"]);
+const AGENT_NON_DELETABLE_PATHS = new Set(["platformio.ini", "src/main.cpp"]);
+const NON_EMPTY_SOURCE_EXTENSIONS = new Set([
+  ".ino",
+  ".c",
+  ".cc",
+  ".cpp",
+  ".h",
+  ".hpp",
+]);
+
+function normalizeOperationPath(value: string): string {
+  return value.trim().replace(/\\/g, "/").replace(/^\/+/, "");
+}
+
+function isAgentLockedPath(relativePath: string): boolean {
+  return AGENT_LOCKED_PATHS.has(normalizeOperationPath(relativePath));
+}
+
+function isAgentProtectedDeletePath(relativePath: string): boolean {
+  return AGENT_NON_DELETABLE_PATHS.has(normalizeOperationPath(relativePath));
+}
+
+function requiresNonEmptyContent(relativePath: string): boolean {
+  return NON_EMPTY_SOURCE_EXTENSIONS.has(
+    relativePath.slice(relativePath.lastIndexOf(".")).toLowerCase(),
+  );
+}
+
 function sanitizeOperation(
   operation: Partial<Esp32AgentProposedOperation>,
 ): Esp32AgentProposedOperation | null {
@@ -46,17 +75,34 @@ function sanitizeOperation(
       ? operation.summary.trim().slice(0, 240)
       : type === "delete_file"
         ? "Delete file"
-        : "Write file";
+      : "Write file";
+  if (isAgentLockedPath(normalizedPath)) {
+    return null;
+  }
+  if (type === "delete_file" && isAgentProtectedDeletePath(normalizedPath)) {
+    return null;
+  }
+  const content = type === "write_file" ? String(operation.content || "") : undefined;
+  if (
+    type === "write_file" &&
+    requiresNonEmptyContent(normalizedPath) &&
+    !(content || "").trim()
+  ) {
+    return null;
+  }
   return {
     type,
     path: normalizedPath,
-    content:
-      type === "write_file" ? String(operation.content || "") : undefined,
+    content,
     summary,
   };
 }
 
-function buildWorkspaceContext(projectId: string, userPrompt: string): string {
+function buildWorkspaceContext(
+  projectId: string,
+  userPrompt: string,
+  mode: Esp32AgentChatMode,
+): string {
   const project = getEsp32AgentProject(projectId);
   const files = listEsp32AgentProjectWorkspaceTextFiles(projectId);
   const normalizedPrompt = userPrompt.toLowerCase();
@@ -76,17 +122,17 @@ function buildWorkspaceContext(projectId: string, userPrompt: string): string {
       };
       return score(right) - score(left);
     })
-    .slice(0, 8);
+    .slice(0, mode === "error_fix" ? 4 : 6);
 
   const selectedFileChunks = [];
   let totalChars = 0;
   for (const file of prioritizedFiles) {
     const trimmedContent =
-      file.content.length > 6000
-        ? `${file.content.slice(0, 6000)}\n[truncated]`
+      file.content.length > 4500
+        ? `${file.content.slice(0, 4500)}\n[truncated]`
         : file.content;
     const nextChunk = `FILE: ${file.path}\n${trimmedContent}\n`;
-    if (totalChars + nextChunk.length > 30000) {
+    if (totalChars + nextChunk.length > (mode === "error_fix" ? 12000 : 18000)) {
       break;
     }
     selectedFileChunks.push(nextChunk);
@@ -94,7 +140,9 @@ function buildWorkspaceContext(projectId: string, userPrompt: string): string {
   }
 
   const errorLog = readEsp32AgentProjectErrorLog(projectId);
-  const chatHistory = listEsp32AgentProjectChatMessages(projectId).slice(-12);
+  const trimmedErrorLog =
+    errorLog.length > 3500 ? `${errorLog.slice(errorLog.length - 3500)}` : errorLog;
+  const chatHistory = listEsp32AgentProjectChatMessages(projectId).slice(-6);
 
   return [
     `Project name: ${project.name}`,
@@ -111,13 +159,18 @@ function buildWorkspaceContext(projectId: string, userPrompt: string): string {
       : "(none)",
     "",
     "Saved PlatformIO error log:",
-    errorLog.trim() || "(none)",
+    trimmedErrorLog.trim() || "(none)",
     "",
     "Workspace file tree:",
     files.map((file) => file.path).join("\n"),
     "",
     "Selected file contents:",
     selectedFileChunks.length ? selectedFileChunks.join("\n---\n") : "(none selected)",
+    "",
+    "Agent guardrails:",
+    "- platformio.ini is locked for agent-generated edits",
+    "- src/main.cpp must never be deleted or replaced with empty content",
+    "- prefer targeted edits to existing display logic over full rewrites",
   ].join("\n");
 }
 
@@ -168,7 +221,7 @@ export async function generateEsp32AgentProposal(input: {
       },
       {
         role: "system",
-        content: buildWorkspaceContext(input.projectId, prompt),
+        content: buildWorkspaceContext(input.projectId, prompt, mode),
       },
       {
         role: "user",

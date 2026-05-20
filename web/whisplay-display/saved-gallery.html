@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Whisplay Saved Gallery</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600&display=swap"
+    rel="stylesheet"
+  />
+  <link rel="stylesheet" href="/room-monitor-gallery.css" />
+</head>
+<body data-gallery-view="saved">
+  <main class="gallery-shell">
+    <section class="gallery-card">
+      <div class="gallery-header">
+        <div>
+          <div class="gallery-title">Saved Gallery</div>
+          <div class="gallery-subtitle">Open a photo fullscreen, then start a slideshow with 0.5 second interval steps.</div>
+        </div>
+        <div class="gallery-actions">
+          <a class="gallery-link secondary" href="/" target="_blank" rel="noopener">Main UI</a>
+          <a class="gallery-link secondary" href="/room-monitor-gallery" target="_blank" rel="noopener">Open Monitor Gallery</a>
+        </div>
+      </div>
+      <div class="gallery-status" id="galleryStatus">Loading saved gallery...</div>
+      <div class="gallery-meta" id="galleryMeta"></div>
+      <div class="gallery-toolbar">
+        <button class="gallery-button secondary" id="gallerySelectAllBtn" type="button">Select All</button>
+        <button class="gallery-button secondary" id="galleryClearSelectionBtn" type="button">Clear</button>
+        <button class="gallery-button" id="galleryMoveSelectedBtn" type="button">Move</button>
+        <div class="gallery-status" id="gallerySavedCount">Saved</div>
+      </div>
+    </section>
+
+    <section class="gallery-card gallery-main">
+      <div class="gallery-title-row">
+        <div class="gallery-title" id="galleryDayTitle">Saved Gallery</div>
+      </div>
+      <div class="gallery-photo-grid" id="galleryPhotoGrid"></div>
+    </section>
+  </main>
+  <div class="gallery-viewer" id="galleryViewer">
+    <div class="gallery-viewer-panel">
+      <div class="gallery-viewer-toolbar">
+        <button class="gallery-button secondary" id="galleryViewerPrevBtn" type="button">Previous</button>
+        <button class="gallery-button secondary" id="galleryViewerNextBtn" type="button">Next</button>
+        <select class="gallery-select" id="slideshowInterval">
+          <option value="0.5">0.5s</option>
+          <option value="1">1.0s</option>
+          <option value="1.5">1.5s</option>
+          <option value="2">2.0s</option>
+          <option value="2.5">2.5s</option>
+          <option value="3">3.0s</option>
+          <option value="3.5">3.5s</option>
+          <option value="4">4.0s</option>
+          <option value="4.5">4.5s</option>
+          <option value="5">5.0s</option>
+        </select>
+        <button class="gallery-button" id="slideshowToggleBtn" type="button">Start Slideshow</button>
+        <button class="gallery-button secondary" id="galleryViewerCloseBtn" type="button">Close</button>
+      </div>
+      <img class="gallery-viewer-image" id="galleryViewerImage" alt="" />
+      <div class="gallery-viewer-caption" id="galleryViewerCaption"></div>
+    </div>
+  </div>
+  <script src="/room-monitor-gallery.js"></script>
+</body>
+</html>

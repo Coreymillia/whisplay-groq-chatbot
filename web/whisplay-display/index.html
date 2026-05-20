@@ -663,16 +663,21 @@
                 <div class="field-label saved-photos-title">Monitor Gallery</div>
                 <div class="field-hint saved-photos-subtitle" id="roomMonitorStatus">Loading room monitor gallery...</div>
               </div>
-              <button
-                class="button secondary compact"
-                id="roomMonitorToggleBtn"
-                type="button"
-              >
-                Gallery
-              </button>
+              <div class="settings-actions" style="margin-top:0;">
+                <button
+                  class="button secondary compact"
+                  id="roomMonitorToggleBtn"
+                  type="button"
+                >
+                  Open Monitor Gallery
+                </button>
+                <a class="button secondary compact" href="/saved-gallery" target="_blank" rel="noopener">
+                  Open Saved Gallery
+                </a>
+              </div>
             </div>
             <div class="field-hint" style="margin-bottom:12px;">
-              Auto-captures follow the selected camera source and trim the oldest room-monitor images first whenever the Pi needs to keep 8 GB free on the SD card.
+              Auto-captures follow the selected camera source. Open the monitor gallery in a new tab to browse daily folders and move chosen photos into the saved gallery.
             </div>
             <div id="roomMonitorGalleryList" class="saved-photos-grid"></div>
           </div>

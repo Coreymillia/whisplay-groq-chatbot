@@ -76,7 +76,12 @@ import {
   applyRoomMonitorSettings,
   getRoomMonitorCapturePath,
   getRoomMonitorStatus,
+  getSavedRoomMonitorCapturePath,
+  listRoomMonitorCaptureDays,
   listRoomMonitorCaptures,
+  listRoomMonitorCapturesForDay,
+  listSavedRoomMonitorCaptures,
+  moveRoomMonitorCapturesToSaved,
 } from "./room-monitor";
 import {
   createEsp32AgentProjectCheckpoint,
@@ -377,6 +382,18 @@ export class WebDisplayServer implements WebAudioBridgeServer {
       ctx.set("Cache-Control", "no-store");
       ctx.type = "text/html";
       ctx.body = fs.createReadStream(path.join(staticRoot, "agent.html"));
+    });
+
+    this.router.get("/room-monitor-gallery", (ctx) => {
+      ctx.set("Cache-Control", "no-store");
+      ctx.type = "text/html";
+      ctx.body = fs.createReadStream(path.join(staticRoot, "room-monitor-gallery.html"));
+    });
+
+    this.router.get("/saved-gallery", (ctx) => {
+      ctx.set("Cache-Control", "no-store");
+      ctx.type = "text/html";
+      ctx.body = fs.createReadStream(path.join(staticRoot, "saved-gallery.html"));
     });
 
     this.router.get("/api/esp32-agent/presets", (ctx) => {
@@ -1047,6 +1064,76 @@ export class WebDisplayServer implements WebAudioBridgeServer {
       };
     });
 
+    this.router.get("/api/room-monitor/gallery/days", (ctx) => {
+      ctx.set("Cache-Control", "no-store");
+      const days = listRoomMonitorCaptureDays().map((day) => ({
+        dayKey: day.dayKey,
+        label: day.label,
+        count: day.count,
+        updatedAt: day.updatedAt,
+        totalSizeBytes: day.totalSizeBytes,
+        coverImageUrl: `/api/room-monitor/photos/image/${encodeURIComponent(day.coverFileName)}`,
+      }));
+      ctx.body = {
+        days,
+        status: getRoomMonitorStatus(),
+      };
+    });
+
+    this.router.get("/api/room-monitor/gallery/day/:dayKey", (ctx) => {
+      ctx.set("Cache-Control", "no-store");
+      try {
+        const photos = listRoomMonitorCapturesForDay(String(ctx.params.dayKey || "")).map(
+          (photo) => ({
+            fileName: photo.fileName,
+            imageUrl: `/api/room-monitor/photos/image/${encodeURIComponent(photo.fileName)}`,
+            updatedAt: photo.updatedAt,
+            sizeBytes: photo.sizeBytes,
+          }),
+        );
+        ctx.body = {
+          photos,
+          dayKey: String(ctx.params.dayKey || ""),
+        };
+      } catch (error) {
+        ctx.status = 400;
+        ctx.body = {
+          ok: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Failed to load room monitor day gallery.",
+        };
+      }
+    });
+
+    this.router.post("/api/room-monitor/gallery/move", (ctx) => {
+      const rawBody = (ctx.request as any).body;
+      const fileNames = Array.isArray(rawBody?.fileNames)
+        ? rawBody.fileNames.filter((entry: unknown): entry is string => typeof entry === "string")
+        : [];
+      try {
+        const result = moveRoomMonitorCapturesToSaved(fileNames);
+        ctx.body = {
+          ok: true,
+          moved: result.moved,
+          skipped: result.skipped,
+          days: listRoomMonitorCaptureDays(),
+          savedCount: listSavedRoomMonitorCaptures().length,
+          status: getRoomMonitorStatus(),
+        };
+      } catch (error) {
+        ctx.status = 400;
+        ctx.body = {
+          ok: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Failed to move room monitor photos.",
+        };
+      }
+    });
+
     this.router.get("/api/room-monitor/photos/image/:fileName", (ctx) => {
       ctx.set("Cache-Control", "no-store");
       const fileName = decodeURIComponent(String(ctx.params.fileName || ""));
@@ -1054,6 +1141,33 @@ export class WebDisplayServer implements WebAudioBridgeServer {
       if (!photoPath) {
         ctx.status = 404;
         ctx.body = "Room monitor photo not found";
+        return;
+      }
+      ctx.type = getImageMimeType(photoPath);
+      ctx.body = fs.createReadStream(photoPath);
+    });
+
+    this.router.get("/api/room-monitor/saved", (ctx) => {
+      ctx.set("Cache-Control", "no-store");
+      const photos = listSavedRoomMonitorCaptures().map((photo) => ({
+        fileName: photo.fileName,
+        imageUrl: `/api/room-monitor/saved/image/${encodeURIComponent(photo.fileName)}`,
+        updatedAt: photo.updatedAt,
+        sizeBytes: photo.sizeBytes,
+      }));
+      ctx.body = {
+        photos,
+        status: getRoomMonitorStatus(),
+      };
+    });
+
+    this.router.get("/api/room-monitor/saved/image/:fileName", (ctx) => {
+      ctx.set("Cache-Control", "no-store");
+      const fileName = decodeURIComponent(String(ctx.params.fileName || ""));
+      const photoPath = getSavedRoomMonitorCapturePath(fileName);
+      if (!photoPath) {
+        ctx.status = 404;
+        ctx.body = "Saved gallery photo not found";
         return;
       }
       ctx.type = getImageMimeType(photoPath);

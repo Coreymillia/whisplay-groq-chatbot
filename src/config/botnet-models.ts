@@ -13,8 +13,16 @@ export const BOTNET_MODEL_OPTIONS: BotNetModelOption[] = [
     label: "Llama 3.3 70B Versatile",
   },
   {
+    id: "meta-llama/llama-4-scout-17b-16e-instruct",
+    label: "Llama 4 Scout 17B 16E",
+  },
+  {
     id: "qwen/qwen3-32b",
     label: "Qwen 3 32B",
+  },
+  {
+    id: "groq/compound",
+    label: "Groq Compound",
   },
   {
     id: "groq/compound-mini",
@@ -23,6 +31,10 @@ export const BOTNET_MODEL_OPTIONS: BotNetModelOption[] = [
   {
     id: "openai/gpt-oss-20b",
     label: "GPT-OSS 20B",
+  },
+  {
+    id: "openai/gpt-oss-120b",
+    label: "GPT-OSS 120B",
   },
 ];
 

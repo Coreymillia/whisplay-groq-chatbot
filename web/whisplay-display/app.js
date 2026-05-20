@@ -136,8 +136,7 @@ let showAllSavedPhotos = false;
 let savedChatHistories = [];
 let screenBlankTimeoutOptions = [];
 let roomMonitorIntervalOptions = [];
-let roomMonitorPhotos = [];
-let showAllRoomMonitorPhotos = false;
+let roomMonitorDays = [];
 let roomMonitorGalleryState = null;
 let musicTracks = [];
 let botNetState = null;
@@ -1680,101 +1679,77 @@ function renderRoomMonitorPhotos(status = null) {
   if (!roomMonitorGalleryList) return;
   roomMonitorGalleryList.innerHTML = "";
 
-  if (!roomMonitorPhotos.length) {
+  if (!roomMonitorDays.length) {
     const intervalLabel = formatRoomMonitorIntervalLabel(currentStatus?.intervalSec || 0);
     const captureMessage = currentStatus?.enabled
-      ? `Auto capture ${intervalLabel}. No room monitor images yet.`
-      : "Room monitor is off. No room monitor images yet.";
+      ? `Auto capture ${intervalLabel}. No room monitor day folders yet.`
+      : "Room monitor is off. No room monitor day folders yet.";
     setRoomMonitorGalleryStatus(
       currentStatus?.lastError ? `${captureMessage} Last error: ${currentStatus.lastError}` : captureMessage,
       Boolean(currentStatus?.lastError),
     );
     const empty = document.createElement("div");
     empty.className = "saved-photos-empty";
-    empty.textContent = "No room monitor images yet.";
+    empty.textContent = "Open Monitor Gallery to browse daily folders after captures are created.";
     roomMonitorGalleryList.appendChild(empty);
-    if (roomMonitorToggleBtn) {
-      roomMonitorToggleBtn.disabled = true;
-      roomMonitorToggleBtn.textContent = "Gallery";
-    }
     return;
   }
 
-  const visiblePhotos = showAllRoomMonitorPhotos
-    ? roomMonitorPhotos
-    : roomMonitorPhotos.slice(0, 4);
   const usageLabel = `${formatBytes(currentStatus?.totalSizeBytes || 0)} used`;
   const freeSpaceLabel = `${formatBytes(currentStatus?.freeSpaceBytes || 0)} free`;
   const reserveLabel = `keeps ${formatBytes(currentStatus?.freeSpaceReserveBytes || 0)} open`;
   const intervalLabel = formatRoomMonitorIntervalLabel(currentStatus?.intervalSec || 0);
-  let summary = `${currentStatus?.enabled ? `Auto ${intervalLabel}` : "Auto off"} · ${roomMonitorPhotos.length} image${roomMonitorPhotos.length === 1 ? "" : "s"} · ${usageLabel} · ${freeSpaceLabel} · ${reserveLabel}`;
+  let summary = `${currentStatus?.enabled ? `Auto ${intervalLabel}` : "Auto off"} · ${roomMonitorDays.length} day folder${roomMonitorDays.length === 1 ? "" : "s"} · ${currentStatus?.totalCount || 0} image${currentStatus?.totalCount === 1 ? "" : "s"} · ${usageLabel} · ${freeSpaceLabel} · ${reserveLabel}`;
   if (currentStatus?.captureInProgress) {
     summary += " · Capturing now";
   } else if (currentStatus?.lastCaptureAt) {
     summary += ` · Last capture ${new Date(currentStatus.lastCaptureAt).toLocaleString()}`;
   }
+  if (currentStatus?.savedCount) {
+    summary += ` · ${currentStatus.savedCount} saved`;
+  }
   if (currentStatus?.lastError) {
     summary += ` · Last error: ${currentStatus.lastError}`;
   }
   setRoomMonitorGalleryStatus(summary, Boolean(currentStatus?.lastError));
-  if (roomMonitorToggleBtn) {
-    roomMonitorToggleBtn.disabled = roomMonitorPhotos.length <= 4;
-    roomMonitorToggleBtn.textContent =
-      roomMonitorPhotos.length <= 4
-        ? "Gallery"
-        : showAllRoomMonitorPhotos
-          ? "Recent Only"
-          : `Gallery (${roomMonitorPhotos.length})`;
-  }
 
-  for (const photo of visiblePhotos) {
+  for (const day of roomMonitorDays.slice(0, 4)) {
     const card = document.createElement("div");
     card.className = "saved-photo-card";
 
     const img = document.createElement("img");
-    img.src = `${photo.imageUrl}?ts=${photo.updatedAt}`;
-    img.alt = photo.fileName;
+    img.src = `${day.coverImageUrl}?ts=${day.updatedAt}`;
+    img.alt = day.label;
 
     const label = document.createElement("div");
     label.className = "saved-photo-name";
-    label.textContent = photo.fileName;
+    label.textContent = day.label;
 
     const meta = document.createElement("div");
     meta.className = "saved-photo-meta";
-    meta.textContent = `${new Date(photo.updatedAt).toLocaleString()} · ${formatBytes(photo.sizeBytes)}`;
-
-    const actions = document.createElement("div");
-    actions.className = "saved-photo-actions";
-
-    const downloadLink = document.createElement("a");
-    downloadLink.className = "button compact saved-photo-download";
-    downloadLink.textContent = "Download";
-    downloadLink.href = photo.imageUrl;
-    downloadLink.download = photo.fileName;
+    meta.textContent = `${day.count} photo${day.count === 1 ? "" : "s"} · ${formatBytes(day.totalSizeBytes)}`;
 
     card.appendChild(img);
     card.appendChild(label);
     card.appendChild(meta);
-    actions.appendChild(downloadLink);
-    card.appendChild(actions);
     roomMonitorGalleryList.appendChild(card);
   }
 }
 
 async function loadRoomMonitorPhotos() {
   try {
-    const response = await fetch(`/api/room-monitor/photos?ts=${Date.now()}`, {
+    const response = await fetch(`/api/room-monitor/gallery/days?ts=${Date.now()}`, {
       cache: "no-store",
     });
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
     }
     const payload = await response.json();
-    roomMonitorPhotos = Array.isArray(payload.photos) ? payload.photos : [];
+    roomMonitorDays = Array.isArray(payload.days) ? payload.days : [];
     renderRoomMonitorPhotos(payload.status || null);
   } catch (error) {
     console.error("Failed to load room monitor gallery:", error);
-    roomMonitorPhotos = [];
+    roomMonitorDays = [];
     roomMonitorGalleryState = null;
     renderRoomMonitorPhotos(null);
     setRoomMonitorGalleryStatus("Failed to load room monitor gallery.", true);
@@ -2422,11 +2397,7 @@ if (savedPhotosToggleBtn) {
 
 if (roomMonitorToggleBtn) {
   roomMonitorToggleBtn.addEventListener("click", () => {
-    if (roomMonitorPhotos.length <= 4) {
-      return;
-    }
-    showAllRoomMonitorPhotos = !showAllRoomMonitorPhotos;
-    renderRoomMonitorPhotos();
+    window.open("/room-monitor-gallery", "_blank", "noopener");
   });
 }
 

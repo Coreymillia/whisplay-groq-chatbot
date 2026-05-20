@@ -129,6 +129,37 @@ const DEFAULT_EXCLUDED_ENTRIES = new Set([
 
 const PRESET_DEFINITIONS: Esp32AgentPresetDefinition[] = [
   {
+    id: "cyd-basic-inverted",
+    name: "CYD Starter (Inverted Display)",
+    description:
+      "Minimal CYD starter for display experiments such as fill screen, text, and simple shapes.",
+    boardFamily: "cyd",
+    displayProfile: "inverted",
+    templateSourcePath: "ESP32AgentTemplates/CYDStarter/INVERTEDdisplay",
+    buildCommandTemplate: 'pio run -d "{{workspacePath}}"',
+    uploadCommandTemplate: 'pio run -d "{{workspacePath}}" -t upload',
+    notes: [
+      "Best for simple chatbot edits and beginner experiments.",
+      "Keeps only the display setup, starter text, and a few drawing primitives.",
+    ],
+  },
+  {
+    id: "cyd-basic-standard",
+    name: "CYD Starter (Standard Display)",
+    description:
+      "Minimal CYD starter for display experiments without the full Companion app logic.",
+    boardFamily: "cyd",
+    displayProfile: "standard",
+    templateSourcePath: "ESP32AgentTemplates/CYDStarter",
+    buildCommandTemplate: 'pio run -d "{{workspacePath}}"',
+    uploadCommandTemplate: 'pio run -d "{{workspacePath}}" -t upload',
+    notes: [
+      "Best for simple chatbot edits and beginner experiments.",
+      "Starts with fill screen, starter text, and simple line/rectangle drawing.",
+    ],
+    excludedEntries: ["INVERTEDdisplay"],
+  },
+  {
     id: "cyd-inverted",
     name: "Companion CYD (Inverted Display)",
     description:

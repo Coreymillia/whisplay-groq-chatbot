@@ -46,6 +46,9 @@ ensureDirExists(cameraDir);
 export const roomMonitorDir = path.join(dataDir, "room_monitor");
 ensureDirExists(roomMonitorDir);
 
+export const roomMonitorSavedDir = path.join(dataDir, "room_monitor_saved");
+ensureDirExists(roomMonitorSavedDir);
+
 export const cameraFeedDir = path.join(dataDir, "camera_feed");
 ensureDirExists(cameraFeedDir);
 

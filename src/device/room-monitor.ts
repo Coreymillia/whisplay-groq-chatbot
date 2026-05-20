@@ -2,9 +2,10 @@ import fs from "fs";
 import path from "path";
 import { captureCameraImage } from "./camera-daemon";
 import { getRuntimeSettings, type RuntimeSettings } from "../config/runtime-settings";
-import { roomMonitorDir } from "../utils/dir";
+import { roomMonitorDir, roomMonitorSavedDir } from "../utils/dir";
 
 const ROOM_MONITOR_FREE_SPACE_RESERVE_BYTES = 8 * 1024 * 1024 * 1024;
+const ROOM_MONITOR_DAY_KEY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 let captureTimer: NodeJS.Timeout | null = null;
 let captureInProgress = false;
@@ -19,15 +20,24 @@ export interface RoomMonitorCapture {
   sizeBytes: number;
 }
 
-function readRoomMonitorImagesOldestFirst(): RoomMonitorCapture[] {
-  if (!fs.existsSync(roomMonitorDir)) {
+export interface RoomMonitorCaptureDay {
+  dayKey: string;
+  label: string;
+  count: number;
+  updatedAt: number;
+  totalSizeBytes: number;
+  coverFileName: string;
+}
+
+function readCapturesFromDirOldestFirst(dirPath: string): RoomMonitorCapture[] {
+  if (!fs.existsSync(dirPath)) {
     return [];
   }
 
-  return fs.readdirSync(roomMonitorDir)
+  return fs.readdirSync(dirPath)
     .filter((file) => /\.(jpg|jpeg|png|webp|gif)$/i.test(file))
     .map((fileName) => {
-      const imagePath = path.join(roomMonitorDir, fileName);
+      const imagePath = path.join(dirPath, fileName);
       const stats = fs.statSync(imagePath);
       return {
         fileName,
@@ -37,6 +47,54 @@ function readRoomMonitorImagesOldestFirst(): RoomMonitorCapture[] {
       };
     })
     .sort((a, b) => a.updatedAt - b.updatedAt);
+}
+
+function formatLocalDayKey(timestamp: number): string {
+  const date = new Date(timestamp);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function formatDayLabel(dayKey: string): string {
+  const [year, month, day] = dayKey.split("-").map((value) => parseInt(value, 10));
+  const date = new Date(year, month - 1, day);
+  if (Number.isNaN(date.getTime())) {
+    return dayKey;
+  }
+  return date.toLocaleDateString(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function groupCapturesByDay(captures: RoomMonitorCapture[]): RoomMonitorCaptureDay[] {
+  const dayMap = new Map<string, RoomMonitorCaptureDay>();
+  for (const capture of captures) {
+    const dayKey = formatLocalDayKey(capture.updatedAt);
+    const existing = dayMap.get(dayKey);
+    if (existing) {
+      existing.count += 1;
+      existing.totalSizeBytes += capture.sizeBytes;
+      if (capture.updatedAt > existing.updatedAt) {
+        existing.updatedAt = capture.updatedAt;
+        existing.coverFileName = capture.fileName;
+      }
+      continue;
+    }
+    dayMap.set(dayKey, {
+      dayKey,
+      label: formatDayLabel(dayKey),
+      count: 1,
+      updatedAt: capture.updatedAt,
+      totalSizeBytes: capture.sizeBytes,
+      coverFileName: capture.fileName,
+    });
+  }
+  return [...dayMap.values()].sort((left, right) => right.updatedAt - left.updatedAt);
 }
 
 function clearRoomMonitorTimer(): void {
@@ -57,7 +115,7 @@ function getAvailableFreeSpaceBytes(): number {
 }
 
 function ensureStorageReserve(): void {
-  const captures = readRoomMonitorImagesOldestFirst();
+  const captures = readCapturesFromDirOldestFirst(roomMonitorDir);
   let freeSpaceBytes = getAvailableFreeSpaceBytes();
   for (const capture of captures) {
     if (freeSpaceBytes >= ROOM_MONITOR_FREE_SPACE_RESERVE_BYTES) {
@@ -83,6 +141,32 @@ function scheduleNextCapture(): void {
   captureTimer = setTimeout(() => {
     void captureRoomMonitorImage();
   }, captureIntervalSec * 1000);
+}
+
+function getSafePathFromDir(dirPath: string, fileName: string): string {
+  const safeFileName = path.basename(fileName || "");
+  if (!safeFileName) {
+    return "";
+  }
+  const imagePath = path.resolve(dirPath, safeFileName);
+  if (!imagePath.startsWith(path.resolve(dirPath) + path.sep)) {
+    return "";
+  }
+  if (!fs.existsSync(imagePath)) {
+    return "";
+  }
+  return imagePath;
+}
+
+function createUniqueSavedPath(fileName: string): string {
+  const parsed = path.parse(path.basename(fileName));
+  let candidateName = `${parsed.name}${parsed.ext}`;
+  let counter = 1;
+  while (fs.existsSync(path.join(roomMonitorSavedDir, candidateName))) {
+    candidateName = `${parsed.name}-${counter}${parsed.ext}`;
+    counter += 1;
+  }
+  return path.join(roomMonitorSavedDir, candidateName);
 }
 
 export async function captureRoomMonitorImage(): Promise<void> {
@@ -121,22 +205,55 @@ export function startRoomMonitor(): void {
 }
 
 export function listRoomMonitorCaptures(): RoomMonitorCapture[] {
-  return readRoomMonitorImagesOldestFirst().reverse();
+  return readCapturesFromDirOldestFirst(roomMonitorDir).reverse();
+}
+
+export function listRoomMonitorCaptureDays(): RoomMonitorCaptureDay[] {
+  return groupCapturesByDay(listRoomMonitorCaptures());
+}
+
+export function listRoomMonitorCapturesForDay(dayKey: string): RoomMonitorCapture[] {
+  const normalizedDayKey = dayKey.trim();
+  if (!ROOM_MONITOR_DAY_KEY_PATTERN.test(normalizedDayKey)) {
+    throw new Error("Invalid room monitor day.");
+  }
+  return listRoomMonitorCaptures().filter(
+    (capture) => formatLocalDayKey(capture.updatedAt) === normalizedDayKey,
+  );
+}
+
+export function moveRoomMonitorCapturesToSaved(fileNames: string[]): {
+  moved: Array<{ fromFileName: string; savedFileName: string }>;
+  skipped: string[];
+} {
+  const moved: Array<{ fromFileName: string; savedFileName: string }> = [];
+  const skipped: string[] = [];
+  for (const fileName of fileNames) {
+    const sourcePath = getRoomMonitorCapturePath(fileName);
+    if (!sourcePath) {
+      skipped.push(fileName);
+      continue;
+    }
+    const destinationPath = createUniqueSavedPath(fileName);
+    fs.renameSync(sourcePath, destinationPath);
+    moved.push({
+      fromFileName: path.basename(fileName),
+      savedFileName: path.basename(destinationPath),
+    });
+  }
+  return { moved, skipped };
+}
+
+export function listSavedRoomMonitorCaptures(): RoomMonitorCapture[] {
+  return readCapturesFromDirOldestFirst(roomMonitorSavedDir).reverse();
 }
 
 export function getRoomMonitorCapturePath(fileName: string): string {
-  const safeFileName = path.basename(fileName || "");
-  if (!safeFileName) {
-    return "";
-  }
-  const imagePath = path.resolve(roomMonitorDir, safeFileName);
-  if (!imagePath.startsWith(path.resolve(roomMonitorDir) + path.sep)) {
-    return "";
-  }
-  if (!fs.existsSync(imagePath)) {
-    return "";
-  }
-  return imagePath;
+  return getSafePathFromDir(roomMonitorDir, fileName);
+}
+
+export function getSavedRoomMonitorCapturePath(fileName: string): string {
+  return getSafePathFromDir(roomMonitorSavedDir, fileName);
 }
 
 export function getRoomMonitorStatus(): {
@@ -149,8 +266,10 @@ export function getRoomMonitorStatus(): {
   totalSizeBytes: number;
   freeSpaceBytes: number;
   freeSpaceReserveBytes: number;
+  dayCount: number;
+  savedCount: number;
 } {
-  const captures = readRoomMonitorImagesOldestFirst();
+  const captures = readCapturesFromDirOldestFirst(roomMonitorDir);
   const totalSizeBytes = captures.reduce((sum, capture) => sum + capture.sizeBytes, 0);
   return {
     enabled: captureIntervalSec > 0,
@@ -162,5 +281,7 @@ export function getRoomMonitorStatus(): {
     totalSizeBytes,
     freeSpaceBytes: getAvailableFreeSpaceBytes(),
     freeSpaceReserveBytes: ROOM_MONITOR_FREE_SPACE_RESERVE_BYTES,
+    dayCount: groupCapturesByDay(captures.slice().reverse()).length,
+    savedCount: listSavedRoomMonitorCaptures().length,
   };
 }
