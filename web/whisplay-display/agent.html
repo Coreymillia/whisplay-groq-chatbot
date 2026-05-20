@@ -67,14 +67,14 @@
             <label class="agent-label" for="agentBuildCommand">Build Command</label>
             <div class="agent-command-row">
               <input id="agentBuildCommand" class="agent-input agent-code-input" type="text" readonly />
-              <button id="agentCopyBuildBtn" class="agent-button secondary compact" type="button">Copy</button>
+              <button id="agentCopyBuildBtn" class="agent-button secondary compact" type="button">To Terminal</button>
             </div>
           </div>
           <div>
             <label class="agent-label" for="agentUploadCommand">Flash Command</label>
             <div class="agent-command-row">
               <input id="agentUploadCommand" class="agent-input agent-code-input" type="text" readonly />
-              <button id="agentCopyUploadBtn" class="agent-button secondary compact" type="button">Copy</button>
+              <button id="agentCopyUploadBtn" class="agent-button secondary compact" type="button">To Terminal</button>
             </div>
           </div>
         </div>
@@ -95,6 +95,26 @@
       <div class="agent-card">
         <div class="agent-editor-header">
           <div>
+            <div class="agent-card-title">Project Terminal</div>
+            <div class="agent-card-subtitle">Run PlatformIO or helper commands inside this sandbox workspace and inspect the output live.</div>
+          </div>
+          <div class="agent-toolbar-actions">
+            <button id="agentRunTerminalBtn" class="agent-button" type="button">Run Command</button>
+            <button id="agentStopTerminalBtn" class="agent-button secondary" type="button">Stop</button>
+          </div>
+        </div>
+        <label class="agent-label" for="agentTerminalInput">Command</label>
+        <div class="agent-command-row">
+          <input id="agentTerminalInput" class="agent-input agent-code-input" type="text" placeholder="pio run" />
+          <button id="agentTerminalRefreshBtn" class="agent-button secondary compact" type="button">Refresh</button>
+        </div>
+        <pre id="agentTerminalOutput" class="agent-terminal-output">Select a project to use the terminal.</pre>
+        <div id="agentTerminalStatus" class="agent-status">No terminal session loaded.</div>
+      </div>
+
+      <div class="agent-card">
+        <div class="agent-editor-header">
+          <div>
             <div class="agent-card-title">ESP32 Agent Personality</div>
             <div class="agent-card-subtitle">This Agent-only prompt is separate from the normal device personality and will guide the coding/chat apply workflow.</div>
           </div>
@@ -105,6 +125,21 @@
         </div>
         <textarea id="agentPersonalityPrompt" class="agent-editor agent-editor-medium" spellcheck="false" placeholder="ESP32 coding personality prompt…"></textarea>
         <div id="agentPersonalityStatus" class="agent-status">Loading Agent prompt…</div>
+      </div>
+
+      <div class="agent-card">
+        <div class="agent-editor-header">
+          <div>
+            <div class="agent-card-title">ESP32 Error-Fix Personality</div>
+            <div class="agent-card-subtitle">This separate Agent-only prompt is used when you want the saved PlatformIO error log analyzed and fixed.</div>
+          </div>
+          <div class="agent-toolbar-actions">
+            <button id="agentResetErrorPersonalityBtn" class="agent-button secondary" type="button">Reset to Default</button>
+            <button id="agentSaveErrorPersonalityBtn" class="agent-button" type="button">Save Error Prompt</button>
+          </div>
+        </div>
+        <textarea id="agentErrorPersonalityPrompt" class="agent-editor agent-editor-medium" spellcheck="false" placeholder="ESP32 error-fix personality prompt…"></textarea>
+        <div id="agentErrorPersonalityStatus" class="agent-status">Loading Agent error-fix prompt…</div>
       </div>
 
       <div class="agent-card">
@@ -187,6 +222,7 @@
             <div class="agent-card-subtitle">Store the latest PlatformIO failure text with the project for the coding agent to use.</div>
           </div>
           <div class="agent-toolbar-actions">
+            <button id="agentFixFromErrorBtn" class="agent-button secondary" type="button">Fix From Saved Error</button>
             <button id="agentSaveErrorBtn" class="agent-button secondary" type="button">Save Error Log</button>
           </div>
         </div>

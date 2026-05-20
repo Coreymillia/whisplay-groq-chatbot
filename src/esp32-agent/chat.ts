@@ -23,6 +23,8 @@ export interface Esp32AgentProposalResponse {
   operations: Esp32AgentProposedOperation[];
 }
 
+export type Esp32AgentChatMode = "general" | "error_fix";
+
 function sanitizeOperation(
   operation: Partial<Esp32AgentProposedOperation>,
 ): Esp32AgentProposedOperation | null {
@@ -122,6 +124,7 @@ function buildWorkspaceContext(projectId: string, userPrompt: string): string {
 export async function generateEsp32AgentProposal(input: {
   projectId: string;
   prompt: string;
+  mode?: Esp32AgentChatMode;
 }): Promise<Esp32AgentProposalResponse> {
   const prompt = input.prompt.trim();
   if (!prompt) {
@@ -134,14 +137,24 @@ export async function generateEsp32AgentProposal(input: {
   }
 
   const runtime = getRuntimeSettings();
+  const mode = input.mode === "error_fix" ? "error_fix" : "general";
+  const savedErrorLog = readEsp32AgentProjectErrorLog(input.projectId).trim();
+  if (mode === "error_fix" && !savedErrorLog) {
+    throw new Error("Save a build or upload error log first.");
+  }
   const systemPrompt = [
-    runtime.esp32AgentPersonalityPrompt,
+    mode === "error_fix"
+      ? runtime.esp32AgentErrorPersonalityPrompt
+      : runtime.esp32AgentPersonalityPrompt,
     "Return JSON only.",
     "Schema:",
     '{ "reply": string, "operations": [{ "type": "write_file" | "delete_file", "path": string, "content"?: string, "summary": string }] }',
     "Use write_file for both create and update operations.",
     "Only propose changes inside the sandbox workspace.",
     "If no file changes are needed, return an empty operations array.",
+    mode === "error_fix"
+      ? "This request is specifically for fixing the saved PlatformIO error log."
+      : "",
   ].join(" ");
 
   const completion = await openai.chat.completions.create({

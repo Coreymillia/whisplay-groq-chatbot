@@ -19,10 +19,20 @@ const portSelect = document.getElementById("agentPortSelect");
 const refreshPortsBtn = document.getElementById("agentRefreshPortsBtn");
 const savePortBtn = document.getElementById("agentSavePortBtn");
 const portStatus = document.getElementById("agentPortStatus");
+const terminalInput = document.getElementById("agentTerminalInput");
+const terminalOutput = document.getElementById("agentTerminalOutput");
+const runTerminalBtn = document.getElementById("agentRunTerminalBtn");
+const stopTerminalBtn = document.getElementById("agentStopTerminalBtn");
+const refreshTerminalBtn = document.getElementById("agentTerminalRefreshBtn");
+const terminalStatus = document.getElementById("agentTerminalStatus");
 const personalityPrompt = document.getElementById("agentPersonalityPrompt");
 const savePersonalityBtn = document.getElementById("agentSavePersonalityBtn");
 const resetPersonalityBtn = document.getElementById("agentResetPersonalityBtn");
 const personalityStatus = document.getElementById("agentPersonalityStatus");
+const errorPersonalityPrompt = document.getElementById("agentErrorPersonalityPrompt");
+const saveErrorPersonalityBtn = document.getElementById("agentSaveErrorPersonalityBtn");
+const resetErrorPersonalityBtn = document.getElementById("agentResetErrorPersonalityBtn");
+const errorPersonalityStatus = document.getElementById("agentErrorPersonalityStatus");
 const chatMessages = document.getElementById("agentChatMessages");
 const chatInput = document.getElementById("agentChatInput");
 const sendBtn = document.getElementById("agentSendBtn");
@@ -41,6 +51,7 @@ const savepointStatus = document.getElementById("agentSavepointStatus");
 const savepointsList = document.getElementById("agentSavepointsList");
 const errorLog = document.getElementById("agentErrorLog");
 const saveErrorBtn = document.getElementById("agentSaveErrorBtn");
+const fixFromErrorBtn = document.getElementById("agentFixFromErrorBtn");
 const errorStatus = document.getElementById("agentErrorStatus");
 
 let presets = [];
@@ -53,6 +64,9 @@ let proposedOperations = [];
 let activeProject = null;
 let activeFilePath = "";
 let defaultAgentPersonalityPrompt = "";
+let defaultErrorAgentPersonalityPrompt = "";
+let terminalState = null;
+let terminalPollTimer = null;
 
 function setText(node, value) {
   if (node) node.textContent = value;
@@ -74,6 +88,80 @@ async function fetchJson(url, options) {
 function updateApplyButtonState() {
   if (!applyBtn) return;
   applyBtn.disabled = !activeProject || !proposedOperations.length;
+}
+
+function stopTerminalPolling() {
+  if (terminalPollTimer) {
+    window.clearInterval(terminalPollTimer);
+    terminalPollTimer = null;
+  }
+}
+
+function ensureTerminalPolling() {
+  stopTerminalPolling();
+  if (!activeProject) {
+    return;
+  }
+  terminalPollTimer = window.setInterval(() => {
+    if (!activeProject) {
+      stopTerminalPolling();
+      return;
+    }
+    void loadTerminalState(activeProject.id).catch((error) => {
+      stopTerminalPolling();
+      setText(
+        terminalStatus,
+        error instanceof Error ? error.message : "Failed to refresh terminal output.",
+      );
+    });
+  }, 2000);
+}
+
+function renderTerminal() {
+  if (!terminalOutput || !terminalStatus) return;
+  if (!activeProject) {
+    if (terminalInput) terminalInput.value = "";
+    terminalOutput.textContent = "Select a project to use the terminal.";
+    setText(terminalStatus, "No terminal session loaded.");
+    if (runTerminalBtn) runTerminalBtn.disabled = true;
+    if (stopTerminalBtn) stopTerminalBtn.disabled = true;
+    return;
+  }
+
+  const status = terminalState?.status || "idle";
+  terminalOutput.textContent =
+    terminalState?.output || "No terminal output yet for this project.";
+  terminalOutput.scrollTop = terminalOutput.scrollHeight;
+  if (runTerminalBtn) runTerminalBtn.disabled = status === "running";
+  if (stopTerminalBtn) stopTerminalBtn.disabled = status !== "running";
+
+  const suffix =
+    terminalState?.command
+      ? ` Last command: ${terminalState.command}`
+      : " No command has been run yet.";
+  if (status === "running") {
+    setText(terminalStatus, `Running.${suffix}`);
+    return;
+  }
+  if (status === "failed") {
+    setText(
+      terminalStatus,
+      `Command failed${terminalState?.exitCode != null ? ` with code ${terminalState.exitCode}` : ""}.${suffix}`,
+    );
+    return;
+  }
+  if (status === "exited") {
+    setText(
+      terminalStatus,
+      `Command completed${terminalState?.exitCode != null ? ` with code ${terminalState.exitCode}` : ""}.${suffix}`,
+    );
+    return;
+  }
+  if (status === "stopped") {
+    setText(terminalStatus, `Command stopped.${suffix}`);
+    return;
+  }
+  setText(terminalStatus, `Idle.${suffix}`);
 }
 
 function populatePresetOptions() {
@@ -233,9 +321,12 @@ function renderWorkspaceSummary() {
     if (exportBtn) exportBtn.disabled = true;
     if (savePortBtn) savePortBtn.disabled = true;
     if (sendBtn) sendBtn.disabled = true;
+    if (fixFromErrorBtn) fixFromErrorBtn.disabled = true;
     setText(portStatus, serialPorts.length ? "Select a project to save a flash port." : "No USB serial ports loaded.");
     setText(chatStatus, "Select a project to start chatting with the ESP32 Agent.");
     setText(savepointStatus, "Select a project to use savepoints.");
+    terminalState = null;
+    renderTerminal();
     renderChatHistory();
     renderProposals();
     renderSavepoints();
@@ -253,6 +344,7 @@ function renderWorkspaceSummary() {
   if (exportBtn) exportBtn.disabled = false;
   if (savePortBtn) savePortBtn.disabled = false;
   if (sendBtn) sendBtn.disabled = false;
+   if (fixFromErrorBtn) fixFromErrorBtn.disabled = false;
   populateSerialPortOptions(activeProject.uploadPort || "");
   setText(
     portStatus,
@@ -371,10 +463,16 @@ async function loadGlobalSettings() {
 async function loadAgentSettings() {
   const data = await fetchJson("/api/esp32-agent/settings", { cache: "no-store" });
   defaultAgentPersonalityPrompt = data.defaultPersonalityPrompt || "";
+  defaultErrorAgentPersonalityPrompt = data.defaultErrorPersonalityPrompt || "";
   if (personalityPrompt) {
     personalityPrompt.value = data.settings?.personalityPrompt || defaultAgentPersonalityPrompt;
   }
+  if (errorPersonalityPrompt) {
+    errorPersonalityPrompt.value =
+      data.settings?.errorPersonalityPrompt || defaultErrorAgentPersonalityPrompt;
+  }
   setText(personalityStatus, "Agent coding prompt loaded.");
+  setText(errorPersonalityStatus, "Agent error-fix prompt loaded.");
 }
 
 async function loadSerialPorts() {
@@ -449,6 +547,20 @@ async function loadErrorLog(projectId) {
   setText(errorStatus, data.content ? "Loaded saved error log." : "No error log saved.");
 }
 
+async function loadTerminalState(projectId) {
+  const data = await fetchJson(
+    `/api/esp32-agent/projects/${escapePathSegment(projectId)}/terminal`,
+    { cache: "no-store" },
+  );
+  terminalState = data.terminal || null;
+  renderTerminal();
+  if (terminalState?.status === "running") {
+    ensureTerminalPolling();
+  } else {
+    stopTerminalPolling();
+  }
+}
+
 async function selectProject(projectId) {
   const data = await fetchJson(`/api/esp32-agent/projects/${escapePathSegment(projectId)}`, {
     cache: "no-store",
@@ -458,6 +570,7 @@ async function selectProject(projectId) {
   checkpoints = [];
   proposedOperations = [];
   chatHistory = [];
+  terminalState = null;
   if (fileEditor) {
     fileEditor.value = "";
   }
@@ -477,10 +590,13 @@ async function selectProject(projectId) {
       loadProjectChat(activeProject.id),
       loadErrorLog(activeProject.id),
       loadSerialPorts(),
+      loadTerminalState(activeProject.id),
     ]);
   } else {
+    stopTerminalPolling();
     renderFileTree([]);
     renderSavepoints();
+    renderTerminal();
   }
 }
 
@@ -700,13 +816,21 @@ async function saveAgentPersonalityPrompt() {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       personalityPrompt: personalityPrompt?.value || "",
+      errorPersonalityPrompt: errorPersonalityPrompt?.value || "",
     }),
   });
   defaultAgentPersonalityPrompt = data.defaultPersonalityPrompt || defaultAgentPersonalityPrompt;
+  defaultErrorAgentPersonalityPrompt =
+    data.defaultErrorPersonalityPrompt || defaultErrorAgentPersonalityPrompt;
   if (personalityPrompt) {
     personalityPrompt.value = data.settings?.personalityPrompt || defaultAgentPersonalityPrompt;
   }
+  if (errorPersonalityPrompt) {
+    errorPersonalityPrompt.value =
+      data.settings?.errorPersonalityPrompt || defaultErrorAgentPersonalityPrompt;
+  }
   setText(personalityStatus, "Agent coding prompt saved.");
+  setText(errorPersonalityStatus, "Agent error-fix prompt saved.");
 }
 
 function resetAgentPersonalityPrompt() {
@@ -716,17 +840,59 @@ function resetAgentPersonalityPrompt() {
   setText(personalityStatus, "Reset to the default ESP32 Agent prompt. Save to apply it.");
 }
 
-async function sendAgentPrompt() {
+async function saveErrorAgentPersonalityPrompt() {
+  setText(errorPersonalityStatus, "Saving Agent error-fix prompt…");
+  const data = await fetchJson("/api/esp32-agent/settings", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      personalityPrompt: personalityPrompt?.value || "",
+      errorPersonalityPrompt: errorPersonalityPrompt?.value || "",
+    }),
+  });
+  defaultAgentPersonalityPrompt = data.defaultPersonalityPrompt || defaultAgentPersonalityPrompt;
+  defaultErrorAgentPersonalityPrompt =
+    data.defaultErrorPersonalityPrompt || defaultErrorAgentPersonalityPrompt;
+  if (personalityPrompt) {
+    personalityPrompt.value = data.settings?.personalityPrompt || defaultAgentPersonalityPrompt;
+  }
+  if (errorPersonalityPrompt) {
+    errorPersonalityPrompt.value =
+      data.settings?.errorPersonalityPrompt || defaultErrorAgentPersonalityPrompt;
+  }
+  setText(errorPersonalityStatus, "Agent error-fix prompt saved.");
+}
+
+function resetErrorAgentPersonalityPrompt() {
+  if (errorPersonalityPrompt) {
+    errorPersonalityPrompt.value = defaultErrorAgentPersonalityPrompt;
+  }
+  setText(
+    errorPersonalityStatus,
+    "Reset to the default ESP32 error-fix prompt. Save to apply it.",
+  );
+}
+
+async function sendAgentPrompt(mode = "general") {
   if (!activeProject) {
     setText(chatStatus, "Select a project first.");
     return;
   }
-  const prompt = chatInput?.value?.trim() || "";
+  const prompt =
+    chatInput?.value?.trim() ||
+    (mode === "error_fix"
+      ? "Use the saved error log to make the smallest practical fix for this project."
+      : "");
   if (!prompt) {
     setText(chatStatus, "Enter a message for the Agent first.");
     return;
   }
-  setText(chatStatus, "Asking the ESP32 Agent…");
+  setText(
+    chatStatus,
+    mode === "error_fix"
+      ? "Asking the ESP32 error-fix agent…"
+      : "Asking the ESP32 Agent…",
+  );
   const data = await fetchJson(
     `/api/esp32-agent/projects/${escapePathSegment(activeProject.id)}/chat`,
     {
@@ -734,6 +900,7 @@ async function sendAgentPrompt() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         prompt,
+        mode,
       }),
     },
   );
@@ -747,8 +914,8 @@ async function sendAgentPrompt() {
   setText(
     chatStatus,
     proposedOperations.length
-      ? `Agent prepared ${proposedOperations.length} proposed change${proposedOperations.length === 1 ? "" : "s"}.`
-      : "Agent replied without proposing file changes.",
+      ? `${mode === "error_fix" ? "Error-fix agent" : "Agent"} prepared ${proposedOperations.length} proposed change${proposedOperations.length === 1 ? "" : "s"}.`
+      : `${mode === "error_fix" ? "Error-fix agent" : "Agent"} replied without proposing file changes.`,
   );
 }
 
@@ -812,6 +979,62 @@ async function saveErrorLog() {
   activeProject = data.project || activeProject;
   setText(errorStatus, "Error log saved with this sandbox project.");
   await loadProjects();
+}
+
+async function runTerminalCommand() {
+  if (!activeProject) {
+    setText(terminalStatus, "Select a project first.");
+    return;
+  }
+  const command = terminalInput?.value?.trim() || "";
+  if (!command) {
+    setText(terminalStatus, "Enter a terminal command first.");
+    return;
+  }
+  setText(terminalStatus, "Starting terminal command…");
+  const data = await fetchJson(
+    `/api/esp32-agent/projects/${escapePathSegment(activeProject.id)}/terminal/run`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ command }),
+    },
+  );
+  terminalState = data.terminal || null;
+  renderTerminal();
+  ensureTerminalPolling();
+}
+
+async function stopTerminalCommand() {
+  if (!activeProject) {
+    setText(terminalStatus, "Select a project first.");
+    return;
+  }
+  const data = await fetchJson(
+    `/api/esp32-agent/projects/${escapePathSegment(activeProject.id)}/terminal/stop`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    },
+  );
+  terminalState = data.terminal || null;
+  renderTerminal();
+  stopTerminalPolling();
+}
+
+async function queueCommandToTerminal(command, statusNode, successMessage) {
+  if (!command) {
+    return;
+  }
+  if (terminalInput) {
+    terminalInput.value = command;
+  }
+  setText(statusNode, successMessage);
+  try {
+    await navigator.clipboard.writeText(command);
+  } catch {
+    // Terminal fill is the primary action; clipboard is only a best-effort bonus.
+  }
 }
 
 async function copyText(value, statusNode, successMessage) {
@@ -887,9 +1110,31 @@ resetPersonalityBtn?.addEventListener("click", () => {
   resetAgentPersonalityPrompt();
 });
 
+saveErrorPersonalityBtn?.addEventListener("click", () => {
+  void saveErrorAgentPersonalityPrompt().catch((error) => {
+    setText(
+      errorPersonalityStatus,
+      error instanceof Error ? error.message : "Failed to save Agent error prompt.",
+    );
+  });
+});
+
+resetErrorPersonalityBtn?.addEventListener("click", () => {
+  resetErrorAgentPersonalityPrompt();
+});
+
 sendBtn?.addEventListener("click", () => {
   void sendAgentPrompt().catch((error) => {
     setText(chatStatus, error instanceof Error ? error.message : "Failed to talk to the Agent.");
+  });
+});
+
+fixFromErrorBtn?.addEventListener("click", () => {
+  void sendAgentPrompt("error_fix").catch((error) => {
+    setText(
+      chatStatus,
+      error instanceof Error ? error.message : "Failed to run the error-fix Agent.",
+    );
   });
 });
 
@@ -912,11 +1157,50 @@ saveErrorBtn?.addEventListener("click", () => {
 });
 
 copyBuildBtn?.addEventListener("click", () => {
-  void copyText(buildCommandInput?.value || "", createStatus, "Build command copied.");
+  void queueCommandToTerminal(
+    buildCommandInput?.value || "",
+    createStatus,
+    "Build command sent to the terminal box.",
+  );
 });
 
 copyUploadBtn?.addEventListener("click", () => {
-  void copyText(uploadCommandInput?.value || "", createStatus, "Flash command copied.");
+  void queueCommandToTerminal(
+    uploadCommandInput?.value || "",
+    createStatus,
+    "Flash command sent to the terminal box.",
+  );
+});
+
+runTerminalBtn?.addEventListener("click", () => {
+  void runTerminalCommand().catch((error) => {
+    setText(
+      terminalStatus,
+      error instanceof Error ? error.message : "Failed to start terminal command.",
+    );
+  });
+});
+
+stopTerminalBtn?.addEventListener("click", () => {
+  void stopTerminalCommand().catch((error) => {
+    setText(
+      terminalStatus,
+      error instanceof Error ? error.message : "Failed to stop terminal command.",
+    );
+  });
+});
+
+refreshTerminalBtn?.addEventListener("click", () => {
+  if (!activeProject) {
+    setText(terminalStatus, "Select a project first.");
+    return;
+  }
+  void loadTerminalState(activeProject.id).catch((error) => {
+    setText(
+      terminalStatus,
+      error instanceof Error ? error.message : "Failed to refresh terminal output.",
+    );
+  });
 });
 
 Promise.all([

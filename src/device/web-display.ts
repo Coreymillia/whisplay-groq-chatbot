@@ -47,7 +47,9 @@ import {
   saveRuntimeSettings,
 } from "../config/runtime-settings";
 import {
+  DEFAULT_ESP32_AGENT_ERROR_PERSONALITY_PROMPT,
   DEFAULT_ESP32_AGENT_PERSONALITY_PROMPT,
+  normalizeEsp32AgentErrorPersonalityPrompt,
   normalizeEsp32AgentPersonalityPrompt,
 } from "../config/esp32-agent-personality";
 import { recordRpdMessage } from "../status/rpd-counter";
@@ -99,6 +101,11 @@ import {
   applyEsp32AgentProposal,
   generateEsp32AgentProposal,
 } from "../esp32-agent/chat";
+import {
+  getEsp32AgentTerminalSnapshot,
+  startEsp32AgentTerminalCommand,
+  stopEsp32AgentTerminalCommand,
+} from "../esp32-agent/terminal";
 import { BOTNET_MODEL_OPTIONS } from "../config/botnet-models";
 
 type ButtonHandler = () => void;
@@ -386,8 +393,11 @@ export class WebDisplayServer implements WebAudioBridgeServer {
       ctx.body = {
         settings: {
           personalityPrompt: settings.esp32AgentPersonalityPrompt,
+          errorPersonalityPrompt: settings.esp32AgentErrorPersonalityPrompt,
         },
         defaultPersonalityPrompt: DEFAULT_ESP32_AGENT_PERSONALITY_PROMPT,
+        defaultErrorPersonalityPrompt:
+          DEFAULT_ESP32_AGENT_ERROR_PERSONALITY_PROMPT,
       };
     });
 
@@ -397,6 +407,9 @@ export class WebDisplayServer implements WebAudioBridgeServer {
         esp32AgentPersonalityPrompt:
           getBodyString(body, "personalityPrompt") ||
           DEFAULT_ESP32_AGENT_PERSONALITY_PROMPT,
+        esp32AgentErrorPersonalityPrompt:
+          getBodyString(body, "errorPersonalityPrompt") ||
+          DEFAULT_ESP32_AGENT_ERROR_PERSONALITY_PROMPT,
       });
       ctx.body = {
         ok: true,
@@ -404,8 +417,13 @@ export class WebDisplayServer implements WebAudioBridgeServer {
           personalityPrompt: normalizeEsp32AgentPersonalityPrompt(
             settings.esp32AgentPersonalityPrompt,
           ),
+          errorPersonalityPrompt: normalizeEsp32AgentErrorPersonalityPrompt(
+            settings.esp32AgentErrorPersonalityPrompt,
+          ),
         },
         defaultPersonalityPrompt: DEFAULT_ESP32_AGENT_PERSONALITY_PROMPT,
+        defaultErrorPersonalityPrompt:
+          DEFAULT_ESP32_AGENT_ERROR_PERSONALITY_PROMPT,
       };
     });
 
@@ -513,6 +531,10 @@ export class WebDisplayServer implements WebAudioBridgeServer {
         const result = await generateEsp32AgentProposal({
           projectId: String(ctx.params.projectId || ""),
           prompt: getBodyString(body, "prompt") || "",
+          mode:
+            getBodyString(body, "mode") === "error_fix"
+              ? "error_fix"
+              : "general",
         });
         ctx.body = {
           ok: true,
@@ -533,6 +555,75 @@ export class WebDisplayServer implements WebAudioBridgeServer {
         };
       }
     });
+
+    this.router.get("/api/esp32-agent/projects/:projectId/terminal", (ctx) => {
+      ctx.set("Cache-Control", "no-store");
+      try {
+        ctx.body = {
+          ok: true,
+          terminal: getEsp32AgentTerminalSnapshot(
+            String(ctx.params.projectId || ""),
+          ),
+        };
+      } catch (error) {
+        ctx.status = 404;
+        ctx.body = {
+          ok: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Failed to load ESP32 agent terminal state.",
+        };
+      }
+    });
+
+    this.router.post(
+      "/api/esp32-agent/projects/:projectId/terminal/run",
+      (ctx) => {
+        const body = normalizeRequestBody((ctx.request as any).body);
+        try {
+          ctx.body = {
+            ok: true,
+            terminal: startEsp32AgentTerminalCommand({
+              projectId: String(ctx.params.projectId || ""),
+              command: getBodyString(body, "command") || "",
+            }),
+          };
+        } catch (error) {
+          ctx.status = 400;
+          ctx.body = {
+            ok: false,
+            error:
+              error instanceof Error
+                ? error.message
+                : "Failed to start ESP32 agent terminal command.",
+          };
+        }
+      },
+    );
+
+    this.router.post(
+      "/api/esp32-agent/projects/:projectId/terminal/stop",
+      (ctx) => {
+        try {
+          ctx.body = {
+            ok: true,
+            terminal: stopEsp32AgentTerminalCommand(
+              String(ctx.params.projectId || ""),
+            ),
+          };
+        } catch (error) {
+          ctx.status = 400;
+          ctx.body = {
+            ok: false,
+            error:
+              error instanceof Error
+                ? error.message
+                : "Failed to stop ESP32 agent terminal command.",
+          };
+        }
+      },
+    );
 
     this.router.post("/api/esp32-agent/projects/:projectId/apply", (ctx) => {
       const body = normalizeRequestBody((ctx.request as any).body);

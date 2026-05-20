@@ -9,7 +9,10 @@ import {
   DEFAULT_BOTNET_MODEL,
   normalizeBotNetModel,
 } from "./botnet-models";
-import { normalizeEsp32AgentPersonalityPrompt } from "./esp32-agent-personality";
+import {
+  normalizeEsp32AgentErrorPersonalityPrompt,
+  normalizeEsp32AgentPersonalityPrompt,
+} from "./esp32-agent-personality";
 
 export type VoiceMode = "text-only" | "speak-on-demand" | "voice-chat";
 export type UITheme = "default" | "matrix" | "plasma" | "amber-terminal";
@@ -65,6 +68,7 @@ export interface RuntimeSettings {
   llmModel: string;
   personalityPrompt: string;
   esp32AgentPersonalityPrompt: string;
+  esp32AgentErrorPersonalityPrompt: string;
   savedPersonalityPresets: PersonalityPreset[];
   musicShuffle: boolean;
   volumeLevel: number;
@@ -96,6 +100,7 @@ export interface RuntimeSettingsUpdate {
   llmModel?: string;
   personalityPrompt?: string;
   esp32AgentPersonalityPrompt?: string;
+  esp32AgentErrorPersonalityPrompt?: string;
   savedPersonalityPresets?: PersonalityPreset[];
   musicShuffle?: boolean;
   volumeLevel?: number;
@@ -524,6 +529,9 @@ function sanitizeSettings(input: Partial<RuntimeSettings> | null | undefined): R
     esp32AgentPersonalityPrompt: normalizeEsp32AgentPersonalityPrompt(
       input?.esp32AgentPersonalityPrompt,
     ),
+    esp32AgentErrorPersonalityPrompt: normalizeEsp32AgentErrorPersonalityPrompt(
+      input?.esp32AgentErrorPersonalityPrompt,
+    ),
     savedPersonalityPresets: normalizeSavedPersonalityPresets(
       input?.savedPersonalityPresets,
     ),
@@ -615,6 +623,13 @@ export function saveRuntimeSettings(
     next.esp32AgentPersonalityPrompt = normalizeEsp32AgentPersonalityPrompt(
       update.esp32AgentPersonalityPrompt,
     );
+  }
+
+  if (typeof update.esp32AgentErrorPersonalityPrompt === "string") {
+    next.esp32AgentErrorPersonalityPrompt =
+      normalizeEsp32AgentErrorPersonalityPrompt(
+        update.esp32AgentErrorPersonalityPrompt,
+      );
   }
 
   if (Array.isArray(update.savedPersonalityPresets)) {
@@ -928,6 +943,7 @@ export function getPublicRuntimeSettings(): {
   llmModel: string;
   personalityPrompt: string;
   esp32AgentPersonalityPrompt: string;
+  esp32AgentErrorPersonalityPrompt: string;
   personalityPresetId: string;
   musicShuffle: boolean;
   volumeLevel: number;
@@ -958,6 +974,8 @@ export function getPublicRuntimeSettings(): {
     llmModel: settings.llmModel,
     personalityPrompt: settings.personalityPrompt,
     esp32AgentPersonalityPrompt: settings.esp32AgentPersonalityPrompt,
+    esp32AgentErrorPersonalityPrompt:
+      settings.esp32AgentErrorPersonalityPrompt,
     personalityPresetId: getCurrentPersonalityPresetId(
       settings.personalityPrompt,
       settings.savedPersonalityPresets,

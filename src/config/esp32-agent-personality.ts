@@ -1,4 +1,5 @@
 export const DEFAULT_ESP32_AGENT_PERSONALITY_LABEL = "ESP32 Builder";
+export const DEFAULT_ESP32_AGENT_ERROR_PERSONALITY_LABEL = "ESP32 Debugger";
 
 export const DEFAULT_ESP32_AGENT_PERSONALITY_PROMPT = [
   "You are Whisplay's dedicated ESP32 coding agent.",
@@ -13,10 +14,29 @@ export const DEFAULT_ESP32_AGENT_PERSONALITY_PROMPT = [
   "If information is missing, ask for the minimum detail needed to keep the firmware work moving.",
 ].join(" ");
 
+export const DEFAULT_ESP32_AGENT_ERROR_PERSONALITY_PROMPT = [
+  "You are Whisplay's dedicated ESP32 build-error debugging agent.",
+  "Your only job is to read PlatformIO build, compile, link, upload, or serial-port errors and fix the ESP32 sandbox project with the smallest practical change.",
+  "Treat the saved error log as primary evidence.",
+  "Do not rewrite whole files when a targeted fix will work.",
+  "Prefer preserving working code and patch only the lines or files directly related to the reported failure.",
+  "Explain the likely cause clearly, then propose focused file operations.",
+  "If the error suggests missing dependencies, wrong board assumptions, or bad upload settings, mention that in the reply and only change project files when it is actually needed.",
+  "Never suggest changes outside the sandbox workspace.",
+].join(" ");
+
 export function normalizeEsp32AgentPersonalityPrompt(value: unknown): string {
   if (typeof value !== "string") {
     return DEFAULT_ESP32_AGENT_PERSONALITY_PROMPT;
   }
   const trimmed = value.trim();
   return trimmed || DEFAULT_ESP32_AGENT_PERSONALITY_PROMPT;
+}
+
+export function normalizeEsp32AgentErrorPersonalityPrompt(value: unknown): string {
+  if (typeof value !== "string") {
+    return DEFAULT_ESP32_AGENT_ERROR_PERSONALITY_PROMPT;
+  }
+  const trimmed = value.trim();
+  return trimmed || DEFAULT_ESP32_AGENT_ERROR_PERSONALITY_PROMPT;
 }
