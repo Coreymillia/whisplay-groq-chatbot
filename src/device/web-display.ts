@@ -46,6 +46,10 @@ import {
   saveNamedPersonalityPreset,
   saveRuntimeSettings,
 } from "../config/runtime-settings";
+import {
+  DEFAULT_ESP32_AGENT_PERSONALITY_PROMPT,
+  normalizeEsp32AgentPersonalityPrompt,
+} from "../config/esp32-agent-personality";
 import { recordRpdMessage } from "../status/rpd-counter";
 import { getPersonalityPresets } from "../config/personality-presets";
 import type { RuntimeSettings } from "../config/runtime-settings";
@@ -78,6 +82,7 @@ import {
   exportEsp32AgentProject,
   getEsp32AgentProject,
   importEsp32AgentProject,
+  listEsp32AgentProjectChatMessages,
   listEsp32AgentProjectCheckpoints,
   listEsp32AgentPresets,
   listEsp32AgentProjects,
@@ -89,6 +94,11 @@ import {
   writeEsp32AgentProjectErrorLog,
   writeEsp32AgentProjectFile,
 } from "../esp32-agent/workspace";
+import { listEsp32AgentSerialPorts } from "../esp32-agent/serial";
+import {
+  applyEsp32AgentProposal,
+  generateEsp32AgentProposal,
+} from "../esp32-agent/chat";
 import { BOTNET_MODEL_OPTIONS } from "../config/botnet-models";
 
 type ButtonHandler = () => void;
@@ -370,6 +380,42 @@ export class WebDisplayServer implements WebAudioBridgeServer {
       };
     });
 
+    this.router.get("/api/esp32-agent/settings", (ctx) => {
+      ctx.set("Cache-Control", "no-store");
+      const settings = getRuntimeSettings();
+      ctx.body = {
+        settings: {
+          personalityPrompt: settings.esp32AgentPersonalityPrompt,
+        },
+        defaultPersonalityPrompt: DEFAULT_ESP32_AGENT_PERSONALITY_PROMPT,
+      };
+    });
+
+    this.router.post("/api/esp32-agent/settings", (ctx) => {
+      const body = normalizeRequestBody((ctx.request as any).body);
+      const settings = saveRuntimeSettings({
+        esp32AgentPersonalityPrompt:
+          getBodyString(body, "personalityPrompt") ||
+          DEFAULT_ESP32_AGENT_PERSONALITY_PROMPT,
+      });
+      ctx.body = {
+        ok: true,
+        settings: {
+          personalityPrompt: normalizeEsp32AgentPersonalityPrompt(
+            settings.esp32AgentPersonalityPrompt,
+          ),
+        },
+        defaultPersonalityPrompt: DEFAULT_ESP32_AGENT_PERSONALITY_PROMPT,
+      };
+    });
+
+    this.router.get("/api/esp32-agent/serial-ports", (ctx) => {
+      ctx.set("Cache-Control", "no-store");
+      ctx.body = {
+        ports: listEsp32AgentSerialPorts(),
+      };
+    });
+
     this.router.get("/api/esp32-agent/projects", (ctx) => {
       ctx.set("Cache-Control", "no-store");
       ctx.body = {
@@ -441,6 +487,81 @@ export class WebDisplayServer implements WebAudioBridgeServer {
       }
     });
 
+    this.router.get("/api/esp32-agent/projects/:projectId/chat", (ctx) => {
+      ctx.set("Cache-Control", "no-store");
+      try {
+        ctx.body = {
+          messages: listEsp32AgentProjectChatMessages(
+            String(ctx.params.projectId || ""),
+          ),
+        };
+      } catch (error) {
+        ctx.status = 404;
+        ctx.body = {
+          ok: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Failed to load ESP32 agent chat.",
+        };
+      }
+    });
+
+    this.router.post("/api/esp32-agent/projects/:projectId/chat", async (ctx) => {
+      const body = normalizeRequestBody((ctx.request as any).body);
+      try {
+        const result = await generateEsp32AgentProposal({
+          projectId: String(ctx.params.projectId || ""),
+          prompt: getBodyString(body, "prompt") || "",
+        });
+        ctx.body = {
+          ok: true,
+          reply: result.reply,
+          operations: result.operations,
+          messages: listEsp32AgentProjectChatMessages(
+            String(ctx.params.projectId || ""),
+          ),
+        };
+      } catch (error) {
+        ctx.status = 400;
+        ctx.body = {
+          ok: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Failed to generate ESP32 agent response.",
+        };
+      }
+    });
+
+    this.router.post("/api/esp32-agent/projects/:projectId/apply", (ctx) => {
+      const body = normalizeRequestBody((ctx.request as any).body);
+      try {
+        const rawOperations = body[normalizeBodyKey("operations")];
+        const operations = Array.isArray(rawOperations) ? rawOperations : [];
+        const result = applyEsp32AgentProposal({
+          projectId: String(ctx.params.projectId || ""),
+          operations: operations as any,
+        });
+        ctx.body = {
+          ok: true,
+          project: getEsp32AgentProject(String(ctx.params.projectId || "")),
+          checkpoint: result.checkpoint,
+          appliedCount: result.appliedCount,
+          files: listEsp32AgentProjectFiles(String(ctx.params.projectId || "")),
+        };
+      } catch (error) {
+        ctx.status = 400;
+        ctx.body = {
+          ok: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Failed to apply ESP32 agent changes.",
+        };
+      }
+    });
+
     this.router.get("/api/esp32-agent/projects/:projectId/export", (ctx) => {
       ctx.set("Cache-Control", "no-store");
       try {
@@ -469,6 +590,7 @@ export class WebDisplayServer implements WebAudioBridgeServer {
         const project = updateEsp32AgentProjectSettings({
           projectId: String(ctx.params.projectId || ""),
           agentModel: getBodyString(body, "agentModel") || undefined,
+          uploadPort: getBodyString(body, "uploadPort"),
         });
         ctx.body = {
           ok: true,

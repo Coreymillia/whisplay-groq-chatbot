@@ -9,6 +9,7 @@ import {
   DEFAULT_BOTNET_MODEL,
   normalizeBotNetModel,
 } from "./botnet-models";
+import { normalizeEsp32AgentPersonalityPrompt } from "./esp32-agent-personality";
 
 export type VoiceMode = "text-only" | "speak-on-demand" | "voice-chat";
 export type UITheme = "default" | "matrix" | "plasma" | "amber-terminal";
@@ -63,6 +64,7 @@ export interface RuntimeSettings {
   geminiApiKey: string;
   llmModel: string;
   personalityPrompt: string;
+  esp32AgentPersonalityPrompt: string;
   savedPersonalityPresets: PersonalityPreset[];
   musicShuffle: boolean;
   volumeLevel: number;
@@ -93,6 +95,7 @@ export interface RuntimeSettingsUpdate {
   geminiApiKey?: string;
   llmModel?: string;
   personalityPrompt?: string;
+  esp32AgentPersonalityPrompt?: string;
   savedPersonalityPresets?: PersonalityPreset[];
   musicShuffle?: boolean;
   volumeLevel?: number;
@@ -518,6 +521,9 @@ function sanitizeSettings(input: Partial<RuntimeSettings> | null | undefined): R
       typeof input?.personalityPrompt === "string"
         ? input.personalityPrompt.trim()
         : "",
+    esp32AgentPersonalityPrompt: normalizeEsp32AgentPersonalityPrompt(
+      input?.esp32AgentPersonalityPrompt,
+    ),
     savedPersonalityPresets: normalizeSavedPersonalityPresets(
       input?.savedPersonalityPresets,
     ),
@@ -603,6 +609,12 @@ export function saveRuntimeSettings(
 
   if (typeof update.personalityPrompt === "string") {
     next.personalityPrompt = update.personalityPrompt.trim();
+  }
+
+  if (typeof update.esp32AgentPersonalityPrompt === "string") {
+    next.esp32AgentPersonalityPrompt = normalizeEsp32AgentPersonalityPrompt(
+      update.esp32AgentPersonalityPrompt,
+    );
   }
 
   if (Array.isArray(update.savedPersonalityPresets)) {
@@ -915,6 +927,7 @@ export function getPublicRuntimeSettings(): {
   geminiApiKeyConfigured: boolean;
   llmModel: string;
   personalityPrompt: string;
+  esp32AgentPersonalityPrompt: string;
   personalityPresetId: string;
   musicShuffle: boolean;
   volumeLevel: number;
@@ -944,6 +957,7 @@ export function getPublicRuntimeSettings(): {
     geminiApiKeyConfigured: Boolean(settings.geminiApiKey),
     llmModel: settings.llmModel,
     personalityPrompt: settings.personalityPrompt,
+    esp32AgentPersonalityPrompt: settings.esp32AgentPersonalityPrompt,
     personalityPresetId: getCurrentPersonalityPresetId(
       settings.personalityPrompt,
       settings.savedPersonalityPresets,

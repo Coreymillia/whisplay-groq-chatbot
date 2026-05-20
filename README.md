@@ -13,6 +13,7 @@ This project starts from the official PiSugar Whisplay chatbot, but is being tai
 - **Power:** wall-powered is fine; the PiSugar battery is optional
 - **Scope:** build the chatbot first as a dedicated Whisplay + Groq device
 - **Companion path:** add optional ESP32 sidecars like the CYD without replacing the Pi-hosted chatbot brain
+- **ESP32 Agent path:** add a browser-first sandboxed coding workspace on the Pi for building and iterating on ESP32 PlatformIO projects
 - **Cost target:** stay on free-tier API usage where possible for now
 
 ## Current hardware status
@@ -37,7 +38,7 @@ This project starts from the official PiSugar Whisplay chatbot, but is being tai
 
 ## Current feature highlights
 
-- **One-button device flow:** long press to talk, double press to replay the last answer, and voice shortcuts for settings and help
+- **One-button device flow:** long press to talk, double press to open live preview, and voice shortcuts for settings and help
 - **Voice controls:** settings, voice on/off, photo capture, photo browsing, BotNet model cycling, shutdown, and an on-device voice-command cheat sheet
 - **Vision flow:** upload a photo or capture one from the configured camera source, then ask **"what do you see?"**
 - **Groq request counter:** both the browser header and the physical HAT header now show a compact **RPD** item beside Wi-Fi so you can track Groq requests sent today without replacing the main status text
@@ -60,6 +61,65 @@ This project starts from the official PiSugar Whisplay chatbot, but is being tai
 - **BotNet model selector:** Whisplay BotNet now has a curated Groq model dropdown in the browser plus a voice shortcut to jump to the next model on-device
 - **Persona Relay mode:** a new GroqBotNet mode where you tell your bot what to send, your local bot rewrites that prompt in character, and the peer bot replies once without falling into an endless loop
 - **Online GroqBotNet groundwork:** Whisplay and the standalone Zero node now both support an **Online Hub** transport with node registration, hub connect/disconnect, and invite create/redeem controls for relay-based internet testing
+- **ESP32 Agent workspace:** `/agent` now provides persistent sandbox projects, a file tree/editor, import/export bundles, savepoints, an Agent-only ESP32 coding personality, Pi-side USB serial-port detection, persistent per-project Agent chat, proposed file operations, and apply-to-sandbox with an automatic savepoint
+
+## ESP32 Agent workspace
+
+The Pi-hosted browser UI now includes an **ESP32 Agent** page at **`/agent`**. This is a browser-first coding workspace intended to help generate, refine, and recover **PlatformIO ESP32 projects** without taking over the normal Whisplay chatbot flow on the device itself.
+
+### Current ESP32 Agent goals
+
+- keep all agent-written code inside a persistent sandbox under `data/esp32-agent/projects/`
+- let the selected device model and a separate **Agent-only ESP32 coding personality** guide firmware work
+- allow users to iterate by pasting build/upload failures back into the project context
+- make file changes reviewable and reversible by creating a savepoint before apply
+- keep the Pi as the build/flash host while the browser remains the main editing and control surface
+
+### Current ESP32 Agent features
+
+- **Persistent sandbox projects:** create and reopen projects without losing work
+- **Preset templates:** initial support starts with **Companion CYD standard** and **Companion CYD inverted**
+- **File system view:** browse and edit sandbox files directly in the browser
+- **Import / export:** move whole projects around as JSON project bundles
+- **Savepoints:** create, list, and restore exact workspace snapshots
+- **Saved error log:** keep the latest PlatformIO build or upload failure text with the project
+- **Agent-only personality:** separate editable ESP32 coding prompt, not shared with the normal chatbot personality
+- **Agent chat + apply flow:** ask the coding agent for changes, review proposed file operations, then apply them into the sandbox with an automatic savepoint first
+- **USB serial detection:** the Pi can list detected serial ports for flashing, while board choice remains manual through the preset selector
+
+### Current workflow
+
+1. Open `/agent`
+2. Create a sandbox project from a preset template
+3. Edit files manually or ask the Agent to propose changes
+4. Review the proposed file operations
+5. Apply them into the sandbox
+6. Build or flash with the generated command, optionally using a saved detected USB serial port
+7. Paste any PlatformIO error output back into the project and iterate
+
+### Current limitations
+
+- board detection is still **manual by preset**, even when the Pi can see a USB serial device
+- the agent currently proposes and applies file operations, but it is not yet a full terminal/build runner inside the browser
+- context is intentionally trimmed to the file tree plus prioritized key files so lower-token Groq models still work reliably
+
+### Proposed next ESP32 Agent direction
+
+- add a clearer **project details/history** view so users can resume later without leaving the tab open
+- add a more guided **build / flash workflow** around the existing commands and saved USB port selection
+- keep improving the Agent prompt and apply loop so debugging pasted build errors becomes faster and more reliable
+
+### Future hardware targets
+
+The ESP32 Agent is being built to start narrow and expand carefully. Current presets are focused on CYD because those templates already exist and are proven in this repo. Future preset targets we want to support include:
+
+- **Companion CYD** standard and inverted variants *(current starting point)*
+- **M5Stack Core / Core1**
+- **M5Stack Core2**
+- **M5Stack Atom S3 / S3R**
+- **M5Stack Cardputer** *(later phase, after the CYD path is stable)*
+- **common ESP32 dev boards** such as WROOM32D, ESP32-C3, and ESP32-S3
+- less common boards like the **LilyGO T-QT Pro** after the core presets are stable
 
 ## Device screenshots
 

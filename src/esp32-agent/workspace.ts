@@ -40,6 +40,7 @@ export interface Esp32AgentProjectManifest {
   name: string;
   slug: string;
   agentModel: string;
+  uploadPort: string;
   presetId: string;
   boardFamily: Esp32AgentBoardFamily;
   displayProfile: Esp32AgentDisplayProfile;
@@ -73,6 +74,18 @@ export interface Esp32AgentCheckpointSummary {
   fileCount: number;
 }
 
+export interface Esp32AgentChatMessage {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  createdAt: string;
+}
+
+export interface Esp32AgentWorkspaceTextFile {
+  path: string;
+  content: string;
+}
+
 interface Esp32AgentCheckpointRecord extends Esp32AgentCheckpointSummary {
   errorLog: string;
   files: Esp32AgentWorkspaceSnapshotFile[];
@@ -85,6 +98,7 @@ interface Esp32AgentProjectBundleProject {
   displayProfile: Esp32AgentDisplayProfile;
   templateSourcePath: string;
   agentModel: string;
+  uploadPort: string;
 }
 
 interface Esp32AgentProjectBundle {
@@ -104,6 +118,7 @@ const CHECKPOINTS_DIR_NAME = "checkpoints";
 const LOGS_DIR_NAME = "logs";
 const ERROR_LOG_FILE_NAME = "latest-error.txt";
 const CHECKPOINT_FILE_PREFIX = "checkpoint-";
+const CHAT_HISTORY_FILE_NAME = "agent-chat.json";
 const DEFAULT_EXCLUDED_ENTRIES = new Set([
   ".git",
   ".pio",
@@ -162,6 +177,10 @@ function getProjectCheckpointPath(projectRoot: string, checkpointId: string): st
   );
 }
 
+function getProjectChatHistoryPath(projectRoot: string): string {
+  return path.join(projectRoot, INTERNAL_DIR_NAME, CHAT_HISTORY_FILE_NAME);
+}
+
 function sanitizeProjectName(name: string): string {
   return name
     .trim()
@@ -210,6 +229,41 @@ function getPresetDefinitionOrThrow(
 
 function renderCommand(template: string, workspacePath: string): string {
   return template.split("{{workspacePath}}").join(workspacePath);
+}
+
+function normalizeUploadPort(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function buildUploadCommand(
+  template: string,
+  workspacePath: string,
+  uploadPort: string,
+): string {
+  const baseCommand = renderCommand(template, workspacePath);
+  const normalizedPort = normalizeUploadPort(uploadPort);
+  if (!normalizedPort) {
+    return baseCommand;
+  }
+  return `${baseCommand} --upload-port ${JSON.stringify(normalizedPort)}`;
+}
+
+function hydrateProjectManifest(
+  manifest: Esp32AgentProjectManifest,
+): Esp32AgentProjectManifest {
+  const preset = getPresetDefinitionOrThrow(manifest.presetId);
+  const normalizedUploadPort = normalizeUploadPort(manifest.uploadPort);
+  return {
+    ...manifest,
+    agentModel: normalizeBotNetModel(manifest.agentModel || DEFAULT_BOTNET_MODEL),
+    uploadPort: normalizedUploadPort,
+    buildCommand: renderCommand(preset.buildCommandTemplate, manifest.workspacePath),
+    uploadCommand: buildUploadCommand(
+      preset.uploadCommandTemplate,
+      manifest.workspacePath,
+      normalizedUploadPort,
+    ),
+  };
 }
 
 function ensureTemplateExists(sourcePath: string): void {
@@ -267,7 +321,7 @@ function readProjectManifest(
     return null;
   }
   const raw = fs.readFileSync(metadataPath, "utf8");
-  return JSON.parse(raw) as Esp32AgentProjectManifest;
+  return hydrateProjectManifest(JSON.parse(raw) as Esp32AgentProjectManifest);
 }
 
 function createProjectManifest(input: {
@@ -298,6 +352,7 @@ function createProjectManifest(input: {
     name: trimmedName,
     slug: slugBase,
     agentModel: normalizeBotNetModel(input.agentModel || DEFAULT_BOTNET_MODEL),
+    uploadPort: "",
     presetId: input.preset.id,
     boardFamily: input.preset.boardFamily,
     displayProfile: input.preset.displayProfile,
@@ -306,7 +361,11 @@ function createProjectManifest(input: {
     workspacePath,
     checkpointsPath,
     buildCommand: renderCommand(input.preset.buildCommandTemplate, workspacePath),
-    uploadCommand: renderCommand(input.preset.uploadCommandTemplate, workspacePath),
+    uploadCommand: buildUploadCommand(
+      input.preset.uploadCommandTemplate,
+      workspacePath,
+      "",
+    ),
     createdAt: now,
     updatedAt: now,
   };
@@ -430,6 +489,46 @@ function writeProjectErrorLog(projectRoot: string, content: string): void {
   fs.writeFileSync(logPath, content, "utf8");
 }
 
+function readProjectChatHistory(
+  projectRoot: string,
+): Esp32AgentChatMessage[] {
+  const chatHistoryPath = getProjectChatHistoryPath(projectRoot);
+  if (!fs.existsSync(chatHistoryPath)) {
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(fs.readFileSync(chatHistoryPath, "utf8"));
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed.filter((entry) => {
+      return (
+        entry &&
+        typeof entry === "object" &&
+        typeof entry.id === "string" &&
+        (entry.role === "user" || entry.role === "assistant") &&
+        typeof entry.content === "string" &&
+        typeof entry.createdAt === "string"
+      );
+    }) as Esp32AgentChatMessage[];
+  } catch {
+    return [];
+  }
+}
+
+function writeProjectChatHistory(
+  projectRoot: string,
+  messages: Esp32AgentChatMessage[],
+): void {
+  const chatHistoryPath = getProjectChatHistoryPath(projectRoot);
+  fs.mkdirSync(path.dirname(chatHistoryPath), { recursive: true });
+  fs.writeFileSync(
+    chatHistoryPath,
+    `${JSON.stringify(messages, null, 2)}\n`,
+    "utf8",
+  );
+}
+
 function parseProjectBundleOrThrow(bundleContent: string): Esp32AgentProjectBundle {
   let bundle: unknown;
   try {
@@ -472,6 +571,7 @@ function parseProjectBundleOrThrow(bundleContent: string): Esp32AgentProjectBund
       agentModel: normalizeBotNetModel(
         String(typedBundle.project.agentModel || DEFAULT_BOTNET_MODEL),
       ),
+      uploadPort: normalizeUploadPort(typedBundle.project.uploadPort),
     },
     files: typedBundle.files.map((entry) => ({
       path: String(entry.path || ""),
@@ -612,10 +712,10 @@ function updateProjectManifest(
 ): Esp32AgentProjectManifest {
   const existing = getProjectManifestOrThrow(projectId);
   const next = updater(existing);
-  const updated = {
+  const updated = hydrateProjectManifest({
     ...next,
     updatedAt: new Date().toISOString(),
-  };
+  });
   writeProjectManifest(existing.projectRoot, updated);
   return updated;
 }
@@ -661,10 +761,15 @@ export function getEsp32AgentProject(projectId: string): Esp32AgentProjectManife
 export function updateEsp32AgentProjectSettings(input: {
   projectId: string;
   agentModel?: string;
+  uploadPort?: string;
 }): Esp32AgentProjectManifest {
   return updateProjectManifest(input.projectId, (project) => ({
     ...project,
     agentModel: normalizeBotNetModel(input.agentModel || project.agentModel),
+    uploadPort:
+      typeof input.uploadPort === "string"
+        ? normalizeUploadPort(input.uploadPort)
+        : project.uploadPort,
   }));
 }
 
@@ -702,6 +807,30 @@ export function writeEsp32AgentProjectFile(input: {
   return updateProjectManifest(input.projectId, (entry) => entry);
 }
 
+export function deleteEsp32AgentProjectFile(input: {
+  projectId: string;
+  relativePath: string;
+}): Esp32AgentProjectManifest {
+  const project = getProjectManifestOrThrow(input.projectId);
+  const filePath = resolveWorkspacePathOrThrow(project, input.relativePath);
+  if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
+    throw new Error(`Project file not found: ${input.relativePath}`);
+  }
+  fs.rmSync(filePath, { force: true });
+
+  let currentDir = path.dirname(filePath);
+  const workspaceRoot = path.resolve(project.workspacePath);
+  while (currentDir.startsWith(workspaceRoot) && currentDir !== workspaceRoot) {
+    if (fs.readdirSync(currentDir).length > 0) {
+      break;
+    }
+    fs.rmdirSync(currentDir);
+    currentDir = path.dirname(currentDir);
+  }
+
+  return updateProjectManifest(input.projectId, (entry) => entry);
+}
+
 export function readEsp32AgentProjectErrorLog(projectId: string): string {
   const project = getProjectManifestOrThrow(projectId);
   const logPath = getProjectErrorLogPath(project.projectRoot);
@@ -709,6 +838,44 @@ export function readEsp32AgentProjectErrorLog(projectId: string): string {
     return "";
   }
   return fs.readFileSync(logPath, "utf8");
+}
+
+export function listEsp32AgentProjectChatMessages(
+  projectId: string,
+): Esp32AgentChatMessage[] {
+  const project = getProjectManifestOrThrow(projectId);
+  return readProjectChatHistory(project.projectRoot);
+}
+
+export function appendEsp32AgentProjectChatMessages(input: {
+  projectId: string;
+  messages: Array<{
+    role: "user" | "assistant";
+    content: string;
+  }>;
+}): Esp32AgentProjectManifest {
+  const project = getProjectManifestOrThrow(input.projectId);
+  const existing = readProjectChatHistory(project.projectRoot);
+  const additions = input.messages
+    .map((message) => ({
+      id: randomUUID(),
+      role: message.role,
+      content: message.content.trim(),
+      createdAt: new Date().toISOString(),
+    }))
+    .filter((message) => message.content);
+  writeProjectChatHistory(project.projectRoot, [...existing, ...additions].slice(-40));
+  return updateProjectManifest(input.projectId, (entry) => entry);
+}
+
+export function listEsp32AgentProjectWorkspaceTextFiles(
+  projectId: string,
+): Esp32AgentWorkspaceTextFile[] {
+  const project = getProjectManifestOrThrow(projectId);
+  return collectWorkspaceSnapshotFiles(project.workspacePath).map((entry) => ({
+    path: entry.path,
+    content: Buffer.from(entry.contentBase64, "base64").toString("utf8"),
+  }));
 }
 
 export function writeEsp32AgentProjectErrorLog(input: {
@@ -795,6 +962,7 @@ export function exportEsp32AgentProject(projectId: string): {
       displayProfile: project.displayProfile,
       templateSourcePath: project.templateSourcePath,
       agentModel: project.agentModel,
+      uploadPort: project.uploadPort,
     },
     files: collectWorkspaceSnapshotFiles(project.workspacePath),
     errorLog: readEsp32AgentProjectErrorLog(project.id),

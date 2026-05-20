@@ -78,6 +78,61 @@
             </div>
           </div>
         </div>
+        <div class="agent-port-grid">
+          <div>
+            <label class="agent-label" for="agentPortSelect">Detected USB Serial Port</label>
+            <select id="agentPortSelect" class="agent-select"></select>
+            <div class="agent-hint">Board preset stays manual. The Pi can reliably detect the serial port and USB bridge details.</div>
+          </div>
+          <div class="agent-port-actions">
+            <button id="agentRefreshPortsBtn" class="agent-button secondary" type="button">Refresh Ports</button>
+            <button id="agentSavePortBtn" class="agent-button secondary" type="button">Save Flash Port</button>
+          </div>
+        </div>
+        <div id="agentPortStatus" class="agent-status">No USB serial ports loaded.</div>
+      </div>
+
+      <div class="agent-card">
+        <div class="agent-editor-header">
+          <div>
+            <div class="agent-card-title">ESP32 Agent Personality</div>
+            <div class="agent-card-subtitle">This Agent-only prompt is separate from the normal device personality and will guide the coding/chat apply workflow.</div>
+          </div>
+          <div class="agent-toolbar-actions">
+            <button id="agentResetPersonalityBtn" class="agent-button secondary" type="button">Reset to Default</button>
+            <button id="agentSavePersonalityBtn" class="agent-button" type="button">Save Agent Prompt</button>
+          </div>
+        </div>
+        <textarea id="agentPersonalityPrompt" class="agent-editor agent-editor-medium" spellcheck="false" placeholder="ESP32 coding personality prompt…"></textarea>
+        <div id="agentPersonalityStatus" class="agent-status">Loading Agent prompt…</div>
+      </div>
+
+      <div class="agent-card">
+        <div class="agent-editor-header">
+          <div>
+            <div class="agent-card-title">Agent Chat</div>
+            <div class="agent-card-subtitle">Ask the ESP32 coding agent to inspect the sandbox, use the saved error log, and prepare file operations for review.</div>
+          </div>
+          <div class="agent-toolbar-actions">
+            <button id="agentApplyBtn" class="agent-button" type="button">Apply Proposed Changes</button>
+          </div>
+        </div>
+        <div id="agentChatMessages" class="agent-chat-messages"></div>
+        <textarea id="agentChatInput" class="agent-editor agent-editor-short" spellcheck="false" placeholder="Ask the agent to make or fix something in this ESP32 project…"></textarea>
+        <div class="agent-chat-actions">
+          <button id="agentSendBtn" class="agent-button" type="button">Send to Agent</button>
+        </div>
+        <div id="agentChatStatus" class="agent-status">Select a project to start chatting with the ESP32 Agent.</div>
+      </div>
+
+      <div class="agent-card">
+        <div class="agent-editor-header">
+          <div>
+            <div class="agent-card-title">Proposed Changes</div>
+            <div class="agent-card-subtitle">Review the next sandbox file operations before applying them. Apply creates an automatic savepoint first.</div>
+          </div>
+        </div>
+        <div id="agentProposalsList" class="agent-project-list"></div>
       </div>
 
       <div class="agent-workspace-grid">

@@ -161,8 +161,19 @@ body {
   min-height: 0;
 }
 
+.agent-chat-messages {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 320px;
+  overflow: auto;
+}
+
 .agent-project-item,
-.agent-tree-node {
+.agent-tree-node,
+.agent-chat-message,
+.agent-proposal-item {
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 10px 12px;
@@ -220,6 +231,16 @@ body {
   min-height: 180px;
 }
 
+.agent-editor-medium {
+  min-height: 220px;
+}
+
+.agent-chat-actions {
+  margin-top: 12px;
+  display: flex;
+  justify-content: flex-end;
+}
+
 .agent-command-grid {
   margin-top: 14px;
   display: grid;
@@ -231,6 +252,54 @@ body {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px;
+}
+
+.agent-port-grid {
+  margin-top: 14px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: end;
+}
+
+.agent-port-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.agent-chat-message.assistant {
+  border-color: rgba(68, 242, 138, 0.28);
+}
+
+.agent-chat-message.user {
+  border-color: rgba(94, 173, 255, 0.22);
+}
+
+.agent-chat-role {
+  font-size: 12px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 6px;
+}
+
+.agent-chat-content {
+  white-space: pre-wrap;
+  line-height: 1.5;
+}
+
+.agent-proposal-path {
+  font-family: var(--font-code);
+  font-size: 13px;
+  margin-top: 4px;
+}
+
+.agent-proposal-summary {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.4;
 }
 
 .agent-savepoint-grid {
@@ -298,7 +367,8 @@ body {
   .agent-shell,
   .agent-workspace-grid,
   .agent-command-grid,
-  .agent-savepoint-grid {
+  .agent-savepoint-grid,
+  .agent-port-grid {
     grid-template-columns: 1fr;
   }
 }

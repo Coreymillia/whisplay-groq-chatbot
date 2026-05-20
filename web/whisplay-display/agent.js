@@ -15,6 +15,20 @@ const copyBuildBtn = document.getElementById("agentCopyBuildBtn");
 const copyUploadBtn = document.getElementById("agentCopyUploadBtn");
 const saveModelBtn = document.getElementById("agentSaveModelBtn");
 const exportBtn = document.getElementById("agentExportBtn");
+const portSelect = document.getElementById("agentPortSelect");
+const refreshPortsBtn = document.getElementById("agentRefreshPortsBtn");
+const savePortBtn = document.getElementById("agentSavePortBtn");
+const portStatus = document.getElementById("agentPortStatus");
+const personalityPrompt = document.getElementById("agentPersonalityPrompt");
+const savePersonalityBtn = document.getElementById("agentSavePersonalityBtn");
+const resetPersonalityBtn = document.getElementById("agentResetPersonalityBtn");
+const personalityStatus = document.getElementById("agentPersonalityStatus");
+const chatMessages = document.getElementById("agentChatMessages");
+const chatInput = document.getElementById("agentChatInput");
+const sendBtn = document.getElementById("agentSendBtn");
+const applyBtn = document.getElementById("agentApplyBtn");
+const chatStatus = document.getElementById("agentChatStatus");
+const proposalsList = document.getElementById("agentProposalsList");
 const fileTree = document.getElementById("agentFileTree");
 const editorPath = document.getElementById("agentEditorPath");
 const fileEditor = document.getElementById("agentFileEditor");
@@ -33,8 +47,12 @@ let presets = [];
 let modelOptions = [];
 let projects = [];
 let checkpoints = [];
+let serialPorts = [];
+let chatHistory = [];
+let proposedOperations = [];
 let activeProject = null;
 let activeFilePath = "";
+let defaultAgentPersonalityPrompt = "";
 
 function setText(node, value) {
   if (node) node.textContent = value;
@@ -51,6 +69,11 @@ async function fetchJson(url, options) {
     throw new Error(data?.error || `Request failed: ${response.status}`);
   }
   return data;
+}
+
+function updateApplyButtonState() {
+  if (!applyBtn) return;
+  applyBtn.disabled = !activeProject || !proposedOperations.length;
 }
 
 function populatePresetOptions() {
@@ -74,6 +97,35 @@ function populateModelOptions(selectedValue) {
     modelSelect.appendChild(option);
   });
   modelSelect.value = selectedValue || modelOptions[0]?.id || "";
+}
+
+function populateSerialPortOptions(selectedValue) {
+  if (!portSelect) return;
+  portSelect.innerHTML = "";
+
+  const defaultOption = document.createElement("option");
+  defaultOption.value = "";
+  defaultOption.textContent = serialPorts.length
+    ? "No saved flash port"
+    : "No USB serial ports detected";
+  portSelect.appendChild(defaultOption);
+
+  serialPorts.forEach((port) => {
+    const option = document.createElement("option");
+    option.value = port.path;
+    option.textContent = port.label;
+    portSelect.appendChild(option);
+  });
+
+  if (selectedValue && serialPorts.some((port) => port.path === selectedValue)) {
+    portSelect.value = selectedValue;
+    return;
+  }
+  if (!selectedValue && serialPorts.length === 1) {
+    portSelect.value = serialPorts[0].path;
+    return;
+  }
+  portSelect.value = "";
 }
 
 function renderProjects() {
@@ -103,6 +155,75 @@ function renderProjects() {
   });
 }
 
+function renderChatHistory() {
+  if (!chatMessages) return;
+  chatMessages.innerHTML = "";
+  if (!activeProject) {
+    chatMessages.innerHTML = '<div class="agent-status">Select a sandbox project first.</div>';
+    return;
+  }
+  if (!chatHistory.length) {
+    chatMessages.innerHTML = '<div class="agent-status">No Agent conversation yet.</div>';
+    return;
+  }
+  chatHistory.forEach((message) => {
+    const wrapper = document.createElement("div");
+    wrapper.className = `agent-chat-message ${message.role}`;
+
+    const role = document.createElement("div");
+    role.className = "agent-chat-role";
+    role.textContent = message.role === "assistant" ? "Agent" : "You";
+
+    const content = document.createElement("div");
+    content.className = "agent-chat-content";
+    content.textContent = message.content;
+
+    wrapper.appendChild(role);
+    wrapper.appendChild(content);
+    chatMessages.appendChild(wrapper);
+  });
+  chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+function renderProposals() {
+  if (!proposalsList) return;
+  proposalsList.innerHTML = "";
+  if (!activeProject) {
+    proposalsList.innerHTML = '<div class="agent-status">Select a sandbox project first.</div>';
+    updateApplyButtonState();
+    return;
+  }
+  if (!proposedOperations.length) {
+    proposalsList.innerHTML = '<div class="agent-status">No proposed file changes yet.</div>';
+    updateApplyButtonState();
+    return;
+  }
+
+  proposedOperations.forEach((operation) => {
+    const item = document.createElement("div");
+    item.className = "agent-proposal-item";
+
+    const title = document.createElement("div");
+    title.className = "agent-project-name";
+    title.textContent =
+      operation.type === "delete_file" ? "Delete file" : "Write file";
+
+    const pathNode = document.createElement("div");
+    pathNode.className = "agent-proposal-path";
+    pathNode.textContent = operation.path;
+
+    const summary = document.createElement("div");
+    summary.className = "agent-proposal-summary";
+    summary.textContent = operation.summary || "";
+
+    item.appendChild(title);
+    item.appendChild(pathNode);
+    item.appendChild(summary);
+    proposalsList.appendChild(item);
+  });
+  updateApplyButtonState();
+}
+
 function renderWorkspaceSummary() {
   if (!activeProject) {
     setText(workspaceTitle, "No project selected");
@@ -110,9 +231,16 @@ function renderWorkspaceSummary() {
     if (buildCommandInput) buildCommandInput.value = "";
     if (uploadCommandInput) uploadCommandInput.value = "";
     if (exportBtn) exportBtn.disabled = true;
+    if (savePortBtn) savePortBtn.disabled = true;
+    if (sendBtn) sendBtn.disabled = true;
+    setText(portStatus, serialPorts.length ? "Select a project to save a flash port." : "No USB serial ports loaded.");
+    setText(chatStatus, "Select a project to start chatting with the ESP32 Agent.");
     setText(savepointStatus, "Select a project to use savepoints.");
+    renderChatHistory();
+    renderProposals();
     renderSavepoints();
     populateModelOptions(modelOptions[0]?.id || "");
+    populateSerialPortOptions("");
     return;
   }
   setText(workspaceTitle, activeProject.name);
@@ -123,6 +251,18 @@ function renderWorkspaceSummary() {
   if (buildCommandInput) buildCommandInput.value = activeProject.buildCommand || "";
   if (uploadCommandInput) uploadCommandInput.value = activeProject.uploadCommand || "";
   if (exportBtn) exportBtn.disabled = false;
+  if (savePortBtn) savePortBtn.disabled = false;
+  if (sendBtn) sendBtn.disabled = false;
+  populateSerialPortOptions(activeProject.uploadPort || "");
+  setText(
+    portStatus,
+    activeProject.uploadPort
+      ? `Saved flash port: ${activeProject.uploadPort}`
+      : serialPorts.length
+        ? "Choose a detected USB serial port for this project."
+        : "No USB serial ports detected on the Pi right now.",
+  );
+  updateApplyButtonState();
 }
 
 function createTreeNode(node) {
@@ -228,6 +368,35 @@ async function loadGlobalSettings() {
   populateModelOptions(data.settings?.llmModel || modelOptions[0]?.id || "");
 }
 
+async function loadAgentSettings() {
+  const data = await fetchJson("/api/esp32-agent/settings", { cache: "no-store" });
+  defaultAgentPersonalityPrompt = data.defaultPersonalityPrompt || "";
+  if (personalityPrompt) {
+    personalityPrompt.value = data.settings?.personalityPrompt || defaultAgentPersonalityPrompt;
+  }
+  setText(personalityStatus, "Agent coding prompt loaded.");
+}
+
+async function loadSerialPorts() {
+  const data = await fetchJson("/api/esp32-agent/serial-ports", { cache: "no-store" });
+  serialPorts = Array.isArray(data.ports) ? data.ports : [];
+  populateSerialPortOptions(activeProject?.uploadPort || "");
+  if (!serialPorts.length) {
+    setText(portStatus, "No USB serial ports detected on the Pi right now.");
+    return;
+  }
+  if (activeProject?.uploadPort) {
+    setText(portStatus, `Detected ${serialPorts.length} USB serial port${serialPorts.length === 1 ? "" : "s"}.`);
+    return;
+  }
+  setText(
+    portStatus,
+    serialPorts.length === 1
+      ? "Detected 1 USB serial port. You can save it to this project."
+      : `Detected ${serialPorts.length} USB serial ports. Choose one for flashing.`,
+  );
+}
+
 async function loadProjects() {
   const data = await fetchJson("/api/esp32-agent/projects", { cache: "no-store" });
   projects = Array.isArray(data.projects) ? data.projects : [];
@@ -260,6 +429,15 @@ async function loadProjectCheckpoints(projectId) {
   );
 }
 
+async function loadProjectChat(projectId) {
+  const data = await fetchJson(
+    `/api/esp32-agent/projects/${escapePathSegment(projectId)}/chat`,
+    { cache: "no-store" },
+  );
+  chatHistory = Array.isArray(data.messages) ? data.messages : [];
+  renderChatHistory();
+}
+
 async function loadErrorLog(projectId) {
   const data = await fetchJson(
     `/api/esp32-agent/projects/${escapePathSegment(projectId)}/error-log`,
@@ -278,18 +456,27 @@ async function selectProject(projectId) {
   activeProject = data.project || null;
   activeFilePath = "";
   checkpoints = [];
+  proposedOperations = [];
+  chatHistory = [];
   if (fileEditor) {
     fileEditor.value = "";
+  }
+  if (chatInput) {
+    chatInput.value = "";
   }
   setText(editorPath, "Choose a file from the tree.");
   setText(editorStatus, "No file loaded.");
   renderProjects();
   renderWorkspaceSummary();
+  renderChatHistory();
+  renderProposals();
   if (activeProject) {
     await Promise.all([
       loadProjectTree(activeProject.id),
       loadProjectCheckpoints(activeProject.id),
+      loadProjectChat(activeProject.id),
       loadErrorLog(activeProject.id),
+      loadSerialPorts(),
     ]);
   } else {
     renderFileTree([]);
@@ -451,12 +638,14 @@ async function restoreSavepoint(checkpointId) {
   );
   activeProject = data.project || activeProject;
   activeFilePath = "";
+  proposedOperations = [];
   if (fileEditor) {
     fileEditor.value = "";
   }
   setText(editorPath, "Choose a file from the tree.");
   setText(editorStatus, "Savepoint restored. Reload a file to continue.");
   setText(savepointStatus, "Savepoint restored.");
+  renderProposals();
   await loadProjects();
   await Promise.all([
     loadProjectTree(activeProject.id),
@@ -475,6 +664,133 @@ async function saveAgentModel() {
   });
   await loadGlobalSettings();
   setText(createStatus, "Device AI model saved.");
+}
+
+async function saveProjectPort() {
+  if (!activeProject) {
+    setText(portStatus, "Select a project first.");
+    return;
+  }
+  setText(portStatus, "Saving flash port…");
+  const data = await fetchJson(
+    `/api/esp32-agent/projects/${escapePathSegment(activeProject.id)}/settings`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        uploadPort: portSelect?.value || "",
+      }),
+    },
+  );
+  activeProject = data.project || activeProject;
+  await loadProjects();
+  renderWorkspaceSummary();
+  setText(
+    portStatus,
+    activeProject.uploadPort
+      ? `Saved flash port: ${activeProject.uploadPort}`
+      : "Cleared saved flash port for this project.",
+  );
+}
+
+async function saveAgentPersonalityPrompt() {
+  setText(personalityStatus, "Saving Agent prompt…");
+  const data = await fetchJson("/api/esp32-agent/settings", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      personalityPrompt: personalityPrompt?.value || "",
+    }),
+  });
+  defaultAgentPersonalityPrompt = data.defaultPersonalityPrompt || defaultAgentPersonalityPrompt;
+  if (personalityPrompt) {
+    personalityPrompt.value = data.settings?.personalityPrompt || defaultAgentPersonalityPrompt;
+  }
+  setText(personalityStatus, "Agent coding prompt saved.");
+}
+
+function resetAgentPersonalityPrompt() {
+  if (personalityPrompt) {
+    personalityPrompt.value = defaultAgentPersonalityPrompt;
+  }
+  setText(personalityStatus, "Reset to the default ESP32 Agent prompt. Save to apply it.");
+}
+
+async function sendAgentPrompt() {
+  if (!activeProject) {
+    setText(chatStatus, "Select a project first.");
+    return;
+  }
+  const prompt = chatInput?.value?.trim() || "";
+  if (!prompt) {
+    setText(chatStatus, "Enter a message for the Agent first.");
+    return;
+  }
+  setText(chatStatus, "Asking the ESP32 Agent…");
+  const data = await fetchJson(
+    `/api/esp32-agent/projects/${escapePathSegment(activeProject.id)}/chat`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        prompt,
+      }),
+    },
+  );
+  if (chatInput) {
+    chatInput.value = "";
+  }
+  chatHistory = Array.isArray(data.messages) ? data.messages : chatHistory;
+  proposedOperations = Array.isArray(data.operations) ? data.operations : [];
+  renderChatHistory();
+  renderProposals();
+  setText(
+    chatStatus,
+    proposedOperations.length
+      ? `Agent prepared ${proposedOperations.length} proposed change${proposedOperations.length === 1 ? "" : "s"}.`
+      : "Agent replied without proposing file changes.",
+  );
+}
+
+async function applyProposedChanges() {
+  if (!activeProject) {
+    setText(chatStatus, "Select a project first.");
+    return;
+  }
+  if (!proposedOperations.length) {
+    setText(chatStatus, "No proposed changes to apply.");
+    return;
+  }
+  setText(chatStatus, "Applying proposed changes with an automatic savepoint…");
+  const data = await fetchJson(
+    `/api/esp32-agent/projects/${escapePathSegment(activeProject.id)}/apply`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        operations: proposedOperations,
+      }),
+    },
+  );
+  activeProject = data.project || activeProject;
+  proposedOperations = [];
+  activeFilePath = "";
+  if (fileEditor) {
+    fileEditor.value = "";
+  }
+  setText(editorPath, "Choose a file from the tree.");
+  setText(editorStatus, "Agent changes applied. Reload a file to review.");
+  renderProposals();
+  await loadProjects();
+  await Promise.all([
+    loadProjectTree(activeProject.id),
+    loadProjectCheckpoints(activeProject.id),
+    loadProjectChat(activeProject.id),
+  ]);
+  setText(
+    chatStatus,
+    `Applied ${data.appliedCount || 0} change${data.appliedCount === 1 ? "" : "s"} and created savepoint "${data.checkpoint?.label || "Before agent apply"}".`,
+  );
 }
 
 async function saveErrorLog() {
@@ -531,6 +847,18 @@ refreshProjectsBtn?.addEventListener("click", () => {
   });
 });
 
+refreshPortsBtn?.addEventListener("click", () => {
+  void loadSerialPorts().catch((error) => {
+    setText(portStatus, error instanceof Error ? error.message : "Failed to refresh USB serial ports.");
+  });
+});
+
+savePortBtn?.addEventListener("click", () => {
+  void saveProjectPort().catch((error) => {
+    setText(portStatus, error instanceof Error ? error.message : "Failed to save flash port.");
+  });
+});
+
 saveFileBtn?.addEventListener("click", () => {
   void saveActiveFile().catch((error) => {
     setText(editorStatus, error instanceof Error ? error.message : "Failed to save file.");
@@ -546,6 +874,28 @@ savepointBtn?.addEventListener("click", () => {
 saveModelBtn?.addEventListener("click", () => {
   void saveAgentModel().catch((error) => {
     setText(createStatus, error instanceof Error ? error.message : "Failed to save model.");
+  });
+});
+
+savePersonalityBtn?.addEventListener("click", () => {
+  void saveAgentPersonalityPrompt().catch((error) => {
+    setText(personalityStatus, error instanceof Error ? error.message : "Failed to save Agent prompt.");
+  });
+});
+
+resetPersonalityBtn?.addEventListener("click", () => {
+  resetAgentPersonalityPrompt();
+});
+
+sendBtn?.addEventListener("click", () => {
+  void sendAgentPrompt().catch((error) => {
+    setText(chatStatus, error instanceof Error ? error.message : "Failed to talk to the Agent.");
+  });
+});
+
+applyBtn?.addEventListener("click", () => {
+  void applyProposedChanges().catch((error) => {
+    setText(chatStatus, error instanceof Error ? error.message : "Failed to apply Agent changes.");
   });
 });
 
@@ -569,7 +919,13 @@ copyUploadBtn?.addEventListener("click", () => {
   void copyText(uploadCommandInput?.value || "", createStatus, "Flash command copied.");
 });
 
-Promise.all([loadPresets(), loadGlobalSettings(), loadProjects()]).catch((error) => {
+Promise.all([
+  loadPresets(),
+  loadGlobalSettings(),
+  loadAgentSettings(),
+  loadSerialPorts(),
+  loadProjects(),
+]).catch((error) => {
   const message = error instanceof Error ? error.message : "Failed to load ESP32 Agent UI.";
   setText(createStatus, message);
 });
