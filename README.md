@@ -23,7 +23,7 @@ This project starts from the official PiSugar Whisplay chatbot, but is being tai
 - **Microphone:** working
 - **Speaker / WM8960 audio path:** working
 - **Raspberry Pi Camera Module v2.1:** tested, validated, and confirmed working on the local Pi camera path
-- **Raspberry Pi Camera Module 3:** planned as a future upgrade, not yet hardware-validated in this fork
+- **Raspberry Pi Camera Module 3:** tested, validated, and confirmed working on the local Pi camera path
 - **Spoken replies / TTS:** confirmed working with `espeak-ng`
 - **Spoken photo capture:** working
 - **Captured still image on HAT display:** working
