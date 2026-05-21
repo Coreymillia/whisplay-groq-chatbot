@@ -5,7 +5,12 @@ export type GeminiImagePresetId =
   | "neon-hallucination"
   | "glitch-trip"
   | "retro-cosmic-poster"
-  | "surreal-collage";
+  | "surreal-collage"
+  | "biomechanical-growth"
+  | "cyberpunk-noir-1980s"
+  | "tech-blueprint"
+  | "haunted-daguerreotype"
+  | "bas-relief-stone-carving";
 
 export interface GeminiImagePresetDefinition {
   id: GeminiImagePresetId;
@@ -68,6 +73,46 @@ export const GEMINI_IMAGE_PRESET_OPTIONS: GeminiImagePresetDefinition[] = [
       "Create a surreal collage treatment with layered textures, cut-and-paste dream logic, unexpected symbolic elements, mixed media feel, and visually striking composition while keeping the original subject legible.",
     fallbackPrompt:
       "Transform the image into a surreal collage with layered mixed-media textures, unexpected symbolic additions, and dreamlike composition.",
+  },
+  {
+    id: "biomechanical-growth",
+    label: "Biomechanical Growth",
+    stylePrompt:
+      "Edit the photo into a dark biomechanical horror scene. Preserve the original composition and recognizable subject shapes, but merge them with intricate organic-mechanical textures: ribbed tubing, tendon-like cables, obsidian bone structures, metallic joints, and wet industrial surfaces. Use moody low-key lighting, subtle reflections, and a heavy atmospheric shadowed tone.",
+    fallbackPrompt:
+      "Transform the image into a dark biomechanical world with organic machinery, tendon-like cables, bone-like structures, and moody cinematic shadows while keeping the subject recognizable.",
+  },
+  {
+    id: "cyberpunk-noir-1980s",
+    label: "Cyberpunk Noir 1980s",
+    stylePrompt:
+      "Reimagine the photo as 1980s cyberpunk noir. Keep the original scene recognizable, but add deep cobalt-blue shadows, crimson neon rim lighting, glossy rain-slick reflections, soft atmospheric haze, and dramatic high-contrast night lighting like a retro futuristic city thriller.",
+    fallbackPrompt:
+      "Restyle the image into 1980s cyberpunk noir with neon reflections, deep blue and red lighting, glossy surfaces, and moody futuristic night atmosphere.",
+  },
+  {
+    id: "tech-blueprint",
+    label: "Tech Blueprint",
+    stylePrompt:
+      "Convert the image into a clean technical blueprint. Preserve the exact layout and major shapes from the original photo, but render everything as crisp white schematic line-art on a deep cyan-blue drafting background with subtle grid lines, cross-hatching, and diagram-style detail.",
+    fallbackPrompt:
+      "Turn the image into a technical blueprint with clean white schematic lines, blueprint-blue background, grid detail, and precise diagram styling.",
+  },
+  {
+    id: "haunted-daguerreotype",
+    label: "Haunted Daguerreotype",
+    stylePrompt:
+      "Edit the photo into a haunted 19th-century daguerreotype. Use monochrome sepia tones, strong contrast, soft dark edge vignetting, antique photographic texture, fine scratches, silver-like tarnish, and faint ghostly motion blur. Keep the original subject recognizable but make the image feel eerie, aged, and chemically distressed.",
+    fallbackPrompt:
+      "Transform the image into a haunted antique daguerreotype with sepia tones, scratches, tarnish, ghostly blur, and eerie historical atmosphere.",
+  },
+  {
+    id: "bas-relief-stone-carving",
+    label: "Bas-Relief Stone Carving",
+    stylePrompt:
+      "Transform the scene into an ancient stone bas-relief carving. Preserve the original composition, but make all subjects and objects appear sculpted directly from weathered gray limestone with chiseled edges, worn texture, and deep side lighting that emphasizes carved depth and shadow.",
+    fallbackPrompt:
+      "Restyle the image as an ancient stone bas-relief with carved limestone texture, chiselled depth, and dramatic side lighting.",
   },
 ];
 

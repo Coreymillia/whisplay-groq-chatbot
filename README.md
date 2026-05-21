@@ -44,7 +44,7 @@ This project starts from the official PiSugar Whisplay chatbot, but is being tai
 - **Gemini image generation:** confirmed working in the current code path with a saved Gemini key; the default image model is **`gemini-2.5-flash-image`**
 - **Gemini photo editing on-device:** take a photo, then use either a **voice command on the Pi** or **browser text input** to edit the current photo with Gemini; current-photo edits now generate and display successfully on the device path
 - **Gemini image settings:** the browser Settings panel now includes a **Gemini Image Model** dropdown plus a **Gemini Style Preset** dropdown for stronger edit styles without rewriting the whole prompt manually
-- **Gemini style presets:** built-in presets now include **Dali Dream**, **Melting Psychedelic**, **Neon Hallucination**, **Glitch Trip**, **Retro Cosmic Poster**, and **Surreal Collage**
+- **Gemini style presets:** built-in presets now include **Dali Dream**, **Melting Psychedelic**, **Neon Hallucination**, **Glitch Trip**, **Retro Cosmic Poster**, **Surreal Collage**, **Biomechanical Growth**, **Cyberpunk Noir 1980s**, **Tech Blueprint**, **Haunted Daguerreotype**, and **Bas-Relief Stone Carving**
 - **Preset fallback edits:** vague requests such as **"edit this photo in your favorite style"** or **"surprise me with this photo"** now use the selected Gemini preset as the creative fallback
 - **Gemini low-tier image balance meter:** the browser and physical HAT header now show the saved **Gemini 2.5 Flash Image** balance between the status text and the right-side Groq badge; each successful low-tier Gemini image subtracts a fixed **$0.04** and can auto-reload from user-defined settings
 - **Groq request counter:** both the browser header and the physical HAT header now show a compact **RPD** item beside Wi-Fi so you can track Groq requests sent today without replacing the main status text
@@ -173,6 +173,19 @@ These are a few representative shots of the current build. GitHub README pages a
 <p align="center">
   <img src="images/IMG_20260505_133314327_HDR.jpg" alt="Sketch-style photo effect example" width="48%" />
   <img src="images/IMG_20260503_171835378_HDR.jpg" alt="Cranky Bot giving a sarcastic GitHub-flavored reply" width="48%" />
+</p>
+
+### Gemini editing, opening screen, and extra screensavers
+
+<p align="center">
+  <img src="images/IMG_20260521_144328855_HDR.jpg" alt="Gemini photo editing shown on the Whisplay HAT" width="48%" />
+  <img src="images/IMG_20260521_173152523_HDR.jpg" alt="Another Gemini photo editing example on the Whisplay HAT" width="48%" />
+</p>
+
+<p align="center">
+  <img src="images/IMG_20260521_173748583.jpg" alt="Whisplay opening screen on the device" width="32%" />
+  <img src="images/IMG_20260521_173833830.jpg" alt="Additional Whisplay screensaver example" width="32%" />
+  <img src="images/IMG_20260521_173914871.jpg" alt="Second additional Whisplay screensaver example" width="32%" />
 </p>
 
 ## Fresh Pi quick start for this fork
