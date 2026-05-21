@@ -41,6 +41,11 @@ This project starts from the official PiSugar Whisplay chatbot, but is being tai
 - **One-button device flow:** long press to talk, double press to open live preview, and voice shortcuts for settings and help
 - **Voice controls:** settings, voice on/off, photo capture, photo browsing, BotNet model cycling, shutdown, and an on-device voice-command cheat sheet
 - **Vision flow:** upload a photo or capture one from the configured camera source, then ask **"what do you see?"**
+- **Gemini image generation:** confirmed working in the current code path with a saved Gemini key; the default image model is **`gemini-2.5-flash-image`**
+- **Gemini photo editing on-device:** take a photo, then use either a **voice command on the Pi** or **browser text input** to edit the current photo with Gemini; current-photo edits now generate and display successfully on the device path
+- **Gemini image settings:** the browser Settings panel now includes a **Gemini Image Model** dropdown plus a **Gemini Style Preset** dropdown for stronger edit styles without rewriting the whole prompt manually
+- **Gemini style presets:** built-in presets now include **Dali Dream**, **Melting Psychedelic**, **Neon Hallucination**, **Glitch Trip**, **Retro Cosmic Poster**, and **Surreal Collage**
+- **Preset fallback edits:** vague requests such as **"edit this photo in your favorite style"** or **"surprise me with this photo"** now use the selected Gemini preset as the creative fallback
 - **Groq request counter:** both the browser header and the physical HAT header now show a compact **RPD** item beside Wi-Fi so you can track Groq requests sent today without replacing the main status text
 - **Per-camera rotation controls:** the browser UI can rotate the **Pi Camera** and **ESP32-CAM** independently in 90-degree steps so previews and captures match your mounting direction
 - **HAT font color controls:** the browser UI can now set a single HAT reply color or switch to a **multi-color per-line** mode for easier reading on the device
@@ -65,6 +70,13 @@ This project starts from the official PiSugar Whisplay chatbot, but is being tai
 - **ESP32 Agent workspace:** `/agent` now provides persistent sandbox projects, a file tree/editor, import/export bundles, savepoints, separate coding and error-fix personalities, Pi-side USB serial-port detection, an in-browser terminal, persistent per-project Agent chat, proposed file operations, and apply-to-sandbox with an automatic savepoint
 - **Safer ESP32 Agent presets:** the Agent now includes **minimal CYD Starter** presets alongside the full Companion CYD presets, plus bot-side guardrails that lock `platformio.ini` from agent edits and reject empty source-file writes
 - **Room monitor gallery split:** the browser now exposes a dedicated **Room Monitor Gallery** with daily folders plus a separate **Saved Gallery** that moves selected files instead of copying them and supports fullscreen slideshow viewing
+
+## Current Gemini photo workflow status
+
+- **Working now:** capture a photo, say or type an edit request, and Gemini will edit the current photo using the latest shown image as context
+- **Working now:** Gemini-generated images and edited photos are saved after generation so they can be reused later in the session
+- **Fallback still available:** local voice-triggered photo effects like **retro**, **comic**, **sketch**, **pixelate**, and the rest of the existing basic image commands still work even without Gemini billing-enabled image generation
+- **Next step:** add a proper **AI image gallery** and old-photo selection flow for both the **browser UI** and the **device UI**, so previously generated images and older captured photos can be reopened and edited directly
 
 ## ESP32 Agent workspace
 
@@ -639,7 +651,12 @@ Important Gemini settings in `.env`:
 GEMINI_API_KEY=your_gemini_api_key
 # optional overrides
 # GEMINI_VISION_MODEL=gemini-2.5-flash
+# GEMINI_IMAGE_MODEL=gemini-2.5-flash-image
 ```
+
+Gemini image generation in this fork currently defaults to **`gemini-2.5-flash-image`**. You can now switch the Gemini image model in the browser **Settings** panel, and the runtime still falls back to **`GEMINI_IMAGE_MODEL`** in `.env` when no browser override is saved.
+
+The browser **Settings** panel also includes an optional **Gemini Style Preset** for stronger stylized edits. When a preset is selected, Gemini combines that preset's hidden style directions with your normal edit prompt, and vague requests like “edit this photo in your favorite style” use the preset's default creative fallback.
 
 ## Speech recognition notes for this fork
 

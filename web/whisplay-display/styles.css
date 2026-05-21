@@ -217,6 +217,7 @@ body::before {
   color: var(--text);
   font-family: var(--font-screen);
   text-shadow: var(--text-glow);
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -234,10 +235,11 @@ body::before {
   justify-content: flex-end;
   gap: 8px;
   align-items: center;
+  flex: 0 0 auto;
 }
 
 .request-count {
-  font-size: 10px;
+  font-size: 9px;
   color: var(--muted);
   font-family: var(--font-screen);
   white-space: nowrap;

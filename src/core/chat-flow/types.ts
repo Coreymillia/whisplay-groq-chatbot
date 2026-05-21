@@ -3,7 +3,9 @@ import { StreamResponser } from "../StreamResponsor";
 export type FlowName =
   | "sleep"
   | "camera"
+  | "gallery_menu"
   | "photo_browser"
+  | "generated_image_browser"
   | "voice_command_help"
   | "music"
   | "listening"

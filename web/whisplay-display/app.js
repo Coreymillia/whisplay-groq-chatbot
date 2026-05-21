@@ -45,6 +45,8 @@ const groqKeyInput = document.getElementById("groqKeyInput");
 const groqKeyHint = document.getElementById("groqKeyHint");
 const geminiKeyInput = document.getElementById("geminiKeyInput");
 const geminiKeyHint = document.getElementById("geminiKeyHint");
+const geminiImageModelSelect = document.getElementById("geminiImageModelSelect");
+const geminiImagePresetSelect = document.getElementById("geminiImagePresetSelect");
 const personalityPresetSelect = document.getElementById("personalityPresetSelect");
 const personalityInput = document.getElementById("personalityInput");
 const personalityNameInput = document.getElementById("personalityNameInput");
@@ -67,6 +69,7 @@ const esp32CamRotationSelect = document.getElementById("esp32CamRotationSelect")
 const weatherLatitudeInput = document.getElementById("weatherLatitudeInput");
 const weatherLongitudeInput = document.getElementById("weatherLongitudeInput");
 const headerModeSelect = document.getElementById("headerModeSelect");
+const groqHeaderBadgeModeSelect = document.getElementById("groqHeaderBadgeModeSelect");
 const screensaverModeSelect = document.getElementById("screensaverModeSelect");
 const idleTimeoutSelect = document.getElementById("idleTimeoutSelect");
 const screenBlankTimeoutSelect = document.getElementById("screenBlankTimeoutSelect");
@@ -152,6 +155,8 @@ const CUSTOM_PERSONALITY_PRESET_ID = "custom";
 let personalityPresets = [];
 let botNetModelOptions = [];
 let llmModelOptions = [];
+let geminiImageModelOptions = [];
+let geminiImagePresetOptions = [];
 let volumeLevelOptions = [];
 let recordTimeoutOptions = [];
 let scrollSpeedOptions = [];
@@ -159,8 +164,13 @@ let hatScrollSpeedOptions = [];
 let idleTimeoutOptions = [];
 
 const DEFAULT_HEADER_MODE = "emoji";
+const DEFAULT_GROQ_HEADER_BADGE_MODE = "model";
 const DEFAULT_SCREENSAVER_MODE = "retro-geometry";
 const DEFAULT_IDLE_TIMEOUT_SEC = 120;
+const DEFAULT_GEMINI_IMAGE_MODEL = "gemini-2.5-flash-image";
+const DEFAULT_GEMINI_IMAGE_PRESET = "none";
+let currentLlmModel = "";
+let currentGroqHeaderBadgeMode = DEFAULT_GROQ_HEADER_BADGE_MODE;
 
 function setBotNetStatus(message, isError = false) {
   if (!botNetStatus) return;
@@ -760,18 +770,37 @@ function formatMs(ms) {
   return min + ":" + (sec < 10 ? "0" : "") + sec;
 }
 
-function formatDailyRequestsLabel(value) {
+function formatFullLimit(value) {
   const numeric = Number.isFinite(Number(value))
     ? Math.max(0, Math.round(Number(value)))
     : 0;
-  return `RPD ${numeric}`;
+  return String(numeric);
+}
+
+function getCurrentModelOption() {
+  return llmModelOptions.find((option) => option.id === currentLlmModel) || null;
+}
+
+function formatGroqHeaderBadgeLabel(value) {
+  const numeric = Number.isFinite(Number(value))
+    ? Math.max(0, Math.round(Number(value)))
+    : 0;
+  const modelOption = getCurrentModelOption();
+  if (currentGroqHeaderBadgeMode === "rpd-remaining") {
+    const rpdLimit = modelOption?.rateLimits?.rpd;
+    if (typeof rpdLimit === "number" && Number.isFinite(rpdLimit) && rpdLimit > 0) {
+      return formatFullLimit(Math.max(0, rpdLimit - numeric));
+    }
+    return "?";
+  }
+  return modelOption?.shortLabel || modelOption?.label || "Model";
 }
 
 function applyState(data) {
   if (!data || !data.ready) return;
 
   const status = data.status || "";
-  statusText.textContent = status;
+  statusText.textContent = status === "last reply" ? "Last" : status;
   emojiText.textContent = data.emoji || "";
   updateText(
     data.text || "",
@@ -779,7 +808,7 @@ function applyState(data) {
     data.scroll_speed,
     data.scroll_speed_factor,
   );
-  updateTextInputState(data.text_input_enabled, status);
+  updateTextInputState(data.text_input_enabled, status, Boolean(data.image));
 
   const ledColor = normalizeColor(data.RGB);
   led.style.background = ledColor;
@@ -796,9 +825,11 @@ function applyState(data) {
   }
   batteryFill.style.background = normalizeColor(data.battery_color);
   if (dailyRequestsText) {
-    dailyRequestsText.textContent = formatDailyRequestsLabel(
-      data.groq_requests_today,
+    dailyRequestsText.dataset.requestsToday = String(
+      Number.isFinite(Number(data.groq_requests_today)) ? Number(data.groq_requests_today) : 0,
     );
+    dailyRequestsText.textContent =
+      data.groq_header_badge_text || formatGroqHeaderBadgeLabel(data.groq_requests_today);
   }
 
   setIconVisible(wifiIcon, updateWifiIcon(data.wifi_signal_level));
@@ -1268,6 +1299,51 @@ function populateLlmModelOptions(selectedValue) {
   llmModelSelect.value = fallbackValue;
 }
 
+function populateGeminiImageModelOptions(selectedValue) {
+  if (!geminiImageModelSelect) return;
+  geminiImageModelSelect.innerHTML = "";
+  geminiImageModelOptions.forEach((item) => {
+    const option = document.createElement("option");
+    option.value = item.id;
+    option.textContent = item.label;
+    geminiImageModelSelect.appendChild(option);
+  });
+  const fallbackValue = selectedValue || geminiImageModelOptions[0]?.id || DEFAULT_GEMINI_IMAGE_MODEL;
+  if (
+    fallbackValue &&
+    ![...geminiImageModelSelect.options].some((option) => option.value === fallbackValue)
+  ) {
+    const option = document.createElement("option");
+    option.value = fallbackValue;
+    option.textContent = fallbackValue;
+    geminiImageModelSelect.appendChild(option);
+  }
+  geminiImageModelSelect.value = fallbackValue;
+}
+
+function populateGeminiImagePresetOptions(selectedValue) {
+  if (!geminiImagePresetSelect) return;
+  geminiImagePresetSelect.innerHTML = "";
+  geminiImagePresetOptions.forEach((item) => {
+    const option = document.createElement("option");
+    option.value = item.id;
+    option.textContent = item.label;
+    geminiImagePresetSelect.appendChild(option);
+  });
+  const fallbackValue =
+    selectedValue || geminiImagePresetOptions[0]?.id || DEFAULT_GEMINI_IMAGE_PRESET;
+  if (
+    fallbackValue &&
+    ![...geminiImagePresetSelect.options].some((option) => option.value === fallbackValue)
+  ) {
+    const option = document.createElement("option");
+    option.value = fallbackValue;
+    option.textContent = fallbackValue;
+    geminiImagePresetSelect.appendChild(option);
+  }
+  geminiImagePresetSelect.value = fallbackValue;
+}
+
 function populateRecordTimeoutOptions(selectedValue) {
   if (!recordTimeSelect) return;
   recordTimeSelect.innerHTML = "";
@@ -1462,7 +1538,12 @@ function syncPresetSelectionFromPrompt(prompt) {
 
 function applySettings(settings) {
   if (!settings) return;
+  currentLlmModel = settings.llmModel || llmModelOptions[0]?.id || "";
+  currentGroqHeaderBadgeMode =
+    settings.groqHeaderBadgeMode || DEFAULT_GROQ_HEADER_BADGE_MODE;
   populateLlmModelOptions(settings.llmModel || "");
+  populateGeminiImageModelOptions(settings.geminiImageModel || DEFAULT_GEMINI_IMAGE_MODEL);
+  populateGeminiImagePresetOptions(settings.geminiImagePreset || DEFAULT_GEMINI_IMAGE_PRESET);
   populatePersonalityPresets(settings.personalityPresetId);
   populateVolumeLevelOptions(settings.volumeLevel || 9);
   populateRecordTimeoutOptions(settings.manualRecordMaxSec || 15);
@@ -1489,6 +1570,18 @@ function applySettings(settings) {
   }
   if (llmModelSelect) {
     llmModelSelect.value = settings.llmModel || llmModelOptions[0]?.id || "";
+  }
+  if (geminiImageModelSelect) {
+    geminiImageModelSelect.value =
+      settings.geminiImageModel || geminiImageModelOptions[0]?.id || DEFAULT_GEMINI_IMAGE_MODEL;
+  }
+  if (geminiImagePresetSelect) {
+    geminiImagePresetSelect.value =
+      settings.geminiImagePreset || geminiImagePresetOptions[0]?.id || DEFAULT_GEMINI_IMAGE_PRESET;
+  }
+  if (groqHeaderBadgeModeSelect) {
+    groqHeaderBadgeModeSelect.value =
+      settings.groqHeaderBadgeMode || DEFAULT_GROQ_HEADER_BADGE_MODE;
   }
   if (musicShuffleCheckbox) {
     musicShuffleCheckbox.checked = Boolean(settings.musicShuffle);
@@ -1547,6 +1640,11 @@ function applySettings(settings) {
   if (geminiKeyInput) {
     geminiKeyInput.value = "";
   }
+  if (dailyRequestsText) {
+    dailyRequestsText.textContent = formatGroqHeaderBadgeLabel(
+      Number(dailyRequestsText.dataset.requestsToday || "0"),
+    );
+  }
   updateCameraSourceUi();
 }
 
@@ -1581,6 +1679,12 @@ async function loadSettings() {
       : [];
     llmModelOptions = Array.isArray(payload.llmModelOptions)
       ? payload.llmModelOptions
+      : [];
+    geminiImageModelOptions = Array.isArray(payload.geminiImageModelOptions)
+      ? payload.geminiImageModelOptions
+      : [];
+    geminiImagePresetOptions = Array.isArray(payload.geminiImagePresetOptions)
+      ? payload.geminiImagePresetOptions
       : [];
     applySettings(payload.settings || {});
     settingsLoaded = true;
@@ -1971,7 +2075,13 @@ async function saveSettings({ clearGroqApiKey = false } = {}) {
     groqApiKey: clearGroqApiKey ? "" : (groqKeyInput?.value || "").trim(),
     clearGroqApiKey,
     geminiApiKey: (geminiKeyInput?.value || "").trim(),
+    geminiImageModel:
+      geminiImageModelSelect?.value || geminiImageModelOptions[0]?.id || DEFAULT_GEMINI_IMAGE_MODEL,
+    geminiImagePreset:
+      geminiImagePresetSelect?.value || geminiImagePresetOptions[0]?.id || DEFAULT_GEMINI_IMAGE_PRESET,
     llmModel: llmModelSelect?.value || llmModelOptions[0]?.id || "",
+    groqHeaderBadgeMode:
+      groqHeaderBadgeModeSelect?.value || DEFAULT_GROQ_HEADER_BADGE_MODE,
     personalityPrompt: (personalityInput?.value || "").trim(),
     voiceMode: voiceModeSelect?.value || "text-only",
     musicShuffle: Boolean(musicShuffleCheckbox?.checked),
@@ -2029,6 +2139,12 @@ async function saveSettings({ clearGroqApiKey = false } = {}) {
     personalityPresets = Array.isArray(payload.presets)
       ? payload.presets
       : personalityPresets;
+    geminiImageModelOptions = Array.isArray(payload.geminiImageModelOptions)
+      ? payload.geminiImageModelOptions
+      : geminiImageModelOptions;
+    geminiImagePresetOptions = Array.isArray(payload.geminiImagePresetOptions)
+      ? payload.geminiImagePresetOptions
+      : geminiImagePresetOptions;
     applySettings(payload.settings || {});
     loadRoomMonitorPhotos();
     setSettingsStatus(
@@ -2785,14 +2901,10 @@ const textInput = document.getElementById("textInput");
 const textSendBtn = document.getElementById("textSendBtn");
 let currentDeviceStatus = "";
 
-function updateTextInputState(enabled, status) {
+function updateTextInputState(enabled, status, hasImage = false) {
   currentDeviceStatus = status || "";
-  const isEnabled =
-    typeof enabled === "boolean"
-      ? enabled
-      : currentDeviceStatus === "idle" || currentDeviceStatus === "starting";
-  textInput.disabled = !isEnabled;
-  textSendBtn.disabled = !isEnabled;
+  textInput.disabled = false;
+  textSendBtn.disabled = false;
 }
 
 async function sendTextInput() {

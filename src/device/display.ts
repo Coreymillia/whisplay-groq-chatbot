@@ -5,7 +5,9 @@ import { getCurrentTimeTag } from "../utils";
 import {
   getRuntimeSettings,
   getScrollSpeedFactor,
+  type GroqHeaderBadgeMode,
 } from "../config/runtime-settings";
+import { formatGroqHeaderBadgeText } from "../status/groq-header-badge";
 import { WebDisplayServer } from "./web-display";
 import { webAudioBridge } from "./web-audio-bridge";
 import { setVolumeByLevel } from "../utils/volume";
@@ -38,6 +40,9 @@ export interface Status {
   capture_image_path: string;
   wifi_signal_level: number;
   groq_requests_today: number;
+  llm_model: string;
+  groq_header_badge_mode: string;
+  groq_header_badge_text: string;
   vpn_connected: boolean;
   rag_icon_visible: boolean;
   image_icon_visible: boolean;
@@ -73,6 +78,13 @@ function getInitialStatus(): Status {
     capture_image_path: "",
     wifi_signal_level: 0,
     groq_requests_today: 0,
+    llm_model: settings.llmModel,
+    groq_header_badge_mode: settings.groqHeaderBadgeMode,
+    groq_header_badge_text: formatGroqHeaderBadgeText(
+      settings.llmModel,
+      settings.groqHeaderBadgeMode,
+      0,
+    ),
     vpn_connected: false,
     rag_icon_visible: false,
     image_icon_visible: false,
@@ -153,6 +165,8 @@ export class WhisplayDisplay {
             idle_timeout_sec: settings.idleTimeoutSec,
             screen_blank_timeout_sec: settings.screenBlankTimeoutSec,
             hat_text_color: settings.hatTextColor,
+            llm_model: settings.llmModel,
+            groq_header_badge_mode: settings.groqHeaderBadgeMode,
             scroll_speed: this.currentStatus.scroll_speed,
             scroll_speed_factor: getScrollSpeedFactor(settings.scrollSpeedLevel),
             hat_scroll_speed_factor: settings.hatScrollSpeedLevel,
@@ -162,9 +176,11 @@ export class WhisplayDisplay {
         },
         onImageUploaded: (imagePath) => {
           void this.display({
+            status: "photo ready",
             image: imagePath,
             image_icon_visible: false,
             text: "[camera]Photo captured.",
+            text_input_enabled: true,
           });
         },
         onCameraPreviewRequested: () => this.handleCameraPreviewRequest(),
@@ -464,6 +480,8 @@ export class WhisplayDisplay {
       capture_image_path,
       wifi_signal_level,
       groq_requests_today,
+      llm_model,
+      groq_header_badge_mode,
       vpn_connected,
       rag_icon_visible,
       image_icon_visible,
@@ -479,6 +497,11 @@ export class WhisplayDisplay {
       ...this.currentStatus,
       ...normalizedStatus,
     };
+    const groqHeaderBadgeText = formatGroqHeaderBadgeText(
+      llm_model,
+      groq_header_badge_mode as GroqHeaderBadgeMode,
+      groq_requests_today,
+    );
 
     const changedValues = Object.entries(normalizedStatus).filter(
       ([key, value]) => (this.currentStatus as any)[key] !== value,
@@ -505,6 +528,9 @@ export class WhisplayDisplay {
     this.currentStatus.capture_image_path = capture_image_path;
     this.currentStatus.wifi_signal_level = wifi_signal_level;
     this.currentStatus.groq_requests_today = groq_requests_today;
+    this.currentStatus.llm_model = llm_model;
+    this.currentStatus.groq_header_badge_mode = groq_header_badge_mode;
+    this.currentStatus.groq_header_badge_text = groqHeaderBadgeText;
     this.currentStatus.vpn_connected = vpn_connected;
     this.currentStatus.rag_icon_visible = rag_icon_visible;
     this.currentStatus.image_icon_visible = image_icon_visible;

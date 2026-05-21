@@ -2,12 +2,11 @@ from icon_constants import STATUS_ICON_HEIGHT
 
 
 class RequestCountStatusIcon:
-    def __init__(self, requests_today, text_font, status_font_size):
-        self.requests_today = max(0, int(requests_today))
+    def __init__(self, label_text, text_font, status_font_size):
+        self.label = str(label_text or "").strip()
         self.text_font = text_font
         self.status_font_size = status_font_size
         self.icon_height = STATUS_ICON_HEIGHT
-        self.label = f"RPD {self.requests_today}"
 
     def measure(self):
         text_bbox = self.text_font.getbbox(self.label)

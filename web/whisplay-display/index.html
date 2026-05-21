@@ -23,7 +23,7 @@
               <img class="status-icon" id="imageIcon" src="/img/image.png" alt="image" />
               <img class="status-icon" id="ragIcon" src="/img/rag.png" alt="rag" />
               <img class="status-icon" id="vpnIcon" src="/img/vpn.png" alt="vpn" />
-              <span class="request-count" id="dailyRequestsText">RPD 0</span>
+              <span class="request-count" id="dailyRequestsText">Model</span>
               <img class="status-icon" id="wifiIcon" src="/img/wifi-strong.png" alt="wifi" />
               <div class="battery">
                 <div class="battery-shell">
@@ -376,6 +376,33 @@
                 <select class="settings-select" id="llmModelSelect"></select>
                 <div class="field-hint">
                   Shared device model for normal chat and the ESP32 Agent workspace.
+                </div>
+              </div>
+
+              <div class="settings-field">
+                <label class="field-label" for="geminiImageModelSelect">Gemini Image Model</label>
+                <select class="settings-select" id="geminiImageModelSelect"></select>
+                <div class="field-hint">
+                  Used for Gemini image generation and photo editing. Start with the Flash image model for the cheapest path.
+                </div>
+              </div>
+
+              <div class="settings-field">
+                <label class="field-label" for="geminiImagePresetSelect">Gemini Style Preset</label>
+                <select class="settings-select" id="geminiImagePresetSelect"></select>
+                <div class="field-hint">
+                  Optional strong style layer for Gemini edits. If you ask for a vague edit like a favorite-style remix, the selected preset supplies the creative direction.
+                </div>
+              </div>
+
+              <div class="settings-field">
+                <label class="field-label" for="groqHeaderBadgeModeSelect">Groq Header Badge</label>
+                <select class="settings-select" id="groqHeaderBadgeModeSelect">
+                  <option value="model">Selected Model</option>
+                  <option value="rpd-remaining">RPD Remaining</option>
+                </select>
+                <div class="field-hint">
+                  Browser header only. RPD remaining uses the local request counter; live RPM/TPM/TPD tracking is not wired in yet.
                 </div>
               </div>
 

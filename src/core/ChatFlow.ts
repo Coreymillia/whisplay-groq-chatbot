@@ -233,7 +233,7 @@ class ChatFlow implements ChatFlowContext {
     }
     console.log(`[${getCurrentTimeTag()}] switch to:`, flowName);
     this.stateMachine.transitionTo(flowName);
-    display({ text_input_enabled: flowName === "sleep" });
+    display({ text_input_enabled: flowName === "sleep" || flowName === "image" });
   };
 
   isAnswerFlow = (): boolean => {

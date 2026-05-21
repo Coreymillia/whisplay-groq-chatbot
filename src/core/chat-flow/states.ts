@@ -1,3 +1,5 @@
+import fs from "fs";
+import path from "path";
 import moment from "moment";
 import { compact, noop } from "lodash";
 import {
@@ -23,21 +25,22 @@ import { getSystemPromptWithKnowledge } from "../Knowledge";
 import { enableRAG } from "../../cloud-api/knowledge";
 import { getSystemPrompt } from "../../config/llm-config";
 import { getOpenAIClient, getOpenAILLMModel } from "../../cloud-api/openai/openai";
-import { cameraDir } from "../../utils/dir";
+import { cameraDir, imageDir } from "../../utils/dir";
 import {
   activateInteractiveImage,
   clearInteractiveImage,
   clearPendingCapturedImgForChat,
   getInteractiveImage,
+  getLatestCapturedImg,
   hasInteractiveImage,
   listCapturedImgs,
+  listGeneratedImgs,
   getLatestGenImg,
   getLatestDisplayImg,
   getLatestShowedImage,
   queueDisplayImage,
   setLatestCapturedImg,
   setPendingCapturedImgForChat,
-  showCapturedImgByIndex,
   showLatestCapturedImg,
 } from "../../utils/image";
 import { sendWhisplayIMMessage } from "../../cloud-api/whisplay-im/whisplay-im";
@@ -123,10 +126,24 @@ const imageGenerationIntentPatterns = [
   /^\s*(?:draw|illustrate|paint)\b/i,
   /\b(?:generate|create|make)\s+(?:me\s+)?(?:an?\s+)?(?:image|picture|photo|drawing|illustration|artwork|logo|poster|wallpaper)\b/i,
   /^\s*edit\s+(?:this|the|that)\s+(?:image|photo|picture)\b/i,
+  /\b(?:edit|restyle|transform|change)\s+(?:this|the|that|my)?\s*(?:image|photo|picture)\b/i,
+  /\b(?:make|turn|give|apply)\s+(?:this|the|that|my)?\s*(?:image|photo|picture)\b/i,
+  /\b(?:surprise\s+me|work\s+your\s+magic)\b[\s\S]{0,80}\b(?:image|photo|picture)\b/i,
+  /\b(?:do\s+your\s+thing|favorite\s+style|personal\s+style)\b[\s\S]{0,80}\b(?:image|photo|picture)\b/i,
+  /\bmake\s+(?:this|the|that|my)?\s*(?:image|photo|picture)\s+artistic\b/i,
 ];
 
 const imageGenerationContextPattern =
-  /\b(?:this|the|that)\s+(?:image|picture|photo)\b/i;
+  /\b(?:edit|restyle|transform|change|make|turn|give|apply|surprise|work|favorite|personal)\b[\s\S]{0,80}\b(?:this|the|that|my)?\s*(?:image|picture|photo)\b/i;
+
+const showInteractiveImageIntentPatterns = [
+  /^\s*(?:show|display|open)\s+(?:me\s+)?(?:the\s+)?(?:image|photo|picture)\s*[.!?]*$/i,
+  /^\s*(?:show|display|open)\s+(?:this|that|my)\s+(?:image|photo|picture)\s*[.!?]*$/i,
+];
+
+const editInteractiveImageIntentPatterns = [
+  /^\s*edit\s+(?:the\s+|this\s+|that\s+|my\s+)?(?:image|photo|picture)\s*[.!?]*$/i,
+];
 
 const imageEffectCommandMatchers: Array<{
   effect: ImageEffectId;
@@ -254,6 +271,8 @@ const captureIntentPatterns = [
 
 const browseIntentPatterns = [
   /^\s*browse\s+(?:photos|images)\s*[.!?]*$/i,
+  /^\s*open\s+gallery\s*[.!?]*$/i,
+  /^\s*(?:show|open)\s+(?:the\s+)?gallery\s*[.!?]*$/i,
 ];
 
 const shutdownIntentPatterns = [
@@ -381,12 +400,74 @@ function shouldUseImageContextForGeneration(prompt: string): boolean {
   return imageGenerationContextPattern.test(trimmed);
 }
 
+function shouldShowInteractiveImage(prompt: string): boolean {
+  const trimmed = prompt.trim();
+  if (!trimmed) {
+    return false;
+  }
+  return showInteractiveImageIntentPatterns.some((pattern) => pattern.test(trimmed));
+}
+
+function shouldOpenInteractiveImageEditor(prompt: string): boolean {
+  const trimmed = prompt.trim();
+  if (!trimmed) {
+    return false;
+  }
+  return editInteractiveImageIntentPatterns.some((pattern) => pattern.test(trimmed));
+}
+
 function shouldKeepInteractiveImageFocus(prompt: string): boolean {
   return (
     shouldRouteToVision(prompt) ||
     parseImageEffectCommand(prompt) !== null ||
     shouldUseImageContextForGeneration(prompt)
   );
+}
+
+function shouldKeepImageVisibleDuringReply(prompt: string): boolean {
+  return (
+    parseImageEffectCommand(prompt) !== null ||
+    shouldRouteToImageGeneration(prompt)
+  );
+}
+
+function isEligibleInteractiveImagePath(imagePath: string): boolean {
+  if (!imagePath) {
+    return false;
+  }
+  const resolved = path.resolve(imagePath);
+  const roots = [path.resolve(cameraDir), path.resolve(imageDir)];
+  return (
+    fs.existsSync(resolved) &&
+    roots.some((root) => resolved === root || resolved.startsWith(`${root}${path.sep}`))
+  );
+}
+
+function getDefaultInteractiveImageTarget(): {
+  path: string;
+  source: "manual-selection" | "other";
+} | null {
+  const cameraRoot = path.resolve(cameraDir);
+  const candidates = [
+    getInteractiveImage(),
+    getLatestShowedImage(),
+    getLatestGenImg(),
+    getLatestCapturedImg(),
+  ];
+  for (const candidate of candidates) {
+    if (!isEligibleInteractiveImagePath(candidate)) {
+      continue;
+    }
+    const resolved = path.resolve(candidate);
+    return {
+      path: resolved,
+      source:
+        resolved === cameraRoot || resolved.startsWith(`${cameraRoot}${path.sep}`)
+          ? "manual-selection"
+          : "other",
+    };
+  }
+  return null;
 }
 
 function replayTextAnswerAndSleep(
@@ -461,6 +542,33 @@ function shouldAdvanceBotNetModel(prompt: string): boolean {
 function shouldBrowsePhotos(prompt: string): boolean {
   const trimmed = prompt.trim();
   return browseIntentPatterns.some((pattern) => pattern.test(trimmed));
+}
+
+function getAvailableGalleryEntries(): Array<{
+  id: "photos" | "generated";
+  label: string;
+  flow: "photo_browser" | "generated_image_browser";
+}> {
+  const entries: Array<{
+    id: "photos" | "generated";
+    label: string;
+    flow: "photo_browser" | "generated_image_browser";
+  }> = [];
+  if (listCapturedImgs().length) {
+    entries.push({
+      id: "photos",
+      label: "Camera Photos",
+      flow: "photo_browser",
+    });
+  }
+  if (listGeneratedImgs().length) {
+    entries.push({
+      id: "generated",
+      label: "AI Images",
+      flow: "generated_image_browser",
+    });
+  }
+  return entries;
 }
 
 function shouldShutdown(prompt: string): boolean {
@@ -810,6 +918,85 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
       RGB: "#00ff88",
     });
   },
+  gallery_menu: (ctx: ChatFlowContext) => {
+    let menuIndex = 0;
+    let holdTimer: NodeJS.Timeout | null = null;
+    let holdTriggered = false;
+
+    const exitGalleryMenu = () => {
+      if (holdTimer) {
+        clearTimeout(holdTimer);
+        holdTimer = null;
+      }
+      ctx.transitionTo("sleep");
+    };
+
+    const renderMenu = () => {
+      const entries = getAvailableGalleryEntries();
+      if (!entries.length) {
+        display({
+          status: "gallery",
+          emoji: STATE_EMOJIS.camera,
+          RGB: "#0088ff",
+          text: "No galleries yet.\nDouble press: exit",
+          image: "",
+          image_icon_visible: false,
+        });
+        return;
+      }
+      if (menuIndex >= entries.length) {
+        menuIndex = 0;
+      }
+      const selected = entries[menuIndex];
+      display({
+        status: "gallery",
+        emoji: STATE_EMOJIS.camera,
+        RGB: "#0088ff",
+        text:
+          `Gallery ${menuIndex + 1}/${entries.length}\n` +
+          `${selected.label}\n` +
+          "Short press: next\nHold: open\nDouble press: exit",
+        image: "",
+        image_icon_visible: false,
+      });
+    };
+
+    onButtonDoubleClick(() => {
+      exitGalleryMenu();
+    });
+    onButtonPressed(() => {
+      holdTriggered = false;
+      if (holdTimer) {
+        clearTimeout(holdTimer);
+      }
+      holdTimer = setTimeout(() => {
+        holdTriggered = true;
+        const entries = getAvailableGalleryEntries();
+        const selected = entries[menuIndex];
+        if (!selected) {
+          exitGalleryMenu();
+          return;
+        }
+        ctx.transitionTo(selected.flow);
+      }, PHOTO_BROWSER_EXIT_HOLD_MS);
+    });
+    onButtonReleased(() => {
+      if (holdTimer) {
+        clearTimeout(holdTimer);
+        holdTimer = null;
+      }
+      if (holdTriggered) {
+        holdTriggered = false;
+        return;
+      }
+      const entries = getAvailableGalleryEntries();
+      if (entries.length > 1) {
+        menuIndex = (menuIndex + 1) % entries.length;
+      }
+      renderMenu();
+    });
+    renderMenu();
+  },
   photo_browser: (ctx: ChatFlowContext) => {
     let photoIndex = 0;
     let holdTimer: NodeJS.Timeout | null = null;
@@ -843,18 +1030,22 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
       if (photoIndex >= photos.length) {
         photoIndex = 0;
       }
-      const imagePath = showCapturedImgByIndex(photoIndex);
+      const imagePath = photos[photoIndex] || "";
       display({
         status: "photos",
         emoji: STATE_EMOJIS.camera,
         RGB: "#0088ff",
-        text: `Photo ${photoIndex + 1}/${photos.length}\nShort press: next\nHold: exit`,
+        text:
+          `Photo ${photoIndex + 1}/${photos.length}\n` +
+          "Short press: next\nHold: select\nDouble press: exit",
         image: imagePath,
         image_icon_visible: false,
       });
     };
 
-    onButtonDoubleClick(null);
+    onButtonDoubleClick(() => {
+      exitPhotoBrowser();
+    });
     onButtonPressed(() => {
       holdTriggered = false;
       if (holdTimer) {
@@ -862,7 +1053,22 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
       }
       holdTimer = setTimeout(() => {
         holdTriggered = true;
-        exitPhotoBrowser();
+        const photos = listCapturedImgs();
+        const imagePath = photos[photoIndex] || "";
+        if (!imagePath) {
+          exitPhotoBrowser();
+          return;
+        }
+        activateInteractiveImage(imagePath, "manual-selection");
+        queueDisplayImage(imagePath);
+        display({
+          status: "photo ready",
+          image: imagePath,
+          image_icon_visible: false,
+          text: "[gallery]Photo selected.",
+          text_input_enabled: true,
+        });
+        ctx.transitionTo("image");
       }, PHOTO_BROWSER_EXIT_HOLD_MS);
     });
     onButtonReleased(() => {
@@ -881,6 +1087,97 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
       renderCurrentPhoto();
     });
     renderCurrentPhoto();
+  },
+  generated_image_browser: (ctx: ChatFlowContext) => {
+    let imageIndex = 0;
+    let holdTimer: NodeJS.Timeout | null = null;
+    let holdTriggered = false;
+
+    const exitGeneratedImageBrowser = () => {
+      if (holdTimer) {
+        clearTimeout(holdTimer);
+        holdTimer = null;
+      }
+      display({
+        image: "",
+        image_icon_visible: false,
+      });
+      ctx.transitionTo("sleep");
+    };
+
+    const renderCurrentImage = () => {
+      const images = listGeneratedImgs();
+      if (!images.length) {
+        display({
+          status: "ai images",
+          emoji: STATE_EMOJIS.camera,
+          RGB: "#8a4dff",
+          text: "No AI images yet.\nDouble press: exit",
+          image: "",
+          image_icon_visible: false,
+        });
+        return;
+      }
+      if (imageIndex >= images.length) {
+        imageIndex = 0;
+      }
+      const imagePath = images[imageIndex] || "";
+      display({
+        status: "ai images",
+        emoji: STATE_EMOJIS.camera,
+        RGB: "#8a4dff",
+        text:
+          `AI Image ${imageIndex + 1}/${images.length}\n` +
+          "Short press: next\nHold: select\nDouble press: exit",
+        image: imagePath,
+        image_icon_visible: false,
+      });
+    };
+
+    onButtonDoubleClick(() => {
+      exitGeneratedImageBrowser();
+    });
+    onButtonPressed(() => {
+      holdTriggered = false;
+      if (holdTimer) {
+        clearTimeout(holdTimer);
+      }
+      holdTimer = setTimeout(() => {
+        holdTriggered = true;
+        const images = listGeneratedImgs();
+        const imagePath = images[imageIndex] || "";
+        if (!imagePath) {
+          exitGeneratedImageBrowser();
+          return;
+        }
+        activateInteractiveImage(imagePath, "other");
+        queueDisplayImage(imagePath);
+        display({
+          status: "photo ready",
+          image: imagePath,
+          image_icon_visible: false,
+          text: "[gallery]AI image selected.",
+          text_input_enabled: true,
+        });
+        ctx.transitionTo("image");
+      }, PHOTO_BROWSER_EXIT_HOLD_MS);
+    });
+    onButtonReleased(() => {
+      if (holdTimer) {
+        clearTimeout(holdTimer);
+        holdTimer = null;
+      }
+      if (holdTriggered) {
+        holdTriggered = false;
+        return;
+      }
+      const images = listGeneratedImgs();
+      if (images.length > 1) {
+        imageIndex = (imageIndex + 1) % images.length;
+      }
+      renderCurrentImage();
+    });
+    renderCurrentImage();
   },
   voice_command_help: (ctx: ChatFlowContext) => {
     let pageIndex = 0;
@@ -1218,6 +1515,9 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
       RGB: "#00c8a3",
     });
     const currentAnswerId = ctx.answerId;
+    if (getCurrentStatus().image && !shouldKeepImageVisibleDuringReply(ctx.asrText)) {
+      display({ image: "", image_icon_visible: false });
+    }
     if (hasInteractiveImage() && !shouldKeepInteractiveImageFocus(ctx.asrText)) {
       clearInteractiveImage();
     }
@@ -1334,6 +1634,28 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
       clearPendingCapturedImgForChat();
       display({ image_icon_visible: false });
       ctx.transitionTo("music");
+    };
+    const transitionDirectlyToImage = (
+      message: string,
+      imagePath: string,
+      status = "photo ready",
+    ): void => {
+      llmResponseText = message;
+      stopPlaying();
+      ctx.rememberLastAnswer({
+        text: message,
+        emoji: STATE_EMOJIS.answering,
+        image: imagePath,
+      });
+      clearPendingCapturedImgForChat();
+      display({
+        status,
+        image: imagePath,
+        image_icon_visible: false,
+        text: `[camera]${message}`,
+        text_input_enabled: true,
+      });
+      ctx.transitionTo("image");
     };
     if (shouldOpenSettings(ctx.asrText)) {
       ctx.openSettingsMenu();
@@ -1514,14 +1836,18 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
       return;
     }
     if (shouldBrowsePhotos(ctx.asrText)) {
-      const photos = listCapturedImgs();
-      if (!photos.length) {
-        display({ text: "[photos]No saved photos yet." });
-        finishDirectMessage("No saved photos yet.");
+      const galleries = getAvailableGalleryEntries();
+      if (!galleries.length) {
+        display({ text: "[gallery]No saved photos or AI images yet." });
+        finishDirectMessage("No saved photos or AI images yet.");
         return;
       }
       ctx.endWakeSession();
-      ctx.transitionTo("photo_browser");
+      if (galleries.length === 1) {
+        ctx.transitionTo(galleries[0].flow);
+        return;
+      }
+      ctx.transitionTo("gallery_menu");
       return;
     }
     if (shouldCaptureImage(ctx.asrText)) {
@@ -1538,7 +1864,7 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
             image_icon_visible: false,
             text: "[camera]Photo captured.",
           });
-          finishDirectMessage("Photo captured.", true);
+          transitionDirectlyToImage("Photo captured.", captureImagePath);
         })
         .catch((error) => {
           console.error("Voice capture failed:", error);
@@ -1554,6 +1880,24 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
           });
           finishDirectMessage(message);
         });
+      return;
+    }
+    if (
+      shouldShowInteractiveImage(ctx.asrText) ||
+      shouldOpenInteractiveImageEditor(ctx.asrText)
+    ) {
+      const target = getDefaultInteractiveImageTarget();
+      if (!target) {
+        finishDirectMessage("Show or capture a photo first.");
+        return;
+      }
+      activateInteractiveImage(target.path, target.source);
+      transitionDirectlyToImage(
+        shouldOpenInteractiveImageEditor(ctx.asrText)
+          ? "Ready to edit this photo."
+          : "Showing photo.",
+        target.path,
+      );
       return;
     }
     if (shouldRouteToWeather(ctx.asrText)) {
@@ -1674,6 +2018,7 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
                 }
                 const generatedImagePath = getLatestGenImg();
                 if (generatedImagePath) {
+                  activateInteractiveImage(generatedImagePath, "other");
                   display({ image: generatedImagePath });
                 }
                 trackingPartial(cleaned || "Image created. Take a look.");
@@ -1691,7 +2036,6 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
           return;
         }
         if (shouldRouteToVision(ctx.asrText) && typeof llmFuncMap.describeImage === "function") {
-          const focusedImagePath = getInteractiveImage() || getLatestShowedImage();
           display({
             text: "[describeImage]Analyzing uploaded image...",
           });
@@ -1739,9 +2083,6 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
                 updatedAt: Date.now(),
                   ok: true,
                 });
-                if (focusedImagePath) {
-                  queueDisplayImage(focusedImagePath);
-                }
                 endPartial();
               })
               .catch((error) => {
@@ -1757,9 +2098,6 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
                   updatedAt: Date.now(),
                   ok: false,
                 });
-                if (focusedImagePath) {
-                  queueDisplayImage(focusedImagePath);
-                }
                 trackingPartial(message);
                 endPartial();
               });
@@ -1881,6 +2219,13 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
     onButtonReleased(noop);
   },
   image: (ctx: ChatFlowContext) => {
+    display({ text_input_enabled: true });
+    onTextInput((text: string) => {
+      ctx.answerId += 1;
+      ctx.asrText = text;
+      display({ status: "recognizing", text, text_input_enabled: true });
+      ctx.transitionTo("answer");
+    });
     onButtonPressed(() => {
       display({ image: "" });
       ctx.transitionTo("listening");

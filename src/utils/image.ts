@@ -147,6 +147,17 @@ export const getLatestGenImg = () => {
   return genImgList.length !== 0 ? genImgList[genImgList.length - 1] : "";
 };
 
+export const listGeneratedImgs = (): string[] => {
+  const images = readImagesFromDir(imageDir);
+  genImgList.splice(0, genImgList.length, ...images);
+  return [...genImgList].reverse();
+};
+
+export const getGeneratedImgByIndex = (index: number): string => {
+  const images = listGeneratedImgs();
+  return images[index] || "";
+};
+
 export const setLatestCapturedImg = (imgPath: string) => {
   const normalizedPath = path.resolve(imgPath);
   const existingIndex = capturedImgList.indexOf(normalizedPath);

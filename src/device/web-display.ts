@@ -12,8 +12,10 @@ import { dataDir, cameraFeedDir } from "../utils/dir";
 import {
   activateInteractiveImage,
   deleteCapturedImg,
+  getGeneratedImgByIndex,
   getImageMimeType,
   listCapturedImgs,
+  listGeneratedImgs,
   getLatestShowedImage,
   queueDisplayImage,
   setLatestCapturedImg,
@@ -43,6 +45,8 @@ import {
   SCROLL_SPEED_OPTIONS,
   HAT_SCROLL_SPEED_OPTIONS,
   VOLUME_LEVEL_OPTIONS,
+  GEMINI_IMAGE_MODEL_OPTIONS,
+  GEMINI_IMAGE_PRESET_OPTIONS,
   saveNamedPersonalityPreset,
   saveRuntimeSettings,
 } from "../config/runtime-settings";
@@ -1050,6 +1054,21 @@ export class WebDisplayServer implements WebAudioBridgeServer {
       ctx.body = { photos };
     });
 
+    this.router.get("/api/generated-images", (ctx) => {
+      ctx.set("Cache-Control", "no-store");
+      const photos = listGeneratedImgs().map((photoPath) => {
+        const stats = fs.statSync(photoPath);
+        const fileName = path.basename(photoPath);
+        return {
+          fileName,
+          imageUrl: `/api/generated-images/image/${encodeURIComponent(fileName)}`,
+          updatedAt: stats.mtimeMs,
+          sizeBytes: stats.size,
+        };
+      });
+      ctx.body = { photos };
+    });
+
     this.router.get("/api/room-monitor/photos", (ctx) => {
       ctx.set("Cache-Control", "no-store");
       const photos = listRoomMonitorCaptures().map((photo) => ({
@@ -1186,6 +1205,21 @@ export class WebDisplayServer implements WebAudioBridgeServer {
       if (!fs.existsSync(photoPath)) {
         ctx.status = 404;
         ctx.body = "Photo not found";
+        return;
+      }
+      ctx.type = getImageMimeType(photoPath);
+      ctx.body = fs.createReadStream(photoPath);
+    });
+
+    this.router.get("/api/generated-images/image/:fileName", (ctx) => {
+      ctx.set("Cache-Control", "no-store");
+      const fileName = decodeURIComponent(String(ctx.params.fileName || ""));
+      const photoPath = getGeneratedImgByIndex(
+        listGeneratedImgs().findIndex((imagePath) => path.basename(imagePath) === path.basename(fileName)),
+      );
+      if (!photoPath) {
+        ctx.status = 404;
+        ctx.body = "Generated image not found";
         return;
       }
       ctx.type = getImageMimeType(photoPath);
@@ -1484,7 +1518,7 @@ export class WebDisplayServer implements WebAudioBridgeServer {
             ? await this.botNet.relayPrompt(topic)
             : await this.botNet.startConversation(topic, starter, botnetMode);
         if (starter === "self") {
-          recordRpdMessage(2);
+          recordRpdMessage(1);
         }
         ctx.body = { ok: true, conversation };
       } catch (error) {
@@ -1518,7 +1552,7 @@ export class WebDisplayServer implements WebAudioBridgeServer {
           botnetMode === "persona-relay"
             ? await this.botNet.relayPrompt(text)
             : await this.botNet.startConversation(text, "self", botnetMode);
-        recordRpdMessage(2);
+        recordRpdMessage(1);
         ctx.body = { ok: true, conversation };
       } catch (error) {
         ctx.status = 400;
@@ -1652,6 +1686,8 @@ export class WebDisplayServer implements WebAudioBridgeServer {
         settings: getPublicRuntimeSettings(),
         presets: getPersonalityPresets(settings.savedPersonalityPresets),
         llmModelOptions: BOTNET_MODEL_OPTIONS,
+        geminiImageModelOptions: GEMINI_IMAGE_MODEL_OPTIONS,
+        geminiImagePresetOptions: GEMINI_IMAGE_PRESET_OPTIONS,
         volumeLevelOptions: VOLUME_LEVEL_OPTIONS,
         scrollSpeedOptions: SCROLL_SPEED_OPTIONS,
         hatScrollSpeedOptions: HAT_SCROLL_SPEED_OPTIONS,
@@ -1668,6 +1704,8 @@ export class WebDisplayServer implements WebAudioBridgeServer {
         groqApiKey: getBodyString(body, "groqApiKey"),
         clearGroqApiKey: getBodyBoolean(body, "clearGroqApiKey"),
         geminiApiKey: getBodyString(body, "geminiApiKey"),
+        geminiImageModel: getBodyString(body, "geminiImageModel"),
+        geminiImagePreset: getBodyString(body, "geminiImagePreset"),
         llmModel: getBodyString(body, "llmModel"),
         personalityPrompt: getBodyString(body, "personalityPrompt"),
         musicShuffle: getBodyBoolean(body, "musicShuffle"),
@@ -1685,6 +1723,7 @@ export class WebDisplayServer implements WebAudioBridgeServer {
         esp32CamRotationDeg: getBodyNumber(body, "esp32CamRotationDeg"),
         manualRecordMaxSec: getBodyNumber(body, "manualRecordMaxSec"),
         headerMode: getBodyString(body, "headerMode"),
+        groqHeaderBadgeMode: getBodyString(body, "groqHeaderBadgeMode"),
         screensaverMode: getBodyString(body, "screensaverMode"),
         idleTimeoutSec: getBodyNumber(body, "idleTimeoutSec"),
         screenBlankTimeoutSec: getBodyNumber(body, "screenBlankTimeoutSec"),
@@ -1700,6 +1739,8 @@ export class WebDisplayServer implements WebAudioBridgeServer {
         settings: getPublicRuntimeSettings(),
         presets: getPersonalityPresets(settings.savedPersonalityPresets),
         llmModelOptions: BOTNET_MODEL_OPTIONS,
+        geminiImageModelOptions: GEMINI_IMAGE_MODEL_OPTIONS,
+        geminiImagePresetOptions: GEMINI_IMAGE_PRESET_OPTIONS,
         volumeLevelOptions: VOLUME_LEVEL_OPTIONS,
         scrollSpeedOptions: SCROLL_SPEED_OPTIONS,
         hatScrollSpeedOptions: HAT_SCROLL_SPEED_OPTIONS,
@@ -1762,7 +1803,10 @@ export class WebDisplayServer implements WebAudioBridgeServer {
       status: this.currentStatus.status,
       emoji: this.currentStatus.emoji,
       text: this.currentStatus.text,
-      text_input_enabled: this.currentStatus.text_input_enabled,
+      text_input_enabled:
+        this.currentStatus.text_input_enabled ||
+        (this.currentStatus.status === "photo ready" &&
+          Boolean(this.currentStatus.image)),
       scroll_speed: this.currentStatus.scroll_speed,
       scroll_speed_factor: this.currentStatus.scroll_speed_factor,
       scroll_sync: this.currentStatus.scroll_sync,
@@ -1775,6 +1819,9 @@ export class WebDisplayServer implements WebAudioBridgeServer {
       capture_image_path: this.currentStatus.capture_image_path,
       wifi_signal_level: this.currentStatus.wifi_signal_level,
       groq_requests_today: this.currentStatus.groq_requests_today,
+      llm_model: this.currentStatus.llm_model,
+      groq_header_badge_mode: this.currentStatus.groq_header_badge_mode,
+      groq_header_badge_text: this.currentStatus.groq_header_badge_text,
       vpn_connected: this.currentStatus.vpn_connected,
       rag_icon_visible: this.currentStatus.rag_icon_visible,
       image_icon_visible: this.currentStatus.image_icon_visible,

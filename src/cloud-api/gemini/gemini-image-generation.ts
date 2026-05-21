@@ -4,12 +4,12 @@ import {
   getLatestShowedImage,
   setLatestGenImg,
 } from "../../utils/image";
-import { geminiImageModel } from "./gemini";
 import { GenerateContentResponse, GoogleGenAI } from "@google/genai";
 import path from "path";
 import { imageDir } from "../../utils/dir";
 import { readFileSync, writeFileSync } from "fs";
 import { getRuntimeSettings } from "../../config/runtime-settings";
+import { buildGeminiImagePrompt } from "../../config/gemini-image-presets";
 import { undiciProxyFetch } from "../proxy-fetch";
 
 const getGeminiImageClient = (): GoogleGenAI | null => {
@@ -22,6 +22,18 @@ const getGeminiImageClient = (): GoogleGenAI | null => {
     apiKey,
     fetch: undiciProxyFetch as any,
   });
+};
+
+const getGeminiImageModel = (): string => {
+  return (
+    getRuntimeSettings().geminiImageModel ||
+    process.env.GEMINI_IMAGE_MODEL ||
+    "gemini-2.5-flash-image"
+  );
+};
+
+const shouldUseResponseModalities = (model: string): boolean => {
+  return /preview/i.test(model) || /^gemini-3/i.test(model);
 };
 
 
@@ -52,8 +64,17 @@ export const addGeminiGenerationTool = (imageGenerationTools: LLMTool[]) => {
       if (!gemini) {
         return `${ToolReturnTag.Error} Gemini image generation is not configured yet.`;
       }
+      const geminiImageModel = getGeminiImageModel();
       console.log(`Generating image with gemini model: ${geminiImageModel}`);
       const { prompt, withImageContext } = params;
+      const runtimeSettings = getRuntimeSettings();
+      const finalPrompt = buildGeminiImagePrompt(
+        prompt,
+        runtimeSettings.geminiImagePreset,
+      ) || prompt;
+      console.log(
+        `Generating image with preset: ${runtimeSettings.geminiImagePreset || "none"}`,
+      );
       let imageContext = undefined;
       if (withImageContext) {
         const latestImgPath = getLatestShowedImage();
@@ -69,26 +90,47 @@ export const addGeminiGenerationTool = (imageGenerationTools: LLMTool[]) => {
           };
         }
       }
-      const response = (await gemini!.models
-        .generateContent({
-          model: geminiImageModel!,
-          contents: [
+      const requestContents = [
+        {
+          role: "user" as const,
+          parts: [
             {
-              text: prompt as string,
+              text: finalPrompt,
             },
             ...(imageContext ? [imageContext] : []),
           ],
-          config: {
-            imageConfig: {
-              aspectRatio: "1:1",
-            },
-          },
-        })
-        .catch((err) => {
-          console.error(`Error generating image:`, err);
+        },
+      ];
+      const config: Record<string, unknown> = {
+        imageConfig: {
+          aspectRatio: "1:1",
+        },
+      };
+      if (shouldUseResponseModalities(geminiImageModel)) {
+        config.responseModalities = ["IMAGE", "TEXT"];
+      } else {
+        config.responseMimeType = "image/png";
+      }
+      let response: GenerateContentResponse | null = null;
+      let generationError = "";
+      try {
+        response = (await gemini!.models.generateContent({
+          model: geminiImageModel!,
+          contents: requestContents,
+          config,
         })) as GenerateContentResponse;
+      } catch (err) {
+        generationError =
+          err instanceof Error && err.message
+            ? err.message
+            : "Image generation request failed.";
+        console.error(`Error generating image:`, err);
+      }
       if (!response?.candidates?.[0]?.content?.parts?.length) {
-        return `${ToolReturnTag.Error}Image generation failed.`;
+        return `${ToolReturnTag.Error}${generationError || "Image generation failed."}`;
+      }
+      if (response.text) {
+        console.log("Gemini image response text:", response.text);
       }
       const fileName = `gemini-image-${Date.now()}.png`;
       const imagePath = path.join(imageDir, fileName);

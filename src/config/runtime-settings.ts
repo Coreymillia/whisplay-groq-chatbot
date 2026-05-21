@@ -13,6 +13,11 @@ import {
   normalizeEsp32AgentErrorPersonalityPrompt,
   normalizeEsp32AgentPersonalityPrompt,
 } from "./esp32-agent-personality";
+import {
+  GEMINI_IMAGE_PRESET_OPTIONS,
+  normalizeGeminiImagePreset,
+  type GeminiImagePresetId,
+} from "./gemini-image-presets";
 
 export type VoiceMode = "text-only" | "speak-on-demand" | "voice-chat";
 export type UITheme = "default" | "matrix" | "plasma" | "amber-terminal";
@@ -37,6 +42,11 @@ export type HeaderMode =
   | "vu-bars"
   | "vu-scope"
   | "vu-wave";
+export type GroqHeaderBadgeMode = "model" | "rpd-remaining";
+export type GeminiImageModel =
+  | "gemini-2.5-flash-image"
+  | "gemini-3.1-flash-image-preview"
+  | "gemini-3-pro-image-preview";
 export type ScreensaverMode =
   | "off"
   | "matrix"
@@ -65,6 +75,8 @@ export type HatFontFamily =
 export interface RuntimeSettings {
   groqApiKey: string;
   geminiApiKey: string;
+  geminiImageModel: GeminiImageModel;
+  geminiImagePreset: GeminiImagePresetId;
   llmModel: string;
   personalityPrompt: string;
   esp32AgentPersonalityPrompt: string;
@@ -85,6 +97,7 @@ export interface RuntimeSettings {
   esp32CamRotationDeg: number;
   manualRecordMaxSec: number;
   headerMode: HeaderMode;
+  groqHeaderBadgeMode: GroqHeaderBadgeMode;
   screensaverMode: ScreensaverMode;
   idleTimeoutSec: number;
   screenBlankTimeoutSec: number;
@@ -97,6 +110,8 @@ export interface RuntimeSettingsUpdate {
   groqApiKey?: string;
   clearGroqApiKey?: boolean;
   geminiApiKey?: string;
+  geminiImageModel?: string;
+  geminiImagePreset?: string;
   llmModel?: string;
   personalityPrompt?: string;
   esp32AgentPersonalityPrompt?: string;
@@ -117,6 +132,7 @@ export interface RuntimeSettingsUpdate {
   esp32CamRotationDeg?: number;
   manualRecordMaxSec?: number;
   headerMode?: string;
+  groqHeaderBadgeMode?: string;
   screensaverMode?: string;
   idleTimeoutSec?: number;
   screenBlankTimeoutSec?: number;
@@ -132,6 +148,8 @@ const SETTINGS_PATH = path.resolve(
 );
 
 const DEFAULT_VOICE_MODE: VoiceMode = "text-only";
+const DEFAULT_GEMINI_IMAGE_MODEL: GeminiImageModel = "gemini-2.5-flash-image";
+const DEFAULT_GEMINI_IMAGE_PRESET: GeminiImagePresetId = "none";
 const DEFAULT_LLM_MODEL = DEFAULT_BOTNET_MODEL;
 const DEFAULT_MUSIC_SHUFFLE = false;
 const DEFAULT_VOLUME_LEVEL = 9;
@@ -147,6 +165,7 @@ const DEFAULT_PI_CAMERA_ROTATION_DEG = 0;
 const DEFAULT_ESP32_CAM_ROTATION_DEG = 0;
 const DEFAULT_MANUAL_RECORD_MAX_SEC = 15;
 const DEFAULT_HEADER_MODE: HeaderMode = "emoji";
+const DEFAULT_GROQ_HEADER_BADGE_MODE: GroqHeaderBadgeMode = "model";
 const DEFAULT_SCREENSAVER_MODE: ScreensaverMode = "retro-geometry";
 const DEFAULT_IDLE_TIMEOUT_SEC = 120;
 const DEFAULT_SCREEN_BLANK_TIMEOUT_SEC = 0;
@@ -209,6 +228,19 @@ export const HEADER_MODES: HeaderMode[] = [
   "vu-scope",
   "vu-wave",
 ];
+export const GROQ_HEADER_BADGE_MODES: GroqHeaderBadgeMode[] = [
+  "model",
+  "rpd-remaining",
+];
+export const GEMINI_IMAGE_MODEL_OPTIONS: Array<{
+  id: GeminiImageModel;
+  label: string;
+}> = [
+  { id: "gemini-2.5-flash-image", label: "Gemini 2.5 Flash Image" },
+  { id: "gemini-3.1-flash-image-preview", label: "Gemini 3.1 Flash Image Preview" },
+  { id: "gemini-3-pro-image-preview", label: "Gemini 3 Pro Image Preview" },
+];
+export { GEMINI_IMAGE_PRESET_OPTIONS };
 export const SCREENSAVER_MODES: ScreensaverMode[] = [
   "off",
   "matrix",
@@ -272,6 +304,9 @@ const VALID_SCREENSAVER_MODES = new Set<ScreensaverMode>([
   "kaleidoscope",
   "tetris-rain",
 ]);
+const VALID_GEMINI_IMAGE_MODELS = new Set<GeminiImageModel>(
+  GEMINI_IMAGE_MODEL_OPTIONS.map((option) => option.id),
+);
 
 const VALID_HAT_FONT_SIZES = new Set<HatFontSize>([
   "small",
@@ -451,6 +486,25 @@ function normalizeHeaderMode(value: unknown): HeaderMode {
   return DEFAULT_HEADER_MODE;
 }
 
+function normalizeGroqHeaderBadgeMode(value: unknown): GroqHeaderBadgeMode {
+  if (typeof value !== "string") {
+    return DEFAULT_GROQ_HEADER_BADGE_MODE;
+  }
+  return GROQ_HEADER_BADGE_MODES.includes(value as GroqHeaderBadgeMode)
+    ? (value as GroqHeaderBadgeMode)
+    : DEFAULT_GROQ_HEADER_BADGE_MODE;
+}
+
+function normalizeGeminiImageModel(value: unknown): GeminiImageModel {
+  if (
+    typeof value === "string" &&
+    VALID_GEMINI_IMAGE_MODELS.has(value as GeminiImageModel)
+  ) {
+    return value as GeminiImageModel;
+  }
+  return DEFAULT_GEMINI_IMAGE_MODEL;
+}
+
 function normalizeScreensaverMode(value: unknown): ScreensaverMode {
   if (
     typeof value === "string" &&
@@ -521,6 +575,8 @@ function sanitizeSettings(input: Partial<RuntimeSettings> | null | undefined): R
       typeof input?.groqApiKey === "string" ? input.groqApiKey.trim() : "",
     geminiApiKey:
       typeof input?.geminiApiKey === "string" ? input.geminiApiKey.trim() : "",
+    geminiImageModel: normalizeGeminiImageModel(input?.geminiImageModel),
+    geminiImagePreset: normalizeGeminiImagePreset(input?.geminiImagePreset),
     llmModel: normalizeLlmModel(input?.llmModel),
     personalityPrompt:
       typeof input?.personalityPrompt === "string"
@@ -559,6 +615,7 @@ function sanitizeSettings(input: Partial<RuntimeSettings> | null | undefined): R
     ),
     manualRecordMaxSec: normalizeManualRecordMaxSec(input?.manualRecordMaxSec),
     headerMode: normalizeHeaderMode(input?.headerMode),
+    groqHeaderBadgeMode: normalizeGroqHeaderBadgeMode(input?.groqHeaderBadgeMode),
     screensaverMode: normalizeScreensaverMode(input?.screensaverMode),
     idleTimeoutSec: normalizeIdleTimeoutSec(input?.idleTimeoutSec),
     screenBlankTimeoutSec: normalizeScreenBlankTimeoutSec(input?.screenBlankTimeoutSec),
@@ -609,6 +666,14 @@ export function saveRuntimeSettings(
     if (trimmed) {
       next.geminiApiKey = trimmed;
     }
+  }
+
+  if (typeof update.geminiImageModel === "string") {
+    next.geminiImageModel = normalizeGeminiImageModel(update.geminiImageModel);
+  }
+
+  if (typeof update.geminiImagePreset === "string") {
+    next.geminiImagePreset = normalizeGeminiImagePreset(update.geminiImagePreset);
   }
 
   if (typeof update.llmModel === "string") {
@@ -704,6 +769,12 @@ export function saveRuntimeSettings(
 
   if (typeof update.headerMode === "string") {
     next.headerMode = normalizeHeaderMode(update.headerMode);
+  }
+
+  if (typeof update.groqHeaderBadgeMode === "string") {
+    next.groqHeaderBadgeMode = normalizeGroqHeaderBadgeMode(
+      update.groqHeaderBadgeMode,
+    );
   }
 
   if (typeof update.screensaverMode === "string") {
@@ -940,6 +1011,8 @@ export function getRoomMonitorIntervalLabel(value: number): string {
 export function getPublicRuntimeSettings(): {
   groqApiKeyConfigured: boolean;
   geminiApiKeyConfigured: boolean;
+  geminiImageModel: GeminiImageModel;
+  geminiImagePreset: GeminiImagePresetId;
   llmModel: string;
   personalityPrompt: string;
   esp32AgentPersonalityPrompt: string;
@@ -960,6 +1033,7 @@ export function getPublicRuntimeSettings(): {
   esp32CamRotationDeg: number;
   manualRecordMaxSec: number;
   headerMode: HeaderMode;
+  groqHeaderBadgeMode: GroqHeaderBadgeMode;
   screensaverMode: ScreensaverMode;
   idleTimeoutSec: number;
   screenBlankTimeoutSec: number;
@@ -971,6 +1045,8 @@ export function getPublicRuntimeSettings(): {
   return {
     groqApiKeyConfigured: Boolean(settings.groqApiKey),
     geminiApiKeyConfigured: Boolean(settings.geminiApiKey),
+    geminiImageModel: settings.geminiImageModel,
+    geminiImagePreset: settings.geminiImagePreset || DEFAULT_GEMINI_IMAGE_PRESET,
     llmModel: settings.llmModel,
     personalityPrompt: settings.personalityPrompt,
     esp32AgentPersonalityPrompt: settings.esp32AgentPersonalityPrompt,
@@ -1001,6 +1077,7 @@ export function getPublicRuntimeSettings(): {
         : DEFAULT_ESP32_CAM_ROTATION_DEG,
     manualRecordMaxSec: settings.manualRecordMaxSec,
     headerMode: settings.headerMode,
+    groqHeaderBadgeMode: settings.groqHeaderBadgeMode,
     screensaverMode: settings.screensaverMode,
     idleTimeoutSec: settings.idleTimeoutSec,
     screenBlankTimeoutSec:
