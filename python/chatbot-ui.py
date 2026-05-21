@@ -133,6 +133,7 @@ current_image = None
 current_network_connected = None
 current_wifi_signal_level = 0
 current_groq_requests_today = 0
+current_gemini_low_tier_image_balance_text = "$0.00"
 current_groq_header_badge_text = "Model"
 current_vpn_connected = False
 current_rag_icon_visible = False
@@ -1284,6 +1285,16 @@ class RenderThread(threading.Thread):
         status_bbox = status_font.getbbox(display_status)
         status_w = status_bbox[2] - status_bbox[0]
         TextUtils.draw_mixed_text(draw, image, display_status, status_font, (whisplay.CornerHeight, 0))
+        if current_gemini_low_tier_image_balance_text:
+            balance_bbox = battery_font.getbbox(current_gemini_low_tier_image_balance_text)
+            balance_w = balance_bbox[2] - balance_bbox[0]
+            TextUtils.draw_mixed_text(
+                draw,
+                image,
+                current_gemini_low_tier_image_balance_text,
+                battery_font,
+                ((image_width - balance_w) // 2, 2),
+            )
 
         header_body_y = status_font_size + 8
         if current_header_mode != "emoji":
@@ -1401,7 +1412,7 @@ class RenderThread(threading.Thread):
 def update_display_data(status=None, emoji=None, text=None,
                    scroll_speed=None, scroll_speed_factor=None, hat_scroll_speed_factor=None, hat_font_size=None, hat_font_family=None, scroll_sync=None, battery_level=None, battery_color=None, image_path=None,
                    network_connected=None, vpn_connected=None, rag_icon_visible=None, image_icon_visible=None, transaction_id=None,
-                   wifi_signal_level=None, groq_requests_today=None, groq_header_badge_text=None, audio_level=None,
+                   wifi_signal_level=None, groq_requests_today=None, gemini_low_tier_image_balance_text=None, groq_header_badge_text=None, audio_level=None,
                    music_progress=None, music_duration_ms=None, header_mode=None,
                    screensaver_mode=None, idle_timeout_sec=None, screen_blank_timeout_sec=None,
                    hat_text_color=None):
@@ -1415,6 +1426,7 @@ def update_display_data(status=None, emoji=None, text=None,
     global current_network_connected, current_vpn_connected, current_rag_icon_visible, current_image_icon_visible, current_transaction_id
     global current_wifi_signal_level
     global current_groq_requests_today
+    global current_gemini_low_tier_image_balance_text
     global current_groq_header_badge_text
     global current_music_progress, current_music_duration_ms
     global current_audio_level
@@ -1540,6 +1552,10 @@ def update_display_data(status=None, emoji=None, text=None,
             current_groq_requests_today = max(0, int(groq_requests_today))
         except (TypeError, ValueError):
             print(f"[Display] Invalid groq_requests_today payload: {groq_requests_today}")
+    if gemini_low_tier_image_balance_text is not None:
+        current_gemini_low_tier_image_balance_text = (
+            str(gemini_low_tier_image_balance_text).strip() or "$0.00"
+        )
     if groq_header_badge_text is not None:
         current_groq_header_badge_text = str(groq_header_badge_text).strip() or "?"
     if audio_level is not None:
@@ -1667,6 +1683,9 @@ def handle_client(client_socket, addr, whisplay):
                     wifi_signal_level = content.get("wifi_signal_level", None)
                     audio_level = content.get("audio_level", None)
                     groq_requests_today = content.get("groq_requests_today", None)
+                    gemini_low_tier_image_balance_text = content.get(
+                        "gemini_low_tier_image_balance_text", None
+                    )
                     groq_header_badge_text = content.get("groq_header_badge_text", None)
                     vpn_connected = content.get("vpn_connected", None)
                     rag_icon_visible = content.get("rag_icon_visible", None)
@@ -1724,8 +1743,9 @@ def handle_client(client_socket, addr, whisplay):
                        (battery_level is not None) or (battery_color is not None) or \
                               (image_path is not None) or (network_connected is not None) or \
                                (wifi_signal_level is not None) or \
-                                (groq_requests_today is not None) or \
-                                (groq_header_badge_text is not None) or \
+                                 (groq_requests_today is not None) or \
+                                 (gemini_low_tier_image_balance_text is not None) or \
+                                 (groq_header_badge_text is not None) or \
                                 (audio_level is not None) or \
                                (vpn_connected is not None) or \
                               (rag_icon_visible is not None) or (image_icon_visible is not None) or (scroll_sync is not None) or \
@@ -1742,10 +1762,11 @@ def handle_client(client_socket, addr, whisplay):
                                                     scroll_sync=scroll_sync,
                                      battery_level=battery_level, battery_color=battery_tuple,
                                                     image_path=image_path, network_connected=network_connected,
-                                                    wifi_signal_level=wifi_signal_level,
-                                                    groq_requests_today=groq_requests_today,
-                                                    groq_header_badge_text=groq_header_badge_text,
-                                                    audio_level=audio_level,
+                                                     wifi_signal_level=wifi_signal_level,
+                                                     groq_requests_today=groq_requests_today,
+                                                     gemini_low_tier_image_balance_text=gemini_low_tier_image_balance_text,
+                                                     groq_header_badge_text=groq_header_badge_text,
+                                                     audio_level=audio_level,
                                         vpn_connected=vpn_connected,
                                                   rag_icon_visible=rag_icon_visible,
                                           image_icon_visible=image_icon_visible,

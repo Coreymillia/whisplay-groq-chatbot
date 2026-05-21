@@ -46,6 +46,7 @@ This project starts from the official PiSugar Whisplay chatbot, but is being tai
 - **Gemini image settings:** the browser Settings panel now includes a **Gemini Image Model** dropdown plus a **Gemini Style Preset** dropdown for stronger edit styles without rewriting the whole prompt manually
 - **Gemini style presets:** built-in presets now include **Dali Dream**, **Melting Psychedelic**, **Neon Hallucination**, **Glitch Trip**, **Retro Cosmic Poster**, and **Surreal Collage**
 - **Preset fallback edits:** vague requests such as **"edit this photo in your favorite style"** or **"surprise me with this photo"** now use the selected Gemini preset as the creative fallback
+- **Gemini low-tier image balance meter:** the browser and physical HAT header now show the saved **Gemini 2.5 Flash Image** balance between the status text and the right-side Groq badge; each successful low-tier Gemini image subtracts a fixed **$0.04** and can auto-reload from user-defined settings
 - **Groq request counter:** both the browser header and the physical HAT header now show a compact **RPD** item beside Wi-Fi so you can track Groq requests sent today without replacing the main status text
 - **Per-camera rotation controls:** the browser UI can rotate the **Pi Camera** and **ESP32-CAM** independently in 90-degree steps so previews and captures match your mounting direction
 - **HAT font color controls:** the browser UI can now set a single HAT reply color or switch to a **multi-color per-line** mode for easier reading on the device
@@ -58,6 +59,7 @@ This project starts from the official PiSugar Whisplay chatbot, but is being tai
 - **Optional PiSugar battery button support:** if a PiSugar service is present, the app can auto-wire **short press** to capture a photo from the selected camera source and **long press** to request a safe Pi shutdown without forcing battery cut-off, without affecting installs that do not use PiSugar
 - **Separate HAT idle controls:** the browser UI now splits **screensaver delay** from a separate **screen blank timeout**, so the device can stay on while the backlight turns off later for power saving
 - **Room monitor gallery:** the browser UI can now auto-capture from the selected camera source on a fixed interval and keep a separate room-monitor gallery trimmed dynamically to preserve at least **8 GB** of free SD-card space by deleting the oldest captures first
+- **Dedicated image galleries:** the browser now exposes separate **Photo Gallery**, **AI / Edited Image Gallery**, and **Room Monitor Gallery** views with download support, day grouping, and delete-selected / delete-current-day actions; the manual-photo and AI-image galleries now also follow the same **leave 8 GB free** retention rule instead of the old fixed image cap
 - **HDMI chat page:** both Whisplay and the standalone Pi Zero GroqBotNet node now expose a dedicated browser page at **`/hdmi`**; Whisplay’s view also mirrors the latest captured image or live camera feed when one is active
 - **Improved HAT readability:** reply text now wraps more naturally on the device instead of breaking as aggressively mid-word
 - **Companion CYD controls:** touch-first **Chat / Capture / Gallery / Settings** modes, top-bar **New Chat** and **Repeat**, touch mode navigation, CYD-local chat text size and color controls, and a built-in **Setup** button for reopening the Wi-Fi portal
@@ -75,8 +77,9 @@ This project starts from the official PiSugar Whisplay chatbot, but is being tai
 
 - **Working now:** capture a photo, say or type an edit request, and Gemini will edit the current photo using the latest shown image as context
 - **Working now:** Gemini-generated images and edited photos are saved after generation so they can be reused later in the session
+- **Working now:** the browser exposes separate manual-photo and AI-image galleries so older captures and older Gemini outputs can be reopened outside the main UI
 - **Fallback still available:** local voice-triggered photo effects like **retro**, **comic**, **sketch**, **pixelate**, and the rest of the existing basic image commands still work even without Gemini billing-enabled image generation
-- **Next step:** add a proper **AI image gallery** and old-photo selection flow for both the **browser UI** and the **device UI**, so previously generated images and older captured photos can be reopened and edited directly
+- **Gemini billing note:** plain hardware info, camera viewing, browsing, and the rest of the normal local device flow remain free; to unlock Gemini image generation and full photo-edit capability, the saved Gemini key must be on a billing-enabled Google project
 
 ## ESP32 Agent workspace
 
@@ -641,7 +644,8 @@ OPENAI_API_KEY=your_groq_api_key
 1. Sign in or create an account at [Google AI Studio](https://aistudio.google.com/).
 2. Create an API key from [Google AI Studio API keys](https://aistudio.google.com/app/apikey).
 3. Make sure the key has access to the Gemini API for your project.
-4. Use the key in either of these ways:
+4. If normal free Gemini access works but **image generation / photo editing** does not, enable billing for the same Google project in **Google Cloud Billing**. In current testing for this fork, the existing Gemini key kept working after billing was enabled; there was no need to create a second paid-only key.
+5. Use the key in either of these ways:
    - put it in `.env` as `GEMINI_API_KEY=...`
    - or paste it into the **Gemini key** field in the browser settings panel and save
 
@@ -692,11 +696,14 @@ TTS_SERVER=espeak-ng
 
 ## Settings UI notes
 
-The browser simulator includes a settings panel for the Groq key, Gemini key, preset personalities, freeform personality editing, a **Save Personality As** box for named favorites, voice mode, record time, text scroll speed, **HAT font color**, UI theme, **camera source**, **per-camera 90-degree rotation controls**, HAT header mode, HAT screensaver mode, **HAT screensaver delay**, **HAT screen blank timeout**, **room monitor auto-capture interval**, **weather latitude/longitude**, the saved **music shuffle** toggle, and a shutdown button for clean power-off without SSH.
+The browser simulator includes a settings panel for the Groq key, Gemini key, Gemini image model, Gemini style preset, the low-tier Gemini image **balance / auto-reload** controls, preset personalities, freeform personality editing, a **Save Personality As** box for named favorites, voice mode, record time, text scroll speed, **HAT font color**, UI theme, **camera source**, **per-camera 90-degree rotation controls**, HAT header mode, HAT screensaver mode, **HAT screensaver delay**, **HAT screen blank timeout**, **room monitor auto-capture interval**, **weather latitude/longitude**, the saved **music shuffle** toggle, and a shutdown button for clean power-off without SSH.
 
 The Groq and Gemini keys can be stored there without editing `.env`. Runtime settings are saved to the local settings file on the Pi, and both **Gemini vision** and **Gemini image generation** in this fork will use the saved browser key before falling back to `GEMINI_API_KEY` from `.env`.
 
-The browser header and physical HAT header now also show a compact **RPD** indicator beside Wi-Fi. It tracks Groq requests sent **today**, resets at local midnight, and leaves the main status label such as **idle**, **listening**, or **thinking** untouched.
+The browser header and physical HAT header now also show:
+
+- a compact **Gemini low-tier image balance** item centered between the left status text and the right-side icons
+- a compact **RPD** indicator beside Wi-Fi that tracks Groq requests sent **today**, resets at local midnight, and leaves the main status label such as **idle**, **listening**, or **thinking** untouched
 
 Saved custom personalities are merged into the same preset list used by both the browser UI and the HAT settings menu, so a favorite you save in the browser can be selected later from either surface.
 
@@ -718,9 +725,11 @@ The active camera source can now also be changed by voice with **"switch camera"
 
 For the local Pi camera path, this fork now supports either the Python **Picamera2** stack or the native **rpicam-still** toolchain, which makes the common Raspberry Pi Camera modules more reliable across different Pi OS installs. The hardware we have already wired up and used in this fork is the **Raspberry Pi Camera Module v2.1**. **Camera Module 3** is the next planned Pi camera target, but it has not been hardware-validated here yet.
 
-Captured photos are now kept in the project camera storage and exposed in the browser UI as a **Saved Photos** list. The browser UI can delete saved photos; the HAT browse mode is read-only.
+Captured photos are now kept in the project camera storage and exposed in the browser UI as a **Saved Photos** list plus a dedicated **Photo Gallery**. Gemini outputs and edited photos now also have their own dedicated **AI / Edited Image Gallery**.
 
 The browser UI also now includes a separate **Room Monitor** gallery fed by optional timed auto-captures from the current camera source. That gallery now trims itself dynamically to leave at least **8 GB** free on the active SD card; when free space drops below that reserve, the oldest room-monitor images are removed first.
+
+The manual-photo and AI-image galleries now follow the same **leave 8 GB free** retention rule instead of the older fixed image-count cap. All three gallery views support **download**, **delete selected**, and **delete current day** actions in their dedicated browser pages.
 
 There is now also a dedicated **HDMI** browser page for full-screen chat output. On Whisplay you can open **`/hdmi`** from the same web server to get a larger chat layout that also shows the latest captured image or active camera stream when one is present. The standalone `GroqBotNet/` node now exposes its own **`/hdmi`** page as well for a simple large-format chat/conversation mirror in the browser. On the Whisplay Pi itself, set `WHISPLAY_HDMI_KIOSK_ENABLED=true` and rerun `bash startup.sh` to auto-launch that page locally on HDMI through Chromium at login.
 

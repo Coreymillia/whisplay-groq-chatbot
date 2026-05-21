@@ -11,11 +11,23 @@ import { WebSocketServer, WebSocket, RawData } from "ws";
 import { dataDir, cameraFeedDir } from "../utils/dir";
 import {
   activateInteractiveImage,
+  deleteCapturedImgs,
+  deleteCapturedImgsForDay,
   deleteCapturedImg,
+  deleteGeneratedImgs,
+  deleteGeneratedImgsForDay,
+  getCapturedImgPath,
+  getCapturedImgStatus,
   getGeneratedImgByIndex,
+  getGeneratedImgPath,
+  getGeneratedImgStatus,
   getImageMimeType,
   listCapturedImgs,
+  listCapturedImgDays,
+  listCapturedImgsForDay,
   listGeneratedImgs,
+  listGeneratedImgDays,
+  listGeneratedImgsForDay,
   getLatestShowedImage,
   queueDisplayImage,
   setLatestCapturedImg,
@@ -78,6 +90,8 @@ import { musicDir } from "../utils/dir";
 import { getBotNetManager } from "./botnet";
 import {
   applyRoomMonitorSettings,
+  deleteRoomMonitorCaptures,
+  deleteRoomMonitorCapturesForDay,
   getRoomMonitorCapturePath,
   getRoomMonitorStatus,
   getSavedRoomMonitorCapturePath,
@@ -398,6 +412,18 @@ export class WebDisplayServer implements WebAudioBridgeServer {
       ctx.set("Cache-Control", "no-store");
       ctx.type = "text/html";
       ctx.body = fs.createReadStream(path.join(staticRoot, "saved-gallery.html"));
+    });
+
+    this.router.get("/photo-gallery", (ctx) => {
+      ctx.set("Cache-Control", "no-store");
+      ctx.type = "text/html";
+      ctx.body = fs.createReadStream(path.join(staticRoot, "photo-gallery.html"));
+    });
+
+    this.router.get("/generated-gallery", (ctx) => {
+      ctx.set("Cache-Control", "no-store");
+      ctx.type = "text/html";
+      ctx.body = fs.createReadStream(path.join(staticRoot, "generated-gallery.html"));
     });
 
     this.router.get("/api/esp32-agent/presets", (ctx) => {
@@ -1051,7 +1077,10 @@ export class WebDisplayServer implements WebAudioBridgeServer {
           sizeBytes: stats.size,
         };
       });
-      ctx.body = { photos };
+      ctx.body = {
+        photos,
+        status: getCapturedImgStatus(),
+      };
     });
 
     this.router.get("/api/generated-images", (ctx) => {
@@ -1066,7 +1095,92 @@ export class WebDisplayServer implements WebAudioBridgeServer {
           sizeBytes: stats.size,
         };
       });
-      ctx.body = { photos };
+      ctx.body = {
+        photos,
+        status: getGeneratedImgStatus(),
+      };
+    });
+
+    this.router.get("/api/photos/gallery/days", (ctx) => {
+      ctx.set("Cache-Control", "no-store");
+      const days = listCapturedImgDays().map((day) => ({
+        dayKey: day.dayKey,
+        label: day.label,
+        count: day.count,
+        updatedAt: day.updatedAt,
+        totalSizeBytes: day.totalSizeBytes,
+        coverImageUrl: `/api/photos/image/${encodeURIComponent(day.coverFileName)}`,
+      }));
+      ctx.body = {
+        days,
+        status: getCapturedImgStatus(),
+      };
+    });
+
+    this.router.get("/api/photos/gallery/day/:dayKey", (ctx) => {
+      ctx.set("Cache-Control", "no-store");
+      try {
+        const photos = listCapturedImgsForDay(String(ctx.params.dayKey || "")).map((photo) => ({
+          fileName: photo.fileName,
+          imageUrl: `/api/photos/image/${encodeURIComponent(photo.fileName)}`,
+          updatedAt: photo.updatedAt,
+          sizeBytes: photo.sizeBytes,
+        }));
+        ctx.body = {
+          photos,
+          dayKey: String(ctx.params.dayKey || ""),
+        };
+      } catch (error) {
+        ctx.status = 400;
+        ctx.body = {
+          ok: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Failed to load photo gallery day.",
+        };
+      }
+    });
+
+    this.router.get("/api/generated-images/gallery/days", (ctx) => {
+      ctx.set("Cache-Control", "no-store");
+      const days = listGeneratedImgDays().map((day) => ({
+        dayKey: day.dayKey,
+        label: day.label,
+        count: day.count,
+        updatedAt: day.updatedAt,
+        totalSizeBytes: day.totalSizeBytes,
+        coverImageUrl: `/api/generated-images/image/${encodeURIComponent(day.coverFileName)}`,
+      }));
+      ctx.body = {
+        days,
+        status: getGeneratedImgStatus(),
+      };
+    });
+
+    this.router.get("/api/generated-images/gallery/day/:dayKey", (ctx) => {
+      ctx.set("Cache-Control", "no-store");
+      try {
+        const photos = listGeneratedImgsForDay(String(ctx.params.dayKey || "")).map((photo) => ({
+          fileName: photo.fileName,
+          imageUrl: `/api/generated-images/image/${encodeURIComponent(photo.fileName)}`,
+          updatedAt: photo.updatedAt,
+          sizeBytes: photo.sizeBytes,
+        }));
+        ctx.body = {
+          photos,
+          dayKey: String(ctx.params.dayKey || ""),
+        };
+      } catch (error) {
+        ctx.status = 400;
+        ctx.body = {
+          ok: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Failed to load AI gallery day.",
+        };
+      }
     });
 
     this.router.get("/api/room-monitor/photos", (ctx) => {
@@ -1153,6 +1267,56 @@ export class WebDisplayServer implements WebAudioBridgeServer {
       }
     });
 
+    this.router.delete("/api/room-monitor/gallery", (ctx) => {
+      const rawBody = (ctx.request as any).body;
+      const fileNames = Array.isArray(rawBody?.fileNames)
+        ? rawBody.fileNames.filter((entry: unknown): entry is string => typeof entry === "string")
+        : [];
+      try {
+        const result = deleteRoomMonitorCaptures(fileNames);
+        ctx.body = {
+          ok: true,
+          deleted: result.deleted,
+          skipped: result.skipped,
+          days: listRoomMonitorCaptureDays(),
+          savedCount: listSavedRoomMonitorCaptures().length,
+          status: getRoomMonitorStatus(),
+        };
+      } catch (error) {
+        ctx.status = 400;
+        ctx.body = {
+          ok: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Failed to delete selected room monitor photos.",
+        };
+      }
+    });
+
+    this.router.delete("/api/room-monitor/gallery/day/:dayKey", (ctx) => {
+      try {
+        const result = deleteRoomMonitorCapturesForDay(String(ctx.params.dayKey || ""));
+        ctx.body = {
+          ok: true,
+          deleted: result.deleted,
+          skipped: result.skipped,
+          days: listRoomMonitorCaptureDays(),
+          savedCount: listSavedRoomMonitorCaptures().length,
+          status: getRoomMonitorStatus(),
+        };
+      } catch (error) {
+        ctx.status = 400;
+        ctx.body = {
+          ok: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Failed to delete room monitor day.",
+        };
+      }
+    });
+
     this.router.get("/api/room-monitor/photos/image/:fileName", (ctx) => {
       ctx.set("Cache-Control", "no-store");
       const fileName = decodeURIComponent(String(ctx.params.fileName || ""));
@@ -1196,13 +1360,8 @@ export class WebDisplayServer implements WebAudioBridgeServer {
     this.router.get("/api/photos/image/:fileName", (ctx) => {
       ctx.set("Cache-Control", "no-store");
       const fileName = decodeURIComponent(String(ctx.params.fileName || ""));
-      const photoPath = path.resolve(dataDir, "camera", path.basename(fileName));
-      if (!photoPath.startsWith(path.resolve(dataDir, "camera") + path.sep)) {
-        ctx.status = 400;
-        ctx.body = "Invalid photo path";
-        return;
-      }
-      if (!fs.existsSync(photoPath)) {
+      const photoPath = getCapturedImgPath(fileName);
+      if (!photoPath) {
         ctx.status = 404;
         ctx.body = "Photo not found";
         return;
@@ -1214,9 +1373,7 @@ export class WebDisplayServer implements WebAudioBridgeServer {
     this.router.get("/api/generated-images/image/:fileName", (ctx) => {
       ctx.set("Cache-Control", "no-store");
       const fileName = decodeURIComponent(String(ctx.params.fileName || ""));
-      const photoPath = getGeneratedImgByIndex(
-        listGeneratedImgs().findIndex((imagePath) => path.basename(imagePath) === path.basename(fileName)),
-      );
+      const photoPath = getGeneratedImgPath(fileName);
       if (!photoPath) {
         ctx.status = 404;
         ctx.body = "Generated image not found";
@@ -1243,6 +1400,102 @@ export class WebDisplayServer implements WebAudioBridgeServer {
         });
       }
       ctx.body = { ok: true };
+    });
+
+    this.router.delete("/api/photos/gallery", (ctx) => {
+      const rawBody = (ctx.request as any).body;
+      const fileNames = Array.isArray(rawBody?.fileNames)
+        ? rawBody.fileNames.filter((entry: unknown): entry is string => typeof entry === "string")
+        : [];
+      try {
+        const result = deleteCapturedImgs(fileNames);
+        ctx.body = {
+          ok: true,
+          deleted: result.deleted,
+          skipped: result.skipped,
+          days: listCapturedImgDays(),
+          status: getCapturedImgStatus(),
+        };
+      } catch (error) {
+        ctx.status = 400;
+        ctx.body = {
+          ok: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Failed to delete selected photos.",
+        };
+      }
+    });
+
+    this.router.delete("/api/photos/gallery/day/:dayKey", (ctx) => {
+      try {
+        const result = deleteCapturedImgsForDay(String(ctx.params.dayKey || ""));
+        ctx.body = {
+          ok: true,
+          deleted: result.deleted,
+          skipped: result.skipped,
+          days: listCapturedImgDays(),
+          status: getCapturedImgStatus(),
+        };
+      } catch (error) {
+        ctx.status = 400;
+        ctx.body = {
+          ok: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Failed to delete photo day.",
+        };
+      }
+    });
+
+    this.router.delete("/api/generated-images/gallery", (ctx) => {
+      const rawBody = (ctx.request as any).body;
+      const fileNames = Array.isArray(rawBody?.fileNames)
+        ? rawBody.fileNames.filter((entry: unknown): entry is string => typeof entry === "string")
+        : [];
+      try {
+        const result = deleteGeneratedImgs(fileNames);
+        ctx.body = {
+          ok: true,
+          deleted: result.deleted,
+          skipped: result.skipped,
+          days: listGeneratedImgDays(),
+          status: getGeneratedImgStatus(),
+        };
+      } catch (error) {
+        ctx.status = 400;
+        ctx.body = {
+          ok: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Failed to delete selected AI images.",
+        };
+      }
+    });
+
+    this.router.delete("/api/generated-images/gallery/day/:dayKey", (ctx) => {
+      try {
+        const result = deleteGeneratedImgsForDay(String(ctx.params.dayKey || ""));
+        ctx.body = {
+          ok: true,
+          deleted: result.deleted,
+          skipped: result.skipped,
+          days: listGeneratedImgDays(),
+          status: getGeneratedImgStatus(),
+        };
+      } catch (error) {
+        ctx.status = 400;
+        ctx.body = {
+          ok: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Failed to delete AI image day.",
+        };
+      }
     });
 
     this.router.get("/api/music/tracks", async (ctx) => {
@@ -1706,6 +1959,16 @@ export class WebDisplayServer implements WebAudioBridgeServer {
         geminiApiKey: getBodyString(body, "geminiApiKey"),
         geminiImageModel: getBodyString(body, "geminiImageModel"),
         geminiImagePreset: getBodyString(body, "geminiImagePreset"),
+        geminiLowTierImageBalanceUsd: getBodyNumber(body, "geminiLowTierImageBalanceUsd"),
+        geminiLowTierAutoReloadEnabled: getBodyBoolean(body, "geminiLowTierAutoReloadEnabled"),
+        geminiLowTierAutoReloadThresholdUsd: getBodyNumber(
+          body,
+          "geminiLowTierAutoReloadThresholdUsd",
+        ),
+        geminiLowTierAutoReloadAmountUsd: getBodyNumber(
+          body,
+          "geminiLowTierAutoReloadAmountUsd",
+        ),
         llmModel: getBodyString(body, "llmModel"),
         personalityPrompt: getBodyString(body, "personalityPrompt"),
         musicShuffle: getBodyBoolean(body, "musicShuffle"),
@@ -1819,6 +2082,10 @@ export class WebDisplayServer implements WebAudioBridgeServer {
       capture_image_path: this.currentStatus.capture_image_path,
       wifi_signal_level: this.currentStatus.wifi_signal_level,
       groq_requests_today: this.currentStatus.groq_requests_today,
+      gemini_low_tier_image_balance_usd:
+        this.currentStatus.gemini_low_tier_image_balance_usd,
+      gemini_low_tier_image_balance_text:
+        this.currentStatus.gemini_low_tier_image_balance_text,
       llm_model: this.currentStatus.llm_model,
       groq_header_badge_mode: this.currentStatus.groq_header_badge_mode,
       groq_header_badge_text: this.currentStatus.groq_header_badge_text,

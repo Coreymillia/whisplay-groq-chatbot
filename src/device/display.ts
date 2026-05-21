@@ -3,6 +3,7 @@ import { resolve } from "path";
 import { Socket } from "net";
 import { getCurrentTimeTag } from "../utils";
 import {
+  formatGeminiLowTierImageBalanceText,
   getRuntimeSettings,
   getScrollSpeedFactor,
   type GroqHeaderBadgeMode,
@@ -40,6 +41,8 @@ export interface Status {
   capture_image_path: string;
   wifi_signal_level: number;
   groq_requests_today: number;
+  gemini_low_tier_image_balance_usd: number;
+  gemini_low_tier_image_balance_text: string;
   llm_model: string;
   groq_header_badge_mode: string;
   groq_header_badge_text: string;
@@ -78,6 +81,10 @@ function getInitialStatus(): Status {
     capture_image_path: "",
     wifi_signal_level: 0,
     groq_requests_today: 0,
+    gemini_low_tier_image_balance_usd: settings.geminiLowTierImageBalanceUsd,
+    gemini_low_tier_image_balance_text: formatGeminiLowTierImageBalanceText(
+      settings.geminiLowTierImageBalanceUsd,
+    ),
     llm_model: settings.llmModel,
     groq_header_badge_mode: settings.groqHeaderBadgeMode,
     groq_header_badge_text: formatGroqHeaderBadgeText(
@@ -165,6 +172,10 @@ export class WhisplayDisplay {
             idle_timeout_sec: settings.idleTimeoutSec,
             screen_blank_timeout_sec: settings.screenBlankTimeoutSec,
             hat_text_color: settings.hatTextColor,
+            gemini_low_tier_image_balance_usd: settings.geminiLowTierImageBalanceUsd,
+            gemini_low_tier_image_balance_text: formatGeminiLowTierImageBalanceText(
+              settings.geminiLowTierImageBalanceUsd,
+            ),
             llm_model: settings.llmModel,
             groq_header_badge_mode: settings.groqHeaderBadgeMode,
             scroll_speed: this.currentStatus.scroll_speed,
@@ -480,6 +491,8 @@ export class WhisplayDisplay {
       capture_image_path,
       wifi_signal_level,
       groq_requests_today,
+      gemini_low_tier_image_balance_usd,
+      gemini_low_tier_image_balance_text,
       llm_model,
       groq_header_badge_mode,
       vpn_connected,
@@ -508,6 +521,8 @@ export class WhisplayDisplay {
     );
 
     const isTextChanged = changedValues.some(([key]) => key === "text");
+    const isGroqHeaderBadgeTextChanged =
+      this.currentStatus.groq_header_badge_text !== groqHeaderBadgeText;
 
     this.currentStatus.status = status;
     this.currentStatus.emoji = emoji;
@@ -528,6 +543,10 @@ export class WhisplayDisplay {
     this.currentStatus.capture_image_path = capture_image_path;
     this.currentStatus.wifi_signal_level = wifi_signal_level;
     this.currentStatus.groq_requests_today = groq_requests_today;
+    this.currentStatus.gemini_low_tier_image_balance_usd =
+      gemini_low_tier_image_balance_usd;
+    this.currentStatus.gemini_low_tier_image_balance_text =
+      gemini_low_tier_image_balance_text;
     this.currentStatus.llm_model = llm_model;
     this.currentStatus.groq_header_badge_mode = groq_header_badge_mode;
     this.currentStatus.groq_header_badge_text = groqHeaderBadgeText;
@@ -545,6 +564,9 @@ export class WhisplayDisplay {
     this.syncAudioLevelMonitor(status, header_mode);
     
     const changedValuesObj = Object.fromEntries(changedValues);
+    if (isGroqHeaderBadgeTextChanged) {
+      changedValuesObj.groq_header_badge_text = groqHeaderBadgeText;
+    }
     changedValuesObj.brightness = 100;
     const data = JSON.stringify(changedValuesObj);
     if (isTextChanged) console.log("send data:", data);

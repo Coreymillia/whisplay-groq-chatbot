@@ -19,6 +19,7 @@
         <div class="header">
           <div class="status-bar">
             <div class="status" id="statusText">starting</div>
+            <div class="cost-balance" id="imageCostBalanceText">$0.00</div>
             <div class="status-icons">
               <img class="status-icon" id="imageIcon" src="/img/image.png" alt="image" />
               <img class="status-icon" id="ragIcon" src="/img/rag.png" alt="rag" />
@@ -321,7 +322,7 @@
                     id="savedPhotosToggleBtn"
                     type="button"
                   >
-                    Gallery
+                    Open Photo Gallery
                   </button>
                 </div>
                 <div id="savedPhotosList" class="saved-photos-grid"></div>
@@ -393,6 +394,55 @@
                 <div class="field-hint">
                   Optional strong style layer for Gemini edits. If you ask for a vague edit like a favorite-style remix, the selected preset supplies the creative direction.
                 </div>
+              </div>
+
+              <div class="settings-field">
+                <label class="field-label" for="geminiLowTierImageBalanceInput">Low Tier Image Balance</label>
+                <input
+                  class="settings-input"
+                  id="geminiLowTierImageBalanceInput"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  placeholder="9.12"
+                />
+                <div class="field-hint">
+                  Displayed on the HAT and browser header. The low tier Gemini image model subtracts a fixed 4 cents for each generated image.
+                </div>
+              </div>
+
+              <div class="settings-field">
+                <label class="music-shuffle-toggle" for="geminiLowTierAutoReloadEnabledCheckbox">
+                  <input id="geminiLowTierAutoReloadEnabledCheckbox" type="checkbox" />
+                  <span>Enable low tier auto reload</span>
+                </label>
+                <div class="field-hint">
+                  When the low tier image balance falls below the threshold, Whisplay adds the reload amount automatically.
+                </div>
+              </div>
+
+              <div class="settings-field">
+                <label class="field-label" for="geminiLowTierAutoReloadThresholdInput">Auto Reload Threshold</label>
+                <input
+                  class="settings-input"
+                  id="geminiLowTierAutoReloadThresholdInput"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  placeholder="1.00"
+                />
+              </div>
+
+              <div class="settings-field">
+                <label class="field-label" for="geminiLowTierAutoReloadAmountInput">Auto Reload Amount</label>
+                <input
+                  class="settings-input"
+                  id="geminiLowTierAutoReloadAmountInput"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  placeholder="10.00"
+                />
               </div>
 
               <div class="settings-field">
@@ -707,6 +757,28 @@
               Auto-captures follow the selected camera source. Open the monitor gallery in a new tab to browse daily folders and move chosen photos into the saved gallery.
             </div>
             <div id="roomMonitorGalleryList" class="saved-photos-grid"></div>
+          </div>
+          <div class="card" id="generatedGalleryCard">
+            <div class="title">AI / Edited Images</div>
+            <div class="saved-photos-header">
+              <div>
+                <div class="field-label saved-photos-title">Generated Gallery</div>
+                <div class="field-hint saved-photos-subtitle" id="generatedGalleryStatus">Loading AI gallery...</div>
+              </div>
+              <div class="settings-actions" style="margin-top:0;">
+                <button
+                  class="button secondary compact"
+                  id="generatedGalleryToggleBtn"
+                  type="button"
+                >
+                  Open AI Gallery
+                </button>
+              </div>
+            </div>
+            <div class="field-hint" style="margin-bottom:12px;">
+              Gemini-generated and edited images stay in their own gallery so they do not mix with manual captures.
+            </div>
+            <div id="generatedGalleryList" class="saved-photos-grid"></div>
           </div>
         </div>
       </div>

@@ -8,7 +8,10 @@ import { GenerateContentResponse, GoogleGenAI } from "@google/genai";
 import path from "path";
 import { imageDir } from "../../utils/dir";
 import { readFileSync, writeFileSync } from "fs";
-import { getRuntimeSettings } from "../../config/runtime-settings";
+import {
+  GEMINI_LOW_TIER_IMAGE_COST_USD,
+  getRuntimeSettings,
+} from "../../config/runtime-settings";
 import { buildGeminiImagePrompt } from "../../config/gemini-image-presets";
 import { undiciProxyFetch } from "../proxy-fetch";
 
@@ -34,6 +37,29 @@ const getGeminiImageModel = (): string => {
 
 const shouldUseResponseModalities = (model: string): boolean => {
   return /preview/i.test(model) || /^gemini-3/i.test(model);
+};
+
+const createImageGenerationConfigs = (model: string): Array<Record<string, unknown>> => {
+  const baseConfig: Record<string, unknown> = {
+    imageConfig: {
+      aspectRatio: "1:1",
+    },
+  };
+  const modalityConfig: Record<string, unknown> = {
+    ...baseConfig,
+    responseModalities: ["IMAGE", "TEXT"],
+  };
+  const mimeConfig: Record<string, unknown> = {
+    ...baseConfig,
+    responseMimeType: "image/png",
+  };
+  return shouldUseResponseModalities(model)
+    ? [modalityConfig, mimeConfig]
+    : [mimeConfig, modalityConfig];
+};
+
+const isResponseConfigMismatch = (message: string): boolean => {
+  return /response[_ ]mime[_ ]type|responsemodalities/i.test(message);
 };
 
 
@@ -101,30 +127,36 @@ export const addGeminiGenerationTool = (imageGenerationTools: LLMTool[]) => {
           ],
         },
       ];
-      const config: Record<string, unknown> = {
-        imageConfig: {
-          aspectRatio: "1:1",
-        },
-      };
-      if (shouldUseResponseModalities(geminiImageModel)) {
-        config.responseModalities = ["IMAGE", "TEXT"];
-      } else {
-        config.responseMimeType = "image/png";
-      }
       let response: GenerateContentResponse | null = null;
       let generationError = "";
-      try {
-        response = (await gemini!.models.generateContent({
-          model: geminiImageModel!,
-          contents: requestContents,
-          config,
-        })) as GenerateContentResponse;
-      } catch (err) {
-        generationError =
-          err instanceof Error && err.message
-            ? err.message
-            : "Image generation request failed.";
-        console.error(`Error generating image:`, err);
+      const requestConfigs = createImageGenerationConfigs(geminiImageModel);
+      for (let index = 0; index < requestConfigs.length; index += 1) {
+        const config = requestConfigs[index];
+        try {
+          response = (await gemini!.models.generateContent({
+            model: geminiImageModel!,
+            contents: requestContents,
+            config,
+          })) as GenerateContentResponse;
+          generationError = "";
+          break;
+        } catch (err) {
+          generationError =
+            err instanceof Error && err.message
+              ? err.message
+              : "Image generation request failed.";
+          console.error(`Error generating image:`, err);
+          const shouldRetry =
+            index < requestConfigs.length - 1 &&
+            isResponseConfigMismatch(generationError);
+          if (shouldRetry) {
+            console.log(
+              `Retrying Gemini image request for model ${geminiImageModel} with alternate response config.`,
+            );
+            continue;
+          }
+          break;
+        }
       }
       if (!response?.candidates?.[0]?.content?.parts?.length) {
         return `${ToolReturnTag.Error}${generationError || "Image generation failed."}`;
@@ -146,6 +178,19 @@ export const addGeminiGenerationTool = (imageGenerationTools: LLMTool[]) => {
             setLatestGenImg(imagePath);
             isSuccess = true;
             console.log(`Image saved as ${imagePath}`);
+            if (geminiImageModel === "gemini-2.5-flash-image") {
+              try {
+                const { recordGeminiLowTierImageCharge } = require("../../status/gemini-image-cost") as {
+                  recordGeminiLowTierImageCharge: () => number;
+                };
+                const remainingBalance = recordGeminiLowTierImageCharge();
+                console.log(
+                  `[Gemini Image Cost] Charged $${GEMINI_LOW_TIER_IMAGE_COST_USD.toFixed(2)} for ${geminiImageModel}. Remaining balance: $${remainingBalance.toFixed(2)}`,
+                );
+              } catch (costError) {
+                console.warn("[Gemini Image Cost] Failed to record low-tier image charge:", costError);
+              }
+            }
           }
         }
       } catch (error) {

@@ -4,6 +4,7 @@ const textContent = document.getElementById("textContent");
 const batteryFill = document.getElementById("batteryFill");
 const batteryText = document.getElementById("batteryText");
 const dailyRequestsText = document.getElementById("dailyRequestsText");
+const imageCostBalanceText = document.getElementById("imageCostBalanceText");
 const wifiIcon = document.getElementById("wifiIcon");
 const vpnIcon = document.getElementById("vpnIcon");
 const imageIcon = document.getElementById("imageIcon");
@@ -28,6 +29,9 @@ const visionStatus = document.getElementById("visionStatus");
 const savedPhotosList = document.getElementById("savedPhotosList");
 const savedPhotosStatus = document.getElementById("savedPhotosStatus");
 const savedPhotosToggleBtn = document.getElementById("savedPhotosToggleBtn");
+const generatedGalleryList = document.getElementById("generatedGalleryList");
+const generatedGalleryStatus = document.getElementById("generatedGalleryStatus");
+const generatedGalleryToggleBtn = document.getElementById("generatedGalleryToggleBtn");
 const chatHistorySelect = document.getElementById("chatHistorySelect");
 const loadChatBtn = document.getElementById("loadChatBtn");
 const newChatBtn = document.getElementById("newChatBtn");
@@ -47,6 +51,10 @@ const geminiKeyInput = document.getElementById("geminiKeyInput");
 const geminiKeyHint = document.getElementById("geminiKeyHint");
 const geminiImageModelSelect = document.getElementById("geminiImageModelSelect");
 const geminiImagePresetSelect = document.getElementById("geminiImagePresetSelect");
+const geminiLowTierImageBalanceInput = document.getElementById("geminiLowTierImageBalanceInput");
+const geminiLowTierAutoReloadEnabledCheckbox = document.getElementById("geminiLowTierAutoReloadEnabledCheckbox");
+const geminiLowTierAutoReloadThresholdInput = document.getElementById("geminiLowTierAutoReloadThresholdInput");
+const geminiLowTierAutoReloadAmountInput = document.getElementById("geminiLowTierAutoReloadAmountInput");
 const personalityPresetSelect = document.getElementById("personalityPresetSelect");
 const personalityInput = document.getElementById("personalityInput");
 const personalityNameInput = document.getElementById("personalityNameInput");
@@ -135,7 +143,7 @@ let settingsLoaded = false;
 let visionAnalysisVisible = false;
 let latestVisionAnalysisStamp = 0;
 let savedPhotos = [];
-let showAllSavedPhotos = false;
+let generatedGalleryPhotos = [];
 let savedChatHistories = [];
 let screenBlankTimeoutOptions = [];
 let roomMonitorIntervalOptions = [];
@@ -777,6 +785,13 @@ function formatFullLimit(value) {
   return String(numeric);
 }
 
+function formatUsdLabel(value) {
+  const numeric = Number.isFinite(Number(value))
+    ? Math.max(0, Number(value))
+    : 0;
+  return `$${numeric.toFixed(2)}`;
+}
+
 function getCurrentModelOption() {
   return llmModelOptions.find((option) => option.id === currentLlmModel) || null;
 }
@@ -800,6 +815,12 @@ function applyState(data) {
   if (!data || !data.ready) return;
 
   const status = data.status || "";
+  if (typeof data.llm_model === "string" && data.llm_model.trim()) {
+    currentLlmModel = data.llm_model;
+  }
+  if (typeof data.groq_header_badge_mode === "string" && data.groq_header_badge_mode.trim()) {
+    currentGroqHeaderBadgeMode = data.groq_header_badge_mode;
+  }
   statusText.textContent = status === "last reply" ? "Last" : status;
   emojiText.textContent = data.emoji || "";
   updateText(
@@ -824,6 +845,19 @@ function applyState(data) {
     batteryFill.style.width = `${Math.min(100, Math.max(0, batteryLevel))}%`;
   }
   batteryFill.style.background = normalizeColor(data.battery_color);
+  if (imageCostBalanceText) {
+    imageCostBalanceText.textContent =
+      data.gemini_low_tier_image_balance_text ||
+      formatUsdLabel(data.gemini_low_tier_image_balance_usd);
+  }
+  if (
+    geminiLowTierImageBalanceInput &&
+    document.activeElement !== geminiLowTierImageBalanceInput &&
+    Number.isFinite(Number(data.gemini_low_tier_image_balance_usd))
+  ) {
+    geminiLowTierImageBalanceInput.value =
+      Number(data.gemini_low_tier_image_balance_usd).toFixed(2);
+  }
   if (dailyRequestsText) {
     dailyRequestsText.dataset.requestsToday = String(
       Number.isFinite(Number(data.groq_requests_today)) ? Number(data.groq_requests_today) : 0,
@@ -1004,26 +1038,23 @@ function renderSavedPhotos() {
     savedPhotosList.appendChild(empty);
     if (savedPhotosToggleBtn) {
       savedPhotosToggleBtn.disabled = true;
-      savedPhotosToggleBtn.textContent = "Gallery";
+      savedPhotosToggleBtn.textContent = "Open Photo Gallery";
     }
     return;
   }
-  const visiblePhotos = showAllSavedPhotos ? savedPhotos : savedPhotos.slice(0, 4);
-  const hiddenCount = Math.max(0, savedPhotos.length - visiblePhotos.length);
+  const visiblePhotos = savedPhotos.slice(0, 4);
   const countLabel = `${savedPhotos.length} saved photo${savedPhotos.length === 1 ? "" : "s"}.`;
   setSavedPhotosStatus(
-    showAllSavedPhotos || hiddenCount === 0
+    savedPhotos.length <= 4
       ? countLabel
       : `${countLabel} Showing ${visiblePhotos.length} recent.`,
   );
   if (savedPhotosToggleBtn) {
-    savedPhotosToggleBtn.disabled = savedPhotos.length <= 4;
+    savedPhotosToggleBtn.disabled = false;
     savedPhotosToggleBtn.textContent =
       savedPhotos.length <= 4
-        ? "Gallery"
-        : showAllSavedPhotos
-          ? "Recent Only"
-          : `Gallery (${savedPhotos.length})`;
+        ? "Open Photo Gallery"
+        : `Open Photo Gallery (${savedPhotos.length})`;
   }
   for (const photo of visiblePhotos) {
     const card = document.createElement("div");
@@ -1068,6 +1099,74 @@ function renderSavedPhotos() {
   }
 }
 
+function setGeneratedGalleryStatus(message, isError = false) {
+  if (!generatedGalleryStatus) return;
+  generatedGalleryStatus.textContent = message;
+  generatedGalleryStatus.style.color = isError ? "#ff8a8a" : "";
+}
+
+function renderGeneratedGalleryPreview() {
+  if (!generatedGalleryList) return;
+  generatedGalleryList.innerHTML = "";
+  if (!generatedGalleryPhotos.length) {
+    setGeneratedGalleryStatus("No AI or edited images yet.");
+    const empty = document.createElement("div");
+    empty.className = "saved-photos-empty";
+    empty.textContent = "No AI or edited images yet.";
+    generatedGalleryList.appendChild(empty);
+    if (generatedGalleryToggleBtn) {
+      generatedGalleryToggleBtn.disabled = true;
+      generatedGalleryToggleBtn.textContent = "Open AI Gallery";
+    }
+    return;
+  }
+  const visiblePhotos = generatedGalleryPhotos.slice(0, 4);
+  setGeneratedGalleryStatus(
+    generatedGalleryPhotos.length <= 4
+      ? `${generatedGalleryPhotos.length} AI image${generatedGalleryPhotos.length === 1 ? "" : "s"}.`
+      : `${generatedGalleryPhotos.length} AI images. Showing ${visiblePhotos.length} recent.`,
+  );
+  if (generatedGalleryToggleBtn) {
+    generatedGalleryToggleBtn.disabled = false;
+    generatedGalleryToggleBtn.textContent =
+      generatedGalleryPhotos.length <= 4
+        ? "Open AI Gallery"
+        : `Open AI Gallery (${generatedGalleryPhotos.length})`;
+  }
+  for (const photo of visiblePhotos) {
+    const card = document.createElement("div");
+    card.className = "saved-photo-card";
+
+    const img = document.createElement("img");
+    img.src = `${photo.imageUrl}?ts=${photo.updatedAt}`;
+    img.alt = photo.fileName;
+
+    const label = document.createElement("div");
+    label.className = "saved-photo-name";
+    label.textContent = photo.fileName;
+
+    const meta = document.createElement("div");
+    meta.className = "saved-photo-meta";
+    meta.textContent = new Date(photo.updatedAt).toLocaleString();
+
+    const actions = document.createElement("div");
+    actions.className = "saved-photo-actions";
+
+    const downloadLink = document.createElement("a");
+    downloadLink.className = "button compact saved-photo-download";
+    downloadLink.textContent = "Download";
+    downloadLink.href = photo.imageUrl;
+    downloadLink.download = photo.fileName;
+
+    card.appendChild(img);
+    card.appendChild(label);
+    card.appendChild(meta);
+    actions.appendChild(downloadLink);
+    card.appendChild(actions);
+    generatedGalleryList.appendChild(card);
+  }
+}
+
 async function loadSavedPhotos() {
   try {
     const response = await fetch(`/api/photos?ts=${Date.now()}`, {
@@ -1084,6 +1183,25 @@ async function loadSavedPhotos() {
     savedPhotos = [];
     renderSavedPhotos();
     setSavedPhotosStatus("Failed to load saved photos.", true);
+  }
+}
+
+async function loadGeneratedGalleryPreview() {
+  try {
+    const response = await fetch(`/api/generated-images?ts=${Date.now()}`, {
+      cache: "no-store",
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    const payload = await response.json();
+    generatedGalleryPhotos = Array.isArray(payload.photos) ? payload.photos : [];
+    renderGeneratedGalleryPreview();
+  } catch (error) {
+    console.error("Failed to load generated gallery preview:", error);
+    generatedGalleryPhotos = [];
+    renderGeneratedGalleryPreview();
+    setGeneratedGalleryStatus("Failed to load AI gallery.", true);
   }
 }
 
@@ -1104,7 +1222,7 @@ async function deleteSavedPhoto(fileName) {
     if (!response.ok || payload.ok === false) {
       throw new Error(payload.error || `HTTP ${response.status}`);
     }
-    await loadSavedPhotos();
+    await Promise.all([loadSavedPhotos(), loadGeneratedGalleryPreview()]);
   } catch (error) {
     console.error("Failed to delete saved photo:", error);
     const message = error instanceof Error ? error.message : String(error);
@@ -1579,9 +1697,34 @@ function applySettings(settings) {
     geminiImagePresetSelect.value =
       settings.geminiImagePreset || geminiImagePresetOptions[0]?.id || DEFAULT_GEMINI_IMAGE_PRESET;
   }
+  if (geminiLowTierImageBalanceInput) {
+    geminiLowTierImageBalanceInput.value = Number(
+      settings.geminiLowTierImageBalanceUsd ?? 0,
+    ).toFixed(2);
+  }
+  if (geminiLowTierAutoReloadEnabledCheckbox) {
+    geminiLowTierAutoReloadEnabledCheckbox.checked = Boolean(
+      settings.geminiLowTierAutoReloadEnabled,
+    );
+  }
+  if (geminiLowTierAutoReloadThresholdInput) {
+    geminiLowTierAutoReloadThresholdInput.value = Number(
+      settings.geminiLowTierAutoReloadThresholdUsd ?? 1,
+    ).toFixed(2);
+  }
+  if (geminiLowTierAutoReloadAmountInput) {
+    geminiLowTierAutoReloadAmountInput.value = Number(
+      settings.geminiLowTierAutoReloadAmountUsd ?? 10,
+    ).toFixed(2);
+  }
   if (groqHeaderBadgeModeSelect) {
     groqHeaderBadgeModeSelect.value =
       settings.groqHeaderBadgeMode || DEFAULT_GROQ_HEADER_BADGE_MODE;
+  }
+  if (imageCostBalanceText) {
+    imageCostBalanceText.textContent = formatUsdLabel(
+      settings.geminiLowTierImageBalanceUsd ?? 0,
+    );
   }
   if (musicShuffleCheckbox) {
     musicShuffleCheckbox.checked = Boolean(settings.musicShuffle);
@@ -2018,7 +2161,7 @@ async function uploadVisionImage() {
       visionImageInput.value = "";
     }
     renderVisionAnalysis(null);
-    loadSavedPhotos();
+    void Promise.all([loadSavedPhotos(), loadGeneratedGalleryPreview()]);
     setVisionStatus("Image uploaded. Ask the bot what it sees.");
   } catch (error) {
     console.error("Failed to upload vision image:", error);
@@ -2052,7 +2195,7 @@ async function captureVisionImage() {
       visionPreview.style.display = "block";
     }
     renderVisionAnalysis(null);
-    loadSavedPhotos();
+    void Promise.all([loadSavedPhotos(), loadGeneratedGalleryPreview()]);
     setVisionStatus("Camera image captured. Ask the bot what it sees.");
   } catch (error) {
     console.error("Failed to capture camera image:", error);
@@ -2079,6 +2222,15 @@ async function saveSettings({ clearGroqApiKey = false } = {}) {
       geminiImageModelSelect?.value || geminiImageModelOptions[0]?.id || DEFAULT_GEMINI_IMAGE_MODEL,
     geminiImagePreset:
       geminiImagePresetSelect?.value || geminiImagePresetOptions[0]?.id || DEFAULT_GEMINI_IMAGE_PRESET,
+    geminiLowTierImageBalanceUsd:
+      parseOptionalFloat(geminiLowTierImageBalanceInput?.value) ?? 0,
+    geminiLowTierAutoReloadEnabled: Boolean(
+      geminiLowTierAutoReloadEnabledCheckbox?.checked,
+    ),
+    geminiLowTierAutoReloadThresholdUsd:
+      parseOptionalFloat(geminiLowTierAutoReloadThresholdInput?.value) ?? 1,
+    geminiLowTierAutoReloadAmountUsd:
+      parseOptionalFloat(geminiLowTierAutoReloadAmountInput?.value) ?? 10,
     llmModel: llmModelSelect?.value || llmModelOptions[0]?.id || "",
     groqHeaderBadgeMode:
       groqHeaderBadgeModeSelect?.value || DEFAULT_GROQ_HEADER_BADGE_MODE,
@@ -2262,6 +2414,7 @@ loadMusicLibrary();
 loadVisionPreview();
 loadVisionAnalysis();
 loadSavedPhotos();
+loadGeneratedGalleryPreview();
 loadRoomMonitorPhotos();
 loadChatHistories();
 setVisionAnalysisVisible(false);
@@ -2503,17 +2656,19 @@ if (visionAnalysisToggleBtn) {
 
 if (savedPhotosToggleBtn) {
   savedPhotosToggleBtn.addEventListener("click", () => {
-    if (savedPhotos.length <= 4) {
-      return;
-    }
-    showAllSavedPhotos = !showAllSavedPhotos;
-    renderSavedPhotos();
+    window.open("/photo-gallery", "_blank", "noopener");
   });
 }
 
 if (roomMonitorToggleBtn) {
   roomMonitorToggleBtn.addEventListener("click", () => {
     window.open("/room-monitor-gallery", "_blank", "noopener");
+  });
+}
+
+if (generatedGalleryToggleBtn) {
+  generatedGalleryToggleBtn.addEventListener("click", () => {
+    window.open("/generated-gallery", "_blank", "noopener");
   });
 }
 

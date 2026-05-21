@@ -1,10 +1,19 @@
 import { imageDir, cameraDir } from "./dir";
 import fs from "fs";
 import path from "path";
+import {
+  deleteGalleryImages,
+  deleteGalleryImagesForDay,
+  ensureGalleryStorageReserve,
+  getGalleryImagePath,
+  getGalleryImageStatus,
+  listGalleryImageDays,
+  listGalleryImages,
+  listGalleryImagesForDay,
+} from "./image-gallery";
 
 export const genImgList: string[] = [];
 export const capturedImgList: string[] = [];
-export const MAX_CAPTURED_IMGS = 100;
 
 export type InteractiveImageSource =
   | "manual-capture"
@@ -54,19 +63,11 @@ export const getInteractiveImageSource = (): InteractiveImageSource | "" => {
   return hasInteractiveImage() ? interactiveImageSource : "";
 };
 
-const readImagesFromDir = (dirPath: string): string[] => {
-  if (!fs.existsSync(dirPath)) {
-    return [];
-  }
-  return fs.readdirSync(dirPath)
-    .filter((file) => /\.(jpg|png|jpeg|webp|gif)$/i.test(file))
-    .sort((a, b) => {
-      const aTime = fs.statSync(path.join(dirPath, a)).mtime.getTime();
-      const bTime = fs.statSync(path.join(dirPath, b)).mtime.getTime();
-      return aTime - bTime;
-    })
-    .map((file) => path.join(dirPath, file));
-};
+const readImagesFromDir = (dirPath: string): string[] =>
+  listGalleryImages(dirPath)
+    .slice()
+    .reverse()
+    .map((entry) => entry.imagePath);
 
 // 加载最新生成的图片路径到list中
 const loadLatestGenImg = () => {
@@ -99,30 +100,28 @@ const clearTrackedImagePath = (imagePath: string) => {
   }
 };
 
-const enforceCapturedImgLimit = (maxCount = MAX_CAPTURED_IMGS) => {
-  if (maxCount <= 0) {
-    return;
-  }
+const enforceCapturedGalleryReserve = () => {
+  ensureGalleryStorageReserve(cameraDir, clearTrackedImagePath);
   const images = readImagesFromDir(cameraDir);
-  const overflowCount = Math.max(0, images.length - maxCount);
-  if (overflowCount <= 0) {
-    capturedImgList.splice(0, capturedImgList.length, ...images);
-    return;
-  }
-  const removed = images.slice(0, overflowCount);
-  removed.forEach((imagePath) => {
-    if (fs.existsSync(imagePath)) {
-      fs.unlinkSync(imagePath);
-    }
-    clearTrackedImagePath(imagePath);
-  });
-  const remainingImages = images.slice(overflowCount);
-  capturedImgList.splice(0, capturedImgList.length, ...remainingImages);
+  capturedImgList.splice(0, capturedImgList.length, ...images);
+};
+
+const enforceGeneratedGalleryReserve = () => {
+  ensureGalleryStorageReserve(imageDir, clearTrackedImagePath);
+  const images = readImagesFromDir(imageDir);
+  genImgList.splice(0, genImgList.length, ...images);
 };
 
 export const setLatestGenImg = (imgPath: string) => {
-  genImgList.push(imgPath);
+  const normalizedPath = path.resolve(imgPath);
+  const existingIndex = genImgList.indexOf(normalizedPath);
+  if (existingIndex >= 0) {
+    genImgList.splice(existingIndex, 1);
+  }
+  genImgList.push(normalizedPath);
   latestDisplayImg = imgPath;
+  setLatestShowedImage(normalizedPath);
+  enforceGeneratedGalleryReserve();
 };
 
 export const getLatestDisplayImg = () => {
@@ -166,7 +165,7 @@ export const setLatestCapturedImg = (imgPath: string) => {
   }
   capturedImgList.push(normalizedPath);
   setLatestShowedImage(imgPath);
-  enforceCapturedImgLimit();
+  enforceCapturedGalleryReserve();
 };
 
 export const setPendingCapturedImgForChat = (imgPath: string) => {
@@ -219,24 +218,31 @@ export const showCapturedImgByIndex = (index: number): string => {
 };
 
 export const deleteCapturedImg = (fileName: string): string => {
-  const safeFileName = path.basename(fileName || "");
-  if (!safeFileName) {
+  const imagePath = getGalleryImagePath(cameraDir, fileName);
+  if (!imagePath) {
     return "";
   }
-  const imagePath = path.resolve(cameraDir, safeFileName);
-  if (!imagePath.startsWith(path.resolve(cameraDir) + path.sep)) {
+  const result = deleteGalleryImages(cameraDir, [fileName], clearTrackedImagePath);
+  if (!result.deleted.length) {
     return "";
   }
-  if (!fs.existsSync(imagePath)) {
-    return "";
-  }
-  fs.unlinkSync(imagePath);
-  const existingIndex = capturedImgList.indexOf(imagePath);
-  if (existingIndex >= 0) {
-    capturedImgList.splice(existingIndex, 1);
-  }
-  clearTrackedImagePath(imagePath);
+  const images = readImagesFromDir(cameraDir);
+  capturedImgList.splice(0, capturedImgList.length, ...images);
   return imagePath;
+};
+
+export const deleteCapturedImgs = (fileNames: string[]): { deleted: string[]; skipped: string[] } => {
+  const result = deleteGalleryImages(cameraDir, fileNames, clearTrackedImagePath);
+  const images = readImagesFromDir(cameraDir);
+  capturedImgList.splice(0, capturedImgList.length, ...images);
+  return result;
+};
+
+export const deleteCapturedImgsForDay = (dayKey: string): { deleted: string[]; skipped: string[] } => {
+  const result = deleteGalleryImagesForDay(cameraDir, dayKey, clearTrackedImagePath);
+  const images = readImagesFromDir(cameraDir);
+  capturedImgList.splice(0, capturedImgList.length, ...images);
+  return result;
 };
 
 export const showLatestCapturedImg = () => {
@@ -249,6 +255,66 @@ export const showLatestCapturedImg = () => {
   } else {
     return false;
   }
+};
+
+export const getCapturedImgPath = (fileName: string): string => {
+  return getGalleryImagePath(cameraDir, fileName);
+};
+
+export const getGeneratedImgPath = (fileName: string): string => {
+  return getGalleryImagePath(imageDir, fileName);
+};
+
+export const deleteGeneratedImg = (fileName: string): string => {
+  const imagePath = getGalleryImagePath(imageDir, fileName);
+  if (!imagePath) {
+    return "";
+  }
+  const result = deleteGalleryImages(imageDir, [fileName], clearTrackedImagePath);
+  if (!result.deleted.length) {
+    return "";
+  }
+  const images = readImagesFromDir(imageDir);
+  genImgList.splice(0, genImgList.length, ...images);
+  return imagePath;
+};
+
+export const deleteGeneratedImgs = (fileNames: string[]): { deleted: string[]; skipped: string[] } => {
+  const result = deleteGalleryImages(imageDir, fileNames, clearTrackedImagePath);
+  const images = readImagesFromDir(imageDir);
+  genImgList.splice(0, genImgList.length, ...images);
+  return result;
+};
+
+export const deleteGeneratedImgsForDay = (dayKey: string): { deleted: string[]; skipped: string[] } => {
+  const result = deleteGalleryImagesForDay(imageDir, dayKey, clearTrackedImagePath);
+  const images = readImagesFromDir(imageDir);
+  genImgList.splice(0, genImgList.length, ...images);
+  return result;
+};
+
+export const listCapturedImgDays = () => {
+  return listGalleryImageDays(cameraDir);
+};
+
+export const listGeneratedImgDays = () => {
+  return listGalleryImageDays(imageDir);
+};
+
+export const listCapturedImgsForDay = (dayKey: string) => {
+  return listGalleryImagesForDay(cameraDir, dayKey);
+};
+
+export const listGeneratedImgsForDay = (dayKey: string) => {
+  return listGalleryImagesForDay(imageDir, dayKey);
+};
+
+export const getCapturedImgStatus = () => {
+  return getGalleryImageStatus(cameraDir);
+};
+
+export const getGeneratedImgStatus = () => {
+  return getGalleryImageStatus(imageDir);
 };
 
 export const queueDisplayImage = (imagePath: string) => {

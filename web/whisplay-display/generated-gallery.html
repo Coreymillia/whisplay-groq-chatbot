@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Whisplay Room Monitor Gallery</title>
+  <title>Whisplay AI Gallery</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link
@@ -12,28 +12,33 @@
   />
   <link rel="stylesheet" href="/room-monitor-gallery.css" />
 </head>
-<body data-gallery-view="monitor">
+<body
+  data-gallery-title="AI / Edited Image Gallery"
+  data-gallery-subtitle="Browse Gemini-generated and edited images by day, download them, delete selected photos, or clear the current day."
+  data-gallery-days-api="/api/generated-images/gallery/days"
+  data-gallery-day-api="/api/generated-images/gallery/day/"
+  data-gallery-delete-api="/api/generated-images/gallery"
+  data-gallery-delete-day-api="/api/generated-images/gallery/day/"
+  data-gallery-main-link="/"
+>
   <main class="gallery-shell">
     <section class="gallery-card">
       <div class="gallery-header">
         <div>
-          <div class="gallery-title">Room Monitor Gallery</div>
-          <div class="gallery-subtitle">Browse captures by day, select photos in bulk, and move the keepers into the saved gallery.</div>
+          <div class="gallery-title" id="galleryPageTitle">AI / Edited Image Gallery</div>
+          <div class="gallery-subtitle" id="galleryPageSubtitle">Browse Gemini-generated and edited images by day, download them, delete selected photos, or clear the current day.</div>
         </div>
         <div class="gallery-actions">
           <a class="gallery-link secondary" href="/" target="_blank" rel="noopener">Main UI</a>
-          <a class="gallery-link secondary" href="/saved-gallery" target="_blank" rel="noopener">Open Saved Gallery</a>
         </div>
       </div>
       <div class="gallery-toolbar">
         <button class="gallery-button secondary" id="gallerySelectAllBtn" type="button">Select All on Day</button>
         <button class="gallery-button secondary" id="galleryClearSelectionBtn" type="button">Clear Selection</button>
         <button class="gallery-button secondary" id="galleryDeleteDayBtn" type="button">Delete Current Day</button>
-        <button class="gallery-button secondary" id="galleryDeleteSelectedBtn" type="button">Delete Selected</button>
-        <button class="gallery-button" id="galleryMoveSelectedBtn" type="button">Move Selected to Saved Gallery</button>
-        <div class="gallery-status" id="gallerySavedCount">0 saved</div>
+        <button class="gallery-button" id="galleryDeleteSelectedBtn" type="button">Delete Selected</button>
       </div>
-      <div class="gallery-status" id="galleryStatus">Loading room monitor folders...</div>
+      <div class="gallery-status" id="galleryStatus">Loading AI gallery...</div>
       <div class="gallery-meta" id="galleryMeta"></div>
     </section>
 
@@ -41,7 +46,7 @@
       <aside class="gallery-card gallery-sidebar" id="galleryDayList"></aside>
       <section class="gallery-card gallery-main">
         <div class="gallery-title-row">
-          <div class="gallery-title" id="galleryDayTitle">Room Monitor Day</div>
+          <div class="gallery-title" id="galleryDayTitle">AI Image Day</div>
         </div>
         <div class="gallery-photo-grid" id="galleryPhotoGrid"></div>
       </section>
@@ -71,6 +76,6 @@
       <div class="gallery-viewer-caption" id="galleryViewerCaption"></div>
     </div>
   </div>
-  <script src="/room-monitor-gallery.js"></script>
+  <script src="/image-gallery.js"></script>
 </body>
 </html>

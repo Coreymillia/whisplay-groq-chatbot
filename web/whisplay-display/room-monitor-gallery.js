@@ -7,6 +7,8 @@ const pageMeta = document.getElementById("galleryMeta");
 const photoGrid = document.getElementById("galleryPhotoGrid");
 const selectAllBtn = document.getElementById("gallerySelectAllBtn");
 const clearSelectionBtn = document.getElementById("galleryClearSelectionBtn");
+const deleteDayBtn = document.getElementById("galleryDeleteDayBtn");
+const deleteSelectedBtn = document.getElementById("galleryDeleteSelectedBtn");
 const moveSelectedBtn = document.getElementById("galleryMoveSelectedBtn");
 const savedCountText = document.getElementById("gallerySavedCount");
 const slideshowInterval = document.getElementById("slideshowInterval");
@@ -129,6 +131,14 @@ function renderDayList() {
 
 function updateSelectionButtons() {
   const selectedCount = selectedFileNames.size;
+  if (deleteSelectedBtn) {
+    deleteSelectedBtn.disabled = selectedCount === 0;
+    deleteSelectedBtn.textContent =
+      selectedCount === 0 ? "Delete Selected" : `Delete Selected (${selectedCount})`;
+  }
+  if (deleteDayBtn) {
+    deleteDayBtn.disabled = mode !== "monitor" || activeDayPhotos.length === 0;
+  }
   if (moveSelectedBtn) {
     moveSelectedBtn.disabled = selectedCount === 0;
     moveSelectedBtn.textContent =
@@ -349,6 +359,59 @@ async function moveSelectedPhotos(fileNames) {
   );
 }
 
+async function deleteSelectedPhotos(fileNames) {
+  const uniqueNames = [...new Set(fileNames.filter(Boolean))];
+  if (!uniqueNames.length) {
+    setStatus("Select at least one photo first.", true);
+    return;
+  }
+  if (!window.confirm(`Delete ${uniqueNames.length} selected room monitor photo${uniqueNames.length === 1 ? "" : "s"}?`)) {
+    return;
+  }
+  setStatus(`Deleting ${uniqueNames.length} selected photo${uniqueNames.length === 1 ? "" : "s"}...`);
+  const payload = await fetchJson("/api/room-monitor/gallery", {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ fileNames: uniqueNames }),
+  });
+  uniqueNames.forEach((fileName) => selectedFileNames.delete(fileName));
+  if (savedCountText) {
+    savedCountText.textContent = `${payload.savedCount || 0} saved`;
+  }
+  await loadMonitorGallery();
+  setStatus(
+    payload.deleted
+      ? `Deleted ${payload.deleted} room monitor photo${payload.deleted === 1 ? "" : "s"}.`
+      : "No photos were deleted.",
+  );
+}
+
+async function deleteCurrentDay() {
+  if (!activeDayKey) {
+    setStatus("Choose a day folder first.", true);
+    return;
+  }
+  const activeDayLabel = roomMonitorDays.find((day) => day.dayKey === activeDayKey)?.label || activeDayKey;
+  if (!window.confirm(`Delete all room monitor photos from ${activeDayLabel}?`)) {
+    return;
+  }
+  setStatus(`Deleting all photos from ${activeDayLabel}...`);
+  const payload = await fetchJson(`/api/room-monitor/gallery/day/${encodeURIComponent(activeDayKey)}`, {
+    method: "DELETE",
+  });
+  selectedFileNames.clear();
+  activeDayKey = "";
+  if (savedCountText) {
+    savedCountText.textContent = `${payload.savedCount || 0} saved`;
+  }
+  await loadMonitorGallery();
+  setStatus(
+    payload.deleted
+      ? `Deleted ${payload.deleted} room monitor photo${payload.deleted === 1 ? "" : "s"} from ${activeDayLabel}.`
+      : `No photos were deleted from ${activeDayLabel}.`,
+  );
+}
+
 async function loadSavedGallery() {
   setStatus("Loading saved gallery...");
   const payload = await fetchJson(`/api/room-monitor/saved?ts=${Date.now()}`, {
@@ -375,6 +438,18 @@ clearSelectionBtn?.addEventListener("click", () => {
 moveSelectedBtn?.addEventListener("click", () => {
   void moveSelectedPhotos([...selectedFileNames]).catch((error) => {
     setStatus(error instanceof Error ? error.message : "Move failed.", true);
+  });
+});
+
+deleteSelectedBtn?.addEventListener("click", () => {
+  void deleteSelectedPhotos([...selectedFileNames]).catch((error) => {
+    setStatus(error instanceof Error ? error.message : "Delete failed.", true);
+  });
+});
+
+deleteDayBtn?.addEventListener("click", () => {
+  void deleteCurrentDay().catch((error) => {
+    setStatus(error instanceof Error ? error.message : "Delete failed.", true);
   });
 });
 
@@ -405,6 +480,8 @@ viewer?.addEventListener("click", (event) => {
 if (mode === "saved") {
   if (selectAllBtn) selectAllBtn.style.display = "none";
   if (clearSelectionBtn) clearSelectionBtn.style.display = "none";
+  if (deleteDayBtn) deleteDayBtn.style.display = "none";
+  if (deleteSelectedBtn) deleteSelectedBtn.style.display = "none";
   if (moveSelectedBtn) moveSelectedBtn.style.display = "none";
   if (savedCountText) savedCountText.style.display = "none";
   void loadSavedGallery().catch((error) => {

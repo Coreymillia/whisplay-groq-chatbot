@@ -77,6 +77,10 @@ export interface RuntimeSettings {
   geminiApiKey: string;
   geminiImageModel: GeminiImageModel;
   geminiImagePreset: GeminiImagePresetId;
+  geminiLowTierImageBalanceUsd: number;
+  geminiLowTierAutoReloadEnabled: boolean;
+  geminiLowTierAutoReloadThresholdUsd: number;
+  geminiLowTierAutoReloadAmountUsd: number;
   llmModel: string;
   personalityPrompt: string;
   esp32AgentPersonalityPrompt: string;
@@ -112,6 +116,10 @@ export interface RuntimeSettingsUpdate {
   geminiApiKey?: string;
   geminiImageModel?: string;
   geminiImagePreset?: string;
+  geminiLowTierImageBalanceUsd?: number;
+  geminiLowTierAutoReloadEnabled?: boolean;
+  geminiLowTierAutoReloadThresholdUsd?: number;
+  geminiLowTierAutoReloadAmountUsd?: number;
   llmModel?: string;
   personalityPrompt?: string;
   esp32AgentPersonalityPrompt?: string;
@@ -150,6 +158,11 @@ const SETTINGS_PATH = path.resolve(
 const DEFAULT_VOICE_MODE: VoiceMode = "text-only";
 const DEFAULT_GEMINI_IMAGE_MODEL: GeminiImageModel = "gemini-2.5-flash-image";
 const DEFAULT_GEMINI_IMAGE_PRESET: GeminiImagePresetId = "none";
+export const GEMINI_LOW_TIER_IMAGE_COST_USD = 0.04;
+const DEFAULT_GEMINI_LOW_TIER_IMAGE_BALANCE_USD = 0;
+const DEFAULT_GEMINI_LOW_TIER_AUTO_RELOAD_ENABLED = false;
+const DEFAULT_GEMINI_LOW_TIER_AUTO_RELOAD_THRESHOLD_USD = 1;
+const DEFAULT_GEMINI_LOW_TIER_AUTO_RELOAD_AMOUNT_USD = 10;
 const DEFAULT_LLM_MODEL = DEFAULT_BOTNET_MODEL;
 const DEFAULT_MUSIC_SHUFFLE = false;
 const DEFAULT_VOLUME_LEVEL = 9;
@@ -565,6 +578,21 @@ function normalizeCoordinate(
   return Math.max(min, Math.min(max, numeric));
 }
 
+function roundCurrency(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
+function normalizeCurrencyValue(
+  value: unknown,
+  fallbackValue: number,
+): number {
+  const numeric = typeof value === "number" ? value : parseFloat(String(value));
+  if (!Number.isFinite(numeric)) {
+    return roundCurrency(fallbackValue);
+  }
+  return roundCurrency(Math.max(0, numeric));
+}
+
 function normalizeLlmModel(value: unknown): string {
   return normalizeBotNetModel(value ?? DEFAULT_LLM_MODEL);
 }
@@ -577,6 +605,22 @@ function sanitizeSettings(input: Partial<RuntimeSettings> | null | undefined): R
       typeof input?.geminiApiKey === "string" ? input.geminiApiKey.trim() : "",
     geminiImageModel: normalizeGeminiImageModel(input?.geminiImageModel),
     geminiImagePreset: normalizeGeminiImagePreset(input?.geminiImagePreset),
+    geminiLowTierImageBalanceUsd: normalizeCurrencyValue(
+      input?.geminiLowTierImageBalanceUsd,
+      DEFAULT_GEMINI_LOW_TIER_IMAGE_BALANCE_USD,
+    ),
+    geminiLowTierAutoReloadEnabled:
+      typeof input?.geminiLowTierAutoReloadEnabled === "boolean"
+        ? input.geminiLowTierAutoReloadEnabled
+        : DEFAULT_GEMINI_LOW_TIER_AUTO_RELOAD_ENABLED,
+    geminiLowTierAutoReloadThresholdUsd: normalizeCurrencyValue(
+      input?.geminiLowTierAutoReloadThresholdUsd,
+      DEFAULT_GEMINI_LOW_TIER_AUTO_RELOAD_THRESHOLD_USD,
+    ),
+    geminiLowTierAutoReloadAmountUsd: normalizeCurrencyValue(
+      input?.geminiLowTierAutoReloadAmountUsd,
+      DEFAULT_GEMINI_LOW_TIER_AUTO_RELOAD_AMOUNT_USD,
+    ),
     llmModel: normalizeLlmModel(input?.llmModel),
     personalityPrompt:
       typeof input?.personalityPrompt === "string"
@@ -674,6 +718,31 @@ export function saveRuntimeSettings(
 
   if (typeof update.geminiImagePreset === "string") {
     next.geminiImagePreset = normalizeGeminiImagePreset(update.geminiImagePreset);
+  }
+
+  if (typeof update.geminiLowTierImageBalanceUsd === "number") {
+    next.geminiLowTierImageBalanceUsd = normalizeCurrencyValue(
+      update.geminiLowTierImageBalanceUsd,
+      current.geminiLowTierImageBalanceUsd,
+    );
+  }
+
+  if (typeof update.geminiLowTierAutoReloadEnabled === "boolean") {
+    next.geminiLowTierAutoReloadEnabled = update.geminiLowTierAutoReloadEnabled;
+  }
+
+  if (typeof update.geminiLowTierAutoReloadThresholdUsd === "number") {
+    next.geminiLowTierAutoReloadThresholdUsd = normalizeCurrencyValue(
+      update.geminiLowTierAutoReloadThresholdUsd,
+      current.geminiLowTierAutoReloadThresholdUsd,
+    );
+  }
+
+  if (typeof update.geminiLowTierAutoReloadAmountUsd === "number") {
+    next.geminiLowTierAutoReloadAmountUsd = normalizeCurrencyValue(
+      update.geminiLowTierAutoReloadAmountUsd,
+      current.geminiLowTierAutoReloadAmountUsd,
+    );
   }
 
   if (typeof update.llmModel === "string") {
@@ -1013,6 +1082,10 @@ export function getPublicRuntimeSettings(): {
   geminiApiKeyConfigured: boolean;
   geminiImageModel: GeminiImageModel;
   geminiImagePreset: GeminiImagePresetId;
+  geminiLowTierImageBalanceUsd: number;
+  geminiLowTierAutoReloadEnabled: boolean;
+  geminiLowTierAutoReloadThresholdUsd: number;
+  geminiLowTierAutoReloadAmountUsd: number;
   llmModel: string;
   personalityPrompt: string;
   esp32AgentPersonalityPrompt: string;
@@ -1047,6 +1120,10 @@ export function getPublicRuntimeSettings(): {
     geminiApiKeyConfigured: Boolean(settings.geminiApiKey),
     geminiImageModel: settings.geminiImageModel,
     geminiImagePreset: settings.geminiImagePreset || DEFAULT_GEMINI_IMAGE_PRESET,
+    geminiLowTierImageBalanceUsd: settings.geminiLowTierImageBalanceUsd,
+    geminiLowTierAutoReloadEnabled: settings.geminiLowTierAutoReloadEnabled,
+    geminiLowTierAutoReloadThresholdUsd: settings.geminiLowTierAutoReloadThresholdUsd,
+    geminiLowTierAutoReloadAmountUsd: settings.geminiLowTierAutoReloadAmountUsd,
     llmModel: settings.llmModel,
     personalityPrompt: settings.personalityPrompt,
     esp32AgentPersonalityPrompt: settings.esp32AgentPersonalityPrompt,
@@ -1091,4 +1168,38 @@ export function getPublicRuntimeSettings(): {
     weatherLatitude: settings.weatherLatitude,
     weatherLongitude: settings.weatherLongitude,
   };
+}
+
+export function formatGeminiLowTierImageBalanceText(balanceUsd: number): string {
+  return `$${normalizeCurrencyValue(balanceUsd, 0).toFixed(2)}`;
+}
+
+export function applyGeminiLowTierImageCharge(
+  chargeUsd = GEMINI_LOW_TIER_IMAGE_COST_USD,
+): RuntimeSettings {
+  const current = loadSettingsFile();
+  const next: RuntimeSettings = {
+    ...current,
+    geminiLowTierImageBalanceUsd: roundCurrency(
+      Math.max(0, current.geminiLowTierImageBalanceUsd - Math.max(0, chargeUsd)),
+    ),
+  };
+  if (
+    next.geminiLowTierAutoReloadEnabled &&
+    next.geminiLowTierAutoReloadAmountUsd > 0
+  ) {
+    let guard = 0;
+    while (
+      next.geminiLowTierImageBalanceUsd < next.geminiLowTierAutoReloadThresholdUsd &&
+      guard < 8
+    ) {
+      next.geminiLowTierImageBalanceUsd = roundCurrency(
+        next.geminiLowTierImageBalanceUsd + next.geminiLowTierAutoReloadAmountUsd,
+      );
+      guard += 1;
+    }
+  }
+  const sanitized = sanitizeSettings(next);
+  writeSettingsFile(sanitized);
+  return sanitized;
 }
