@@ -12,6 +12,7 @@ import {
   onTextInput,
   isButtonDown,
   recordConversationTurn,
+  setEmitPressImmediatelyWithDoubleClick,
 } from "../../device/display";
 import {
   recordAudio,
@@ -360,6 +361,8 @@ const PHOTO_BROWSER_EXIT_HOLD_MS = 1800;
 const VOICE_HELP_EXIT_HOLD_MS = 1800;
 const VOICE_COMMAND_HELP_PAGES = buildVoiceCommandHelpPages();
 const TEXT_AUTO_REPLAY_PAUSE_MS = 900;
+const CAMERA_CAPTURE_CUE_BLINK_MS = 220;
+const CAMERA_CAPTURE_CONFIRM_MS = 1200;
 
 interface PendingImageEditConfirmation {
   prompt: string;
@@ -367,6 +370,8 @@ interface PendingImageEditConfirmation {
 }
 
 let pendingImageEditConfirmation: PendingImageEditConfirmation | null = null;
+let cameraCaptureCueTimer: NodeJS.Timeout | null = null;
+let cameraCaptureCueResetTimer: NodeJS.Timeout | null = null;
 
 function clearPendingImageEditConfirmation(): void {
   pendingImageEditConfirmation = null;
@@ -432,6 +437,52 @@ function buildImageEditConfirmMessage(prompt: string): string {
     `[confirm]Pending edit:\n${formatPendingImageEditPrompt(prompt)}\n\n` +
     "Say confirm, add..., start over..., or cancel."
   );
+}
+
+function stopCameraCaptureCue(resetToDefault = true): void {
+  if (cameraCaptureCueTimer) {
+    clearInterval(cameraCaptureCueTimer);
+    cameraCaptureCueTimer = null;
+  }
+  if (cameraCaptureCueResetTimer) {
+    clearTimeout(cameraCaptureCueResetTimer);
+    cameraCaptureCueResetTimer = null;
+  }
+  if (resetToDefault) {
+    display({ RGB: "#000055" });
+  }
+}
+
+function startCameraCaptureCue(
+  text = "[camera]Capturing image...\nStand still.",
+): void {
+  stopCameraCaptureCue(false);
+  let active = true;
+  display({
+    text,
+    RGB: "#ff2a2a",
+  });
+  cameraCaptureCueTimer = setInterval(() => {
+    active = !active;
+    display({
+      RGB: active ? "#ff2a2a" : "#2a0000",
+    });
+  }, CAMERA_CAPTURE_CUE_BLINK_MS);
+}
+
+function showCameraCapturedCue(
+  text = "[camera]Photo captured.",
+  resetDelayMs = CAMERA_CAPTURE_CONFIRM_MS,
+): void {
+  stopCameraCaptureCue(false);
+  display({
+    text,
+    RGB: "#0088ff",
+  });
+  cameraCaptureCueResetTimer = setTimeout(() => {
+    cameraCaptureCueResetTimer = null;
+    display({ RGB: "#000055" });
+  }, resetDelayMs);
 }
 
 function shouldRouteToVision(prompt: string): boolean {
@@ -833,6 +884,7 @@ async function captureAndPrepareLatestImage(): Promise<string> {
   const captureImagePath = `${cameraDir}/capture-${moment().format(
     "YYYYMMDD-HHmmss",
   )}.jpg`;
+  startCameraCaptureCue();
   await captureCameraImage(captureImagePath, 8000);
   setLatestCapturedImg(captureImagePath);
   activateInteractiveImage(captureImagePath, "manual-capture");
@@ -913,6 +965,7 @@ async function streamWeatherRelayReply(
 
 export const flowStates: Record<FlowName, FlowStateHandler> = {
   sleep: (ctx: ChatFlowContext) => {
+    setEmitPressImmediatelyWithDoubleClick(false);
     const currentStatus = getCurrentStatus();
     const preserveLastReply =
       currentStatus.status === "last reply" && Boolean(currentStatus.text);
@@ -973,6 +1026,7 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
       clearLatestVisionAnalysis();
       clearPendingImageEditConfirmation();
       latestCapturePath = captureImagePath;
+      showCameraCapturedCue();
       display({
         image: captureImagePath,
         image_icon_visible: false,
@@ -994,6 +1048,7 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
     });
   },
   gallery_menu: (ctx: ChatFlowContext) => {
+    setEmitPressImmediatelyWithDoubleClick(true);
     let menuIndex = 0;
     let holdTimer: NodeJS.Timeout | null = null;
     let holdTriggered = false;
@@ -1073,6 +1128,7 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
     renderMenu();
   },
   photo_browser: (ctx: ChatFlowContext) => {
+    setEmitPressImmediatelyWithDoubleClick(true);
     let photoIndex = 0;
     let holdTimer: NodeJS.Timeout | null = null;
     let holdTriggered = false;
@@ -1165,6 +1221,7 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
     renderCurrentPhoto();
   },
   generated_image_browser: (ctx: ChatFlowContext) => {
+    setEmitPressImmediatelyWithDoubleClick(true);
     let imageIndex = 0;
     let holdTimer: NodeJS.Timeout | null = null;
     let holdTriggered = false;
@@ -1308,6 +1365,7 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
     renderCurrentPage();
   },
   music: (ctx: ChatFlowContext) => {
+    setEmitPressImmediatelyWithDoubleClick(false);
     // Start deferred music playback when entering music state
     startPendingMusicPlayback();
 
@@ -1356,6 +1414,7 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
     });
   },
   listening: (ctx: ChatFlowContext) => {
+    setEmitPressImmediatelyWithDoubleClick(false);
     ctx.enterMusicAfterAnswer = false;
     ctx.musicDisplayText = "";
     ctx.isFromWakeListening = false;
@@ -1463,6 +1522,7 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
     });
   },
   wake_listening: (ctx: ChatFlowContext) => {
+    setEmitPressImmediatelyWithDoubleClick(false);
     ctx.enterMusicAfterAnswer = false;
     ctx.musicDisplayText = "";
     ctx.isFromWakeListening = true;
@@ -1736,16 +1796,44 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
       });
       ctx.transitionTo("image");
     };
+    const transitionToPromptStage = (
+      message: string,
+      status = "photo edit",
+    ): void => {
+      llmResponseText = message;
+      stopPlaying();
+      ctx.rememberLastAnswer({
+        text: message,
+        emoji: STATE_EMOJIS.answering,
+        image: "",
+      });
+      clearPendingCapturedImgForChat();
+      display({
+        status,
+        image: "",
+        image_icon_visible: false,
+        text: message,
+        text_input_enabled: true,
+        RGB: "#8a4dff",
+      });
+      ctx.transitionTo("image");
+    };
     const runImageGenerationRequest = (
       prompt: string,
       withImageContext: boolean,
       baseImagePath = "",
+      showSourceImageDuringGeneration = true,
     ): void => {
       display({
+        status: "thinking",
+        emoji: STATE_EMOJIS.answering,
+        RGB: "#8a4dff",
+        ...(showSourceImageDuringGeneration ? {} : { image: "" }),
+        image_icon_visible: false,
         text: "[generateImage]Creating image...",
       });
       void runReplyFlow(async () => {
-        if (baseImagePath) {
+        if (baseImagePath && showSourceImageDuringGeneration) {
           activateInteractiveImage(baseImagePath, "other");
           queueDisplayImage(baseImagePath);
           display({
@@ -1792,26 +1880,19 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
     if (pendingImageEdit && imageEditCommand) {
       if (imageEditCommand.type === "cancel") {
         clearPendingImageEditConfirmation();
-        transitionDirectlyToImage(
-          "Canceled the pending image edit.",
-          pendingImageEdit.imagePath,
-        );
+        transitionToPromptStage("Canceled the pending image edit.");
         return;
       }
       if (imageEditCommand.type === "show") {
-        transitionDirectlyToImage(
+        transitionToPromptStage(
           buildImageEditConfirmMessage(pendingImageEdit.prompt),
-          pendingImageEdit.imagePath,
         );
         return;
       }
       if (imageEditCommand.type === "add" && imageEditCommand.value) {
         const nextPrompt = `${pendingImageEdit.prompt}. ${imageEditCommand.value}`;
         setPendingImageEditConfirmation(nextPrompt, pendingImageEdit.imagePath);
-        transitionDirectlyToImage(
-          buildImageEditConfirmMessage(nextPrompt),
-          pendingImageEdit.imagePath,
-        );
+        transitionToPromptStage(buildImageEditConfirmMessage(nextPrompt));
         return;
       }
       if (imageEditCommand.type === "replace" && imageEditCommand.value) {
@@ -1819,9 +1900,8 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
           imageEditCommand.value,
           pendingImageEdit.imagePath,
         );
-        transitionDirectlyToImage(
+        transitionToPromptStage(
           buildImageEditConfirmMessage(imageEditCommand.value),
-          pendingImageEdit.imagePath,
         );
         return;
       }
@@ -1831,6 +1911,7 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
           pendingImageEdit.prompt,
           true,
           pendingImageEdit.imagePath,
+          false,
         );
         return;
       }
@@ -2028,14 +2109,12 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
       return;
     }
     if (shouldCaptureImage(ctx.asrText)) {
-      display({
-        text: "[camera]Capturing image...",
-      });
       void captureAndPrepareLatestImage()
         .then((captureImagePath) => {
           if (currentAnswerId !== ctx.answerId) {
             return;
           }
+          showCameraCapturedCue();
           display({
             image: captureImagePath,
             image_icon_visible: false,
@@ -2045,6 +2124,7 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
         })
         .catch((error) => {
           console.error("Voice capture failed:", error);
+          stopCameraCaptureCue();
           if (currentAnswerId !== ctx.answerId) {
             return;
           }
@@ -2178,9 +2258,8 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
             const currentImagePath = getLatestShowedImage();
             if (currentImagePath) {
               setPendingImageEditConfirmation(ctx.asrText, currentImagePath);
-              transitionDirectlyToImage(
+              transitionToPromptStage(
                 buildImageEditConfirmMessage(ctx.asrText),
-                currentImagePath,
               );
               return;
             }

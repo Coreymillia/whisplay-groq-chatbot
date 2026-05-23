@@ -125,6 +125,8 @@ export class WhisplayDisplay {
   private buttonPressTimeArray: number[] = [];
   private buttonReleaseTimeArray: number[] = [];
   private buttonDetectInterval: NodeJS.Timeout | null = null;
+  private pendingSingleReleaseCallback: (() => void) | null = null;
+  private emitPressImmediatelyWithDoubleClick = false;
   private webDisplay: WebDisplayServer | null = null;
   private deviceEnabled: boolean;
   private cameraEnabled: boolean;
@@ -226,11 +228,21 @@ export class WhisplayDisplay {
         this.buttonReleaseTimeArray.length >= 2;
 
       if (doubleClickDetected) {
+        this.pendingSingleReleaseCallback = null;
         this.buttonDoubleClickCallback?.();
+      } else if (this.pendingSingleReleaseCallback) {
+        this.pendingSingleReleaseCallback();
+        this.pendingSingleReleaseCallback = null;
       } else {
-        const lastReleaseTime = this.buttonReleaseTimeArray.pop() || 0;
-        const lastPressTime = this.buttonPressTimeArray.pop() || 0;
-        if (!lastReleaseTime || lastReleaseTime < lastPressTime) {
+        const lastReleaseTime =
+          this.buttonReleaseTimeArray[this.buttonReleaseTimeArray.length - 1] || 0;
+        const lastPressTime =
+          this.buttonPressTimeArray[this.buttonPressTimeArray.length - 1] || 0;
+        if (
+          !this.emitPressImmediatelyWithDoubleClick &&
+          (!lastReleaseTime || lastReleaseTime < lastPressTime)
+        ) {
+          console.log("emit pressed");
           this.buttonPressedCallback();
         }
       }
@@ -383,9 +395,14 @@ export class WhisplayDisplay {
       clearTimeout(this.buttonDetectInterval);
       this.buttonDetectInterval = null;
     }
+    this.pendingSingleReleaseCallback = null;
     this.buttonPressTimeArray = [];
     this.buttonReleaseTimeArray = [];
     this.buttonDoubleClickCallback = callback || null;
+  }
+
+  setEmitPressImmediatelyWithDoubleClick(enabled: boolean): void {
+    this.emitPressImmediatelyWithDoubleClick = enabled;
   }
 
   onCameraCapture(callback: () => void): void {
@@ -599,20 +616,25 @@ export class WhisplayDisplay {
   private handleButtonPressedEvent(): void {
     this.buttonDown = true;
     this.buttonPressTimeArray.push(Date.now());
-    this.startMonitoringDoubleClick();
-    if (!this.buttonDetectInterval) {
+    if (!this.buttonDoubleClickCallback || this.emitPressImmediatelyWithDoubleClick) {
       console.log("emit pressed");
       this.buttonPressedCallback();
     }
+    this.startMonitoringDoubleClick();
   }
 
   private handleButtonReleasedEvent(): void {
     this.buttonDown = false;
     this.buttonReleaseTimeArray.push(Date.now());
-    if (!this.buttonDetectInterval) {
+    if (!this.buttonDoubleClickCallback) {
       console.log("emit released");
       this.buttonReleasedCallback();
+      return;
     }
+    this.pendingSingleReleaseCallback = () => {
+      console.log("emit released");
+      this.buttonReleasedCallback();
+    };
   }
 
   isButtonDown(): boolean {
@@ -824,6 +846,8 @@ export const onButtonReleased =
   displayInstance.onButtonReleased.bind(displayInstance);
 export const onButtonDoubleClick =
   displayInstance.onButtonDoubleClick.bind(displayInstance);
+export const setEmitPressImmediatelyWithDoubleClick =
+  displayInstance.setEmitPressImmediatelyWithDoubleClick.bind(displayInstance);
 export const onCameraCapture =
   displayInstance.onCameraCapture.bind(displayInstance);
 export const onCameraPreviewRequested =

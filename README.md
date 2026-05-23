@@ -135,6 +135,32 @@ Official Google docs clearly show **free vs paid tiers**, billing tiers, and mod
 - **Fallback still available:** local voice-triggered photo effects like **retro**, **comic**, **sketch**, **pixelate**, and the rest of the existing basic image commands still work even without Gemini billing-enabled image generation
 - **Gemini billing note:** plain hardware info, camera viewing, browsing, and the rest of the normal local device flow remain free; Gemini **text** may work for light testing on a free key, but **image generation / full photo editing** has been the path most likely to require billing on the Google project
 
+### Prompt tips for stronger Gemini preset results
+
+The current preset flow tends to work best when you either:
+
+- use a broad preset-led request like **`edit this photo in your favorite style`**
+- or name the style more directly and add **2-4 concrete visual anchors**
+
+In practice, a one-word request like **`surreal`** can be too weak and may let Gemini stay conservative. A stronger pattern is:
+
+```text
+edit this photo in your favorite style, add [lighting], [texture/effect], and [atmosphere]
+```
+
+Working-style examples:
+
+- **Dali Dream:** `edit this photo in your favorite style, add melting clocks, warped shadows, and a dreamlike sky`
+- **Neon Hallucination:** `edit this photo in your favorite style, add glowing neon outlines, electric magenta and cyan lighting, and a surreal nightclub dream atmosphere`
+- **Glitch Trip:** `edit this photo in your favorite style, add RGB channel separation, digital corruption, scan lines, and chaotic glitch artifacts`
+- **Retro Cosmic Poster:** `edit this photo in your favorite style, make it look like a retro sci-fi poster with bold gradients, cosmic background elements, and dramatic graphic composition`
+- **Surreal Collage:** `edit this photo in your favorite style, turn it into a surreal collage with layered paper textures, strange symbolic objects, and dreamlike cut-and-paste composition`
+- **Tech Blueprint:** `edit this photo in your favorite style, turn it into a cyan technical blueprint with white schematic lines, grid detail, and diagram-style rendering`
+- **Haunted Daguerreotype:** `edit this photo in your favorite style, make it an eerie antique daguerreotype with sepia tones, scratches, tarnish, and ghostly blur`
+- **Bas-Relief Stone Carving:** `edit this photo in your favorite style, turn it into an ancient stone carving with chiseled edges, weathered limestone texture, and deep shadowed relief`
+- **Visionary Psychedelic:** `edit this photo in your favorite style, add sacred geometry, radiant energy lines, prismatic color, and a spiritual cosmic aura`
+- **Cyberpunk Noir 1980s:** `edit this photo in your favorite style, add crimson and cobalt neon, rain-slick reflections, haze, and moody 1980s cyberpunk night lighting`
+
 ## ESP32 Agent workspace
 
 The Pi-hosted browser UI now includes an **ESP32 Agent** page at **`/agent`**. This is a browser-first coding workspace intended to help generate, refine, and recover **PlatformIO ESP32 projects** without taking over the normal Whisplay chatbot flow on the device itself.
@@ -730,6 +756,27 @@ Gemini image generation in this fork currently defaults to **`gemini-2.5-flash-i
 The browser and device text-model selector now also exposes **Gemini 2.5 Flash**, **Gemini 2.5 Flash-Lite**, and **Gemini 2.5 Pro** for the normal chatbot and the ESP32 Agent workspace. Those text requests use the saved Gemini key when a Gemini model is selected.
 
 The browser **Settings** panel also includes an optional **Gemini Style Preset** for stronger stylized edits plus an optional **Gemini photo-edit confirm** toggle. When a preset is selected, Gemini combines that preset's hidden style directions with your normal edit prompt, and vague requests like “edit this photo in your favorite style” use the preset's default creative fallback.
+
+Current Gemini image presets are defined in:
+
+```text
+src/config/gemini-image-presets.ts
+```
+
+They are **not** currently stored in a user-editable JSON file. Each preset has:
+
+- an `id`
+- a visible `label`
+- a hidden `stylePrompt`
+- a `fallbackPrompt`
+
+The runtime prompt builder also lives in that file under:
+
+```ts
+buildGeminiImagePrompt(...)
+```
+
+So if you want to tune the presets manually, that TypeScript file is the current source of truth.
 
 ## Speech recognition notes for this fork
 

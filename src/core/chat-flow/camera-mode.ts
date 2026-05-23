@@ -69,7 +69,11 @@ export function handleCameraModeRelease(): void {
   }
 
   if (cameraModePressAt > 0 && duration <= CAMERA_LONG_PRESS_MS) {
-    display({ camera_capture: true });
+    display({
+      camera_capture: true,
+      text: "[camera]Capturing image...\nStand still.",
+      RGB: "#ff2a2a",
+    });
     if (cameraModeExitAfterCaptureTimer) {
       clearTimeout(cameraModeExitAfterCaptureTimer);
     }
