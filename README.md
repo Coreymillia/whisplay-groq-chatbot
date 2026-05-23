@@ -34,18 +34,20 @@ These numbers are a **working README snapshot**, not a permanent truth table. Pr
 
 ### Groq text models currently surfaced in Whisplay
 
-Source: Groq **Supported Models** page (`console.groq.com/docs/models`) at the time of this README update.
+Source: Groq **Rate Limits** page (`console.groq.com/docs/rate-limits`) at the time of this README update.
 
-| Model | Whisplay use | Paid price per 1M tokens | Developer-plan rate limits shown by Groq | Notes |
-| --- | --- | --- | --- | --- |
-| `llama-3.1-8b-instant` | shared text selector | **$0.05 input / $0.08 output** | **250K TPM / 1K RPM** | cheapest general Groq text option in the current selector |
-| `llama-3.3-70b-versatile` | shared text selector | **$0.59 input / $0.79 output** | **300K TPM / 1K RPM** | stronger general reasoning than 8B |
-| `meta-llama/llama-4-scout-17b-16e-instruct` | shared text selector | **$0.11 input / $0.34 output** | **300K TPM / 1K RPM** | higher TPM than the older Llama path |
-| `qwen/qwen3-32b` | shared text selector | **$0.29 input / $0.59 output** | **300K TPM / 1K RPM** | solid middle option |
-| `openai/gpt-oss-20b` | shared text selector | **$0.075 input / $0.30 output** | **250K TPM / 1K RPM** | one of the better Groq-hosted code / tool options |
-| `openai/gpt-oss-120b` | shared text selector | **$0.15 input / $0.60 output** | **250K TPM / 1K RPM** | stronger GPT-OSS path for coding / reasoning |
-| `groq/compound` | shared text selector | **not listed as per-token pricing on the models page** | **200K TPM / 200 RPM** | Groq positions Compound as an agentic/tool-using system |
-| `groq/compound-mini` | shared text selector + BotNet | **not listed as per-token pricing on the models page** | **200K TPM / 200 RPM** | smaller/faster agentic Compound path |
+Whisplay is currently more constrained by **Groq free limits** than by Groq paid pricing, so this section tracks the **free-limit chart first**. Paid Groq developer plans are effectively out of scope for this fork right now.
+
+| Model | Whisplay use | Free limits | Notes |
+| --- | --- | --- | --- |
+| `llama-3.1-8b-instant` | shared text selector | **30 RPM / 14.4K RPD / 6K TPM / 500K TPD** | cheapest general Groq text option in the current selector |
+| `llama-3.3-70b-versatile` | shared text selector | **30 RPM / 1K RPD / 12K TPM / 100K TPD** | stronger general reasoning than 8B |
+| `meta-llama/llama-4-scout-17b-16e-instruct` | shared text selector | **30 RPM / 1K RPD / 30K TPM / 500K TPD** | one of the roomier Groq free-tier token buckets in the current selector |
+| `qwen/qwen3-32b` | shared text selector | **60 RPM / 1K RPD / 6K TPM / 500K TPD** | higher free-tier RPM than the other main text models |
+| `openai/gpt-oss-20b` | shared text selector | **30 RPM / 1K RPD / 8K TPM / 200K TPD** | one of the better Groq-hosted code / tool options |
+| `openai/gpt-oss-120b` | shared text selector | **30 RPM / 1K RPD / 8K TPM / 200K TPD** | stronger GPT-OSS path for coding / reasoning |
+| `groq/compound` | shared text selector | **30 RPM / 250 RPD / 70K TPM** | Groq positions Compound as an agentic / tool-using system; no TPD shown on the public rate-limits page |
+| `groq/compound-mini` | shared text selector + BotNet | **30 RPM / 250 RPD / 70K TPM** | smaller/faster agentic Compound path; no TPD shown on the public rate-limits page |
 
 ### Gemini text + image snapshot used by this fork
 
@@ -60,7 +62,7 @@ Official Google docs clearly show **free vs paid tiers**, billing tiers, and mod
 
 ### Practical billing notes for this project
 
-- **Groq:** Whisplay currently exposes an **RPD request counter**, not a full token meter. Large pasted logs can still hit Groq free-tier or developer-plan token limits before the request counter looks scary.
+- **Groq:** Whisplay currently exposes an **RPD request counter**, not a full token meter. Large pasted logs can still hit Groq **free-tier** token limits before the request counter looks scary.
 - **Gemini text:** Gemini text can work on a free key for at least light testing, but Whisplay does **not** currently know the exact moment a Google project stops being effectively free and starts billing for text. That boundary is controlled by **Google project tier / billing**, not by the Pi hardware.
 - **Gemini images:** in live repo testing, **image generation / photo editing** was the path most likely to fail first until billing was enabled on the Google project.
 - **Gemini rate limits:** Google measures limits per project using **RPM**, **TPM**, and **RPD**, and official docs say **RPD resets at midnight Pacific time**.
