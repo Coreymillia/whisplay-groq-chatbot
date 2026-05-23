@@ -1,4 +1,4 @@
-import { getBotNetModelOption } from "../config/botnet-models";
+import { getTextLlmModelOption } from "../config/text-llm-models";
 import type { GroqHeaderBadgeMode } from "../config/runtime-settings";
 
 export function formatGroqHeaderBadgeText(
@@ -6,7 +6,7 @@ export function formatGroqHeaderBadgeText(
   badgeMode: GroqHeaderBadgeMode,
   requestsToday: number,
 ): string {
-  const modelOption = getBotNetModelOption(llmModel);
+  const modelOption = getTextLlmModelOption(llmModel);
   const safeRequestsToday = Number.isFinite(requestsToday)
     ? Math.max(0, Math.round(requestsToday))
     : 0;
@@ -16,7 +16,7 @@ export function formatGroqHeaderBadgeText(
     if (typeof rpdLimit === "number" && Number.isFinite(rpdLimit) && rpdLimit > 0) {
       return String(Math.max(0, rpdLimit - safeRequestsToday));
     }
-    return "?";
+    return modelOption?.shortLabel || modelOption?.label || "Model";
   }
 
   return modelOption?.shortLabel || modelOption?.label || "Model";

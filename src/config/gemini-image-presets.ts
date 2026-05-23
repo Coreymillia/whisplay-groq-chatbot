@@ -10,7 +10,11 @@ export type GeminiImagePresetId =
   | "cyberpunk-noir-1980s"
   | "tech-blueprint"
   | "haunted-daguerreotype"
-  | "bas-relief-stone-carving";
+  | "bas-relief-stone-carving"
+  | "van-gogh"
+  | "picasso"
+  | "stencil-street-art"
+  | "visionary-psychedelic";
 
 export interface GeminiImagePresetDefinition {
   id: GeminiImagePresetId;
@@ -113,6 +117,38 @@ export const GEMINI_IMAGE_PRESET_OPTIONS: GeminiImagePresetDefinition[] = [
       "Transform the scene into an ancient stone bas-relief carving. Preserve the original composition, but make all subjects and objects appear sculpted directly from weathered gray limestone with chiseled edges, worn texture, and deep side lighting that emphasizes carved depth and shadow.",
     fallbackPrompt:
       "Restyle the image as an ancient stone bas-relief with carved limestone texture, chiselled depth, and dramatic side lighting.",
+  },
+  {
+    id: "van-gogh",
+    label: "Van Gogh",
+    stylePrompt:
+      "Restyle the photo with a dramatic post-impressionist oil painting treatment inspired by expressive brushwork, swirling motion, luminous moonlit color energy, vivid cobalt and golden tones, textured paint buildup, and emotionally charged lighting. Preserve the original subject and composition while translating it into a richly painted scene.",
+    fallbackPrompt:
+      "Transform the image into a vivid post-impressionist oil painting with swirling brushwork, bold texture, glowing night-sky color energy, and expressive painterly motion while keeping the subject recognizable.",
+  },
+  {
+    id: "picasso",
+    label: "Picasso",
+    stylePrompt:
+      "Reimagine the photo as a bold cubist painting with fractured planes, geometric simplification, angular forms, flattened perspective, and a confident modernist palette. Preserve the core subject and main composition, but break the scene into stylized overlapping shapes and strong painterly structure.",
+    fallbackPrompt:
+      "Turn the image into a striking cubist artwork with geometric planes, abstracted facial or object structure, flattened depth, and expressive modernist color.",
+  },
+  {
+    id: "stencil-street-art",
+    label: "Stencil Street Art",
+    stylePrompt:
+      "Edit the photo into gritty stencil-driven street art. Keep the original subject readable, but simplify it into bold cutout silhouettes, sharp sprayed edges, limited high-contrast color blocks, weathered wall texture, urban grime, layered poster remnants, and rebellious mural energy.",
+    fallbackPrompt:
+      "Transform the image into high-contrast stencil street art with spray-paint texture, distressed wall surfaces, and bold mural-like urban attitude.",
+  },
+  {
+    id: "visionary-psychedelic",
+    label: "Visionary Psychedelic",
+    stylePrompt:
+      "Transform the image into a visionary psychedelic scene with luminous anatomy-like linework, sacred geometry, radiant energy fields, spiritual symmetry, translucent layered forms, prismatic color gradients, and intricate consciousness-themed detail. Keep the original subject recognizable while elevating it into a vivid metaphysical artwork.",
+    fallbackPrompt:
+      "Restyle the image into visionary psychedelic art with glowing sacred geometry, radiant inner light, intricate spiritual detail, and layered cosmic color.",
   },
 ];
 

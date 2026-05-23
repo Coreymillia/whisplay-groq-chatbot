@@ -7,12 +7,13 @@ import {
   systemPrompt,
   updateLastMessageTime,
 } from "../../config/llm-config";
-import { gemini, geminiModel } from "./gemini";
+import { getGeminiClient } from "./gemini";
 import { llmFuncMap, llmToolsForGemini } from "../../config/llm-tools";
 import dotenv from "dotenv";
 import { FunctionCall, Message } from "../../type";
 import {
   ChatWithLLMStreamFunction,
+  SavedChatHistorySummary,
   SummaryTextWithLLMFunction,
 } from "../interface";
 import { ToolListUnion, ToolUnion, Part, Content } from "@google/genai";
@@ -23,6 +24,8 @@ import {
   hasPendingCapturedImgForChat,
   getImageMimeType,
 } from "../../utils/image";
+import { getRuntimeSettings } from "../../config/runtime-settings";
+import { isGeminiTextLlmModel } from "../../config/text-llm-models";
 
 dotenv.config();
 
@@ -30,19 +33,20 @@ const useCapturedImageInChat =
   (process.env.USE_CAPTURED_IMAGE_IN_CHAT || "false").toLowerCase() ===
   "true";
 
-const chatHistoryFileName = `gemini_chat_history_${moment().format(
-  "YYYY-MM-DD_HH-mm-ss",
-)}.json`;
+const CHAT_HISTORY_FILE_PATTERN = /^gemini_chat_history_.*\.json$/;
 
-const resetChatHistory = (): void => {
-  // messages.length = 0;
-  // messages.push({
-  //   role: "system",
-  //   content: systemPrompt,
-  // });
-};
+function buildChatHistoryFileName(): string {
+  return `gemini_chat_history_${moment().format("YYYY-MM-DD_HH-mm-ss_SSS")}.json`;
+}
 
-// Convert tools to Gemini format
+function getActiveGeminiLlmModel(): string {
+  const runtimeModel = getRuntimeSettings().llmModel;
+  if (isGeminiTextLlmModel(runtimeModel)) {
+    return runtimeModel;
+  }
+  return process.env.GEMINI_MODEL || "gemini-2.5-flash";
+}
+
 const convertToolsToGeminiFormat = (tools: LLMTool[]): ToolListUnion => {
   return [
     {
@@ -58,9 +62,11 @@ const convertToolsToGeminiFormat = (tools: LLMTool[]): ToolListUnion => {
 function createGeminiChatInstance(
   history?: Content[],
   customSystemPrompt?: string,
+  model = getActiveGeminiLlmModel(),
 ) {
+  const gemini = getGeminiClient();
   return gemini?.chats.create({
-    model: geminiModel,
+    model,
     config: {
       tools: convertToolsToGeminiFormat(llmToolsForGemini),
       systemInstruction: {
@@ -72,7 +78,100 @@ function createGeminiChatInstance(
   })!;
 }
 
-let chat = createGeminiChatInstance();
+let activeModel = getActiveGeminiLlmModel();
+let chat = createGeminiChatInstance(undefined, undefined, activeModel);
+
+const resetChatHistory = (): void => {
+  activeModel = getActiveGeminiLlmModel();
+  chat = createGeminiChatInstance(undefined, undefined, activeModel);
+};
+
+const writeChatHistory = (fileName: string, history: Content[]): void => {
+  fs.mkdirSync(chatHistoryDir, { recursive: true });
+  fs.writeFileSync(path.join(chatHistoryDir, fileName), JSON.stringify(history, null, 2));
+};
+
+const archiveCurrentChatHistory = (): string | null => {
+  if (!chat) {
+    return null;
+  }
+  const history = chat.getHistory();
+  const hasConversation = history.some((entry) =>
+    (entry.parts || []).some((part) => Boolean(part.text?.trim())),
+  );
+  if (!hasConversation) {
+    return null;
+  }
+  const fileName = buildChatHistoryFileName();
+  writeChatHistory(fileName, history);
+  return fileName;
+};
+
+const getSafeChatHistoryPath = (fileName: string): string => {
+  return path.resolve(chatHistoryDir, path.basename(fileName || ""));
+};
+
+const readSavedChatHistory = (fileName: string): Content[] | null => {
+  const historyPath = getSafeChatHistoryPath(fileName);
+  if (!historyPath.startsWith(path.resolve(chatHistoryDir) + path.sep)) {
+    return null;
+  }
+  if (
+    !fs.existsSync(historyPath) ||
+    !CHAT_HISTORY_FILE_PATTERN.test(path.basename(historyPath))
+  ) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(fs.readFileSync(historyPath, "utf8"));
+    return Array.isArray(parsed) ? (parsed as Content[]) : null;
+  } catch (error) {
+    console.error("Failed to read saved Gemini chat history:", error);
+    return null;
+  }
+};
+
+const getHistoryPreview = (history: Content[]): string => {
+  const previewSource = [...history]
+    .reverse()
+    .flatMap((entry) => entry.parts || [])
+    .map((part) => part.text || "")
+    .find((text) => text.trim().length > 0) || "";
+  return previewSource.length > 72
+    ? `${previewSource.slice(0, 69).trimEnd()}...`
+    : previewSource;
+};
+
+const listSavedChatHistories = (): SavedChatHistorySummary[] => {
+  if (!fs.existsSync(chatHistoryDir)) {
+    return [];
+  }
+  return fs.readdirSync(chatHistoryDir)
+    .filter((fileName) => CHAT_HISTORY_FILE_PATTERN.test(fileName))
+    .map((fileName) => {
+      const historyPath = path.join(chatHistoryDir, fileName);
+      const stats = fs.statSync(historyPath);
+      const history = readSavedChatHistory(fileName) || [];
+      return {
+        fileName,
+        updatedAt: stats.mtimeMs,
+        messageCount: history.length,
+        preview: getHistoryPreview(history),
+      };
+    })
+    .sort((a, b) => b.updatedAt - a.updatedAt);
+};
+
+const loadSavedChatHistory = (fileName: string): boolean => {
+  const history = readSavedChatHistory(fileName);
+  if (!history || history.length === 0) {
+    return false;
+  }
+  activeModel = getActiveGeminiLlmModel();
+  chat = createGeminiChatInstance(history, undefined, activeModel);
+  updateLastMessageTime();
+  return true;
+};
 
 const chatWithLLMStream: ChatWithLLMStreamFunction = async (
   inputMessages: Message[] = [],
@@ -81,9 +180,15 @@ const chatWithLLMStream: ChatWithLLMStreamFunction = async (
   partialThinkingCallback?: (partialThinking: string) => void,
   invokeFunctionCallback?: (functionName: string, result?: string) => void,
 ): Promise<void> => {
-  if (!gemini || !chat) {
+  const gemini = getGeminiClient();
+  const selectedModel = getActiveGeminiLlmModel();
+  if (!gemini) {
     console.error("Google Gemini API key is not set.");
     return;
+  }
+  if (!chat || selectedModel !== activeModel) {
+    activeModel = selectedModel;
+    chat = createGeminiChatInstance(undefined, undefined, activeModel);
   }
 
   if (shouldResetChatHistory()) {
@@ -98,19 +203,16 @@ const chatWithLLMStream: ChatWithLLMStreamFunction = async (
       parts: [{ text: knowledgePrompt.content }],
       role: "system",
     });
-    // recreate chat instance to include system prompt
-    chat = createGeminiChatInstance(chatHistory);
+    chat = createGeminiChatInstance(chatHistory, undefined, activeModel);
   }
 
   let endResolve: () => void = () => {};
   const promise = new Promise<void>((resolve) => {
     endResolve = resolve;
   }).finally(() => {
-    // save chat history to file
-    fs.writeFileSync(
-      path.join(chatHistoryDir, chatHistoryFileName),
-      JSON.stringify(chat.getHistory(), null, 2),
-    );
+    if (chat) {
+      writeChatHistory(buildChatHistoryFileName(), chat.getHistory());
+    }
   });
 
   let partialAnswer = "";
@@ -175,7 +277,6 @@ const chatWithLLMStream: ChatWithLLMStreamFunction = async (
         partialAnswer += chunkText;
       }
 
-      // Handle function calls
       const functionCalls = chunk.functionCalls;
       if (functionCalls) {
         functionCalls.forEach((call: any) => {
@@ -226,10 +327,9 @@ const chatWithLLMStream: ChatWithLLMStreamFunction = async (
                   return `Error executing function ${name}: ${err.message}`;
                 }),
             ];
-          } else {
-            console.error(`Function ${name} not found`);
-            return [id, `Function ${name} not found`];
           }
+          console.error(`Function ${name} not found`);
+          return [id, `Function ${name} not found`];
         }),
       );
 
@@ -245,10 +345,9 @@ const chatWithLLMStream: ChatWithLLMStreamFunction = async (
         endCallback();
       });
       return;
-    } else {
-      endResolve();
-      endCallback();
     }
+    endResolve();
+    endCallback();
   } catch (error: any) {
     console.error("Error:", error.message);
     endResolve();
@@ -261,12 +360,13 @@ const summaryTextWithLLM: SummaryTextWithLLMFunction = async (
   text: string,
   promptPrefix: string,
 ): Promise<string> => {
+  const gemini = getGeminiClient();
   if (!gemini) {
     console.error("Gemini API key is not set. Using original text.");
     return text;
   }
   const response = await gemini.models.generateContent({
-    model: geminiModel,
+    model: getActiveGeminiLlmModel(),
     contents: [
       {
         parts: [{ text: `${promptPrefix}\n\n${text}\n\n` }],
@@ -280,14 +380,20 @@ const summaryTextWithLLM: SummaryTextWithLLMFunction = async (
   if (!response) {
     return text;
   }
-  if (response && response.text) {
+  if (response.text) {
     const summary = response.text;
     console.log("Gemini summary:", summary);
     return summary;
-  } else {
-    console.log("No summary returned from Gemini. Using original text.");
-    return text;
   }
+  console.log("No summary returned from Gemini. Using original text.");
+  return text;
 };
 
-export default { chatWithLLMStream, resetChatHistory, summaryTextWithLLM };
+export default {
+  chatWithLLMStream,
+  resetChatHistory,
+  summaryTextWithLLM,
+  listSavedChatHistories,
+  loadSavedChatHistory,
+  archiveCurrentChatHistory,
+};

@@ -16,6 +16,56 @@ This project starts from the official PiSugar Whisplay chatbot, but is being tai
 - **ESP32 Agent path:** add a browser-first sandboxed coding workspace on the Pi for building and iterating on ESP32 PlatformIO projects
 - **Cost target:** stay on free-tier API usage where possible for now
 
+## Chat surfaces in this repo
+
+This repo now has **multiple chatbot paths**, not just one screen with one model behind it.
+
+| Surface | What it does | Current model / provider path | Notes |
+| --- | --- | --- | --- |
+| **Whisplay main chat** | the normal device chatbot for casual conversation, weather, help, and device controls | shared text-model selector with **Groq models** plus **Gemini 2.5 Flash / Flash-Lite / Pro** | this is the core Pi + HAT bot |
+| **Gemini vision + photo edit path** | analyze photos, generate images, and edit the currently shown photo | Gemini API | image generation / editing may require billing enabled on the Google project |
+| **BotNet chat** | peer-bot / persona relay experiments | curated **Groq-only** model dropdown | intentionally separate from the shared Gemini-capable selector |
+| **ESP32 Agent workspace** | browser-side coding helper for PlatformIO ESP32 projects | same shared text-model selector as normal chat | separate Agent personalities, same text model family choices |
+| **Companion clients** | CYD, Cardputer, Groqputer, Core2, Core1Display, and related sidecars | mostly relay to the Pi-hosted chatbot stack | these are extra control/display surfaces, not separate cloud backends |
+
+## Cloud model, pricing, and limit snapshot
+
+These numbers are a **working README snapshot**, not a permanent truth table. Provider limits and pricing move over time, so always double-check the current Groq dashboard and Google AI Studio pages before trusting this section for production budgeting.
+
+### Groq text models currently surfaced in Whisplay
+
+Source: Groq **Supported Models** page (`console.groq.com/docs/models`) at the time of this README update.
+
+| Model | Whisplay use | Paid price per 1M tokens | Developer-plan rate limits shown by Groq | Notes |
+| --- | --- | --- | --- | --- |
+| `llama-3.1-8b-instant` | shared text selector | **$0.05 input / $0.08 output** | **250K TPM / 1K RPM** | cheapest general Groq text option in the current selector |
+| `llama-3.3-70b-versatile` | shared text selector | **$0.59 input / $0.79 output** | **300K TPM / 1K RPM** | stronger general reasoning than 8B |
+| `meta-llama/llama-4-scout-17b-16e-instruct` | shared text selector | **$0.11 input / $0.34 output** | **300K TPM / 1K RPM** | higher TPM than the older Llama path |
+| `qwen/qwen3-32b` | shared text selector | **$0.29 input / $0.59 output** | **300K TPM / 1K RPM** | solid middle option |
+| `openai/gpt-oss-20b` | shared text selector | **$0.075 input / $0.30 output** | **250K TPM / 1K RPM** | one of the better Groq-hosted code / tool options |
+| `openai/gpt-oss-120b` | shared text selector | **$0.15 input / $0.60 output** | **250K TPM / 1K RPM** | stronger GPT-OSS path for coding / reasoning |
+| `groq/compound` | shared text selector | **not listed as per-token pricing on the models page** | **200K TPM / 200 RPM** | Groq positions Compound as an agentic/tool-using system |
+| `groq/compound-mini` | shared text selector + BotNet | **not listed as per-token pricing on the models page** | **200K TPM / 200 RPM** | smaller/faster agentic Compound path |
+
+### Gemini text + image snapshot used by this fork
+
+Official Google docs clearly show **free vs paid tiers**, billing tiers, and model availability, but the Gemini pricing pages have been shifting toward newer Gemini 3.x pages. The 2.5-family prices below are therefore a **best-effort current snapshot** based on Google docs plus current public pricing roundups, and should be treated as approximate until re-checked in AI Studio.
+
+| Model | Whisplay use | Best current paid-price snapshot | Free / billing note |
+| --- | --- | --- | --- |
+| **Gemini 2.5 Flash** | shared text selector, current practical Gemini chat choice | about **$0.30 input / $2.50 output per 1M tokens** | can often work on a free AI Studio key for light testing until project limits are hit |
+| **Gemini 2.5 Flash-Lite** | shared text selector, cheaper lightweight chat path | about **$0.10 input / $0.40 output per 1M tokens** | best budget Gemini text option in the current selector |
+| **Gemini 2.5 Pro** | shared text selector, strongest reasoning path | about **$1.25 input / $10.00 output per 1M tokens** for smaller prompts, with higher rates for very large prompts | likely the first Gemini text path where billing matters quickly |
+| **Gemini 2.5 Flash Image** | current default Gemini image generation / editing path | Whisplay currently uses a simple **$0.04 per image** in-app estimate for the low-tier balance meter | real Google billing is still a Google project / API billing issue, not a hardware issue |
+
+### Practical billing notes for this project
+
+- **Groq:** Whisplay currently exposes an **RPD request counter**, not a full token meter. Large pasted logs can still hit Groq free-tier or developer-plan token limits before the request counter looks scary.
+- **Gemini text:** Gemini text can work on a free key for at least light testing, but Whisplay does **not** currently know the exact moment a Google project stops being effectively free and starts billing for text. That boundary is controlled by **Google project tier / billing**, not by the Pi hardware.
+- **Gemini images:** in live repo testing, **image generation / photo editing** was the path most likely to fail first until billing was enabled on the Google project.
+- **Gemini rate limits:** Google measures limits per project using **RPM**, **TPM**, and **RPD**, and official docs say **RPD resets at midnight Pacific time**.
+- **Gemini paid tiers:** enabling billing moves the project from the free tier toward **Tier 1+** with higher limits; later tiers depend on actual Google Cloud spend, not anything inside this repo.
+
 ## Current hardware status
 
 - **Whisplay HAT display:** working on Raspberry Pi Zero 2 W
@@ -43,8 +93,9 @@ This project starts from the official PiSugar Whisplay chatbot, but is being tai
 - **Vision flow:** upload a photo or capture one from the configured camera source, then ask **"what do you see?"**
 - **Gemini image generation:** confirmed working in the current code path with a saved Gemini key; the default image model is **`gemini-2.5-flash-image`**
 - **Gemini photo editing on-device:** take a photo, then use either a **voice command on the Pi** or **browser text input** to edit the current photo with Gemini; current-photo edits now generate and display successfully on the device path
-- **Gemini image settings:** the browser Settings panel now includes a **Gemini Image Model** dropdown plus a **Gemini Style Preset** dropdown for stronger edit styles without rewriting the whole prompt manually
-- **Gemini style presets:** built-in presets now include **Dali Dream**, **Melting Psychedelic**, **Neon Hallucination**, **Glitch Trip**, **Retro Cosmic Poster**, **Surreal Collage**, **Biomechanical Growth**, **Cyberpunk Noir 1980s**, **Tech Blueprint**, **Haunted Daguerreotype**, and **Bas-Relief Stone Carving**
+- **Gemini text models in normal chat:** the shared device / browser / ESP32 Agent selector now includes **Gemini 2.5 Flash**, **Gemini 2.5 Flash-Lite**, and **Gemini 2.5 Pro** alongside the existing Groq-hosted text models
+- **Gemini image settings:** the browser Settings panel now includes a **Gemini Image Model** dropdown, a **Gemini Style Preset** dropdown, and a **Gemini photo-edit confirm** toggle for staged edit prompts
+- **Gemini style presets:** built-in presets now include **Dali Dream**, **Melting Psychedelic**, **Neon Hallucination**, **Glitch Trip**, **Retro Cosmic Poster**, **Surreal Collage**, **Biomechanical Growth**, **Cyberpunk Noir 1980s**, **Tech Blueprint**, **Haunted Daguerreotype**, **Bas-Relief Stone Carving**, **Van Gogh**, **Picasso**, **Stencil Street Art**, and **Visionary Psychedelic**
 - **Preset fallback edits:** vague requests such as **"edit this photo in your favorite style"** or **"surprise me with this photo"** now use the selected Gemini preset as the creative fallback
 - **Gemini low-tier image balance meter:** the browser and physical HAT header now show the saved **Gemini 2.5 Flash Image** balance between the status text and the right-side Groq badge; each successful low-tier Gemini image subtracts a fixed **$0.04** and can auto-reload from user-defined settings
 - **Groq request counter:** both the browser header and the physical HAT header now show a compact **RPD** item beside Wi-Fi so you can track Groq requests sent today without replacing the main status text
@@ -66,7 +117,7 @@ This project starts from the official PiSugar Whisplay chatbot, but is being tai
 - **Companion Cardputer controls:** keyboard text send, message viewing, local setup portal, saved text sizes, and a split receive/send screen layout
 - **Experimental GroqBotNet mode:** optional browser-only controls in Whisplay for connecting to a second bot, testing the link, and starting limited same-network bot-to-bot conversations without replacing the normal Whisplay chatbot flow
 - **BotNet model selector:** Whisplay BotNet now has a curated Groq model dropdown in the browser plus a voice shortcut to jump to the next model on-device
-- **Expanded Groq model selector:** the shared browser / ESP32 Agent model selector now includes **Llama 3.1 8B**, **Llama 3.3 70B**, **Llama 4 Scout 17B 16E**, **Qwen3 32B**, **Groq Compound**, **Groq Compound Mini**, **GPT-OSS 20B**, and **GPT-OSS 120B**
+- **Expanded AI model selector:** the shared browser / ESP32 Agent text-model selector now includes **Llama 3.1 8B**, **Llama 3.3 70B**, **Llama 4 Scout 17B 16E**, **Qwen3 32B**, **Groq Compound**, **Groq Compound Mini**, **GPT-OSS 20B**, **GPT-OSS 120B**, **Gemini 2.5 Flash**, **Gemini 2.5 Flash-Lite**, and **Gemini 2.5 Pro**
 - **Persona Relay mode:** a new GroqBotNet mode where you tell your bot what to send, your local bot rewrites that prompt in character, and the peer bot replies once without falling into an endless loop
 - **Online GroqBotNet groundwork:** Whisplay and the standalone Zero node now both support an **Online Hub** transport with node registration, hub connect/disconnect, and invite create/redeem controls for relay-based internet testing
 - **ESP32 Agent workspace:** `/agent` now provides persistent sandbox projects, a file tree/editor, import/export bundles, savepoints, separate coding and error-fix personalities, Pi-side USB serial-port detection, an in-browser terminal, persistent per-project Agent chat, proposed file operations, and apply-to-sandbox with an automatic savepoint
@@ -76,10 +127,11 @@ This project starts from the official PiSugar Whisplay chatbot, but is being tai
 ## Current Gemini photo workflow status
 
 - **Working now:** capture a photo, say or type an edit request, and Gemini will edit the current photo using the latest shown image as context
+- **Working now:** an optional browser-side **confirm mode** can stage Gemini photo edits and wait for **confirm / add / start over / cancel**
 - **Working now:** Gemini-generated images and edited photos are saved after generation so they can be reused later in the session
 - **Working now:** the browser exposes separate manual-photo and AI-image galleries so older captures and older Gemini outputs can be reopened outside the main UI
 - **Fallback still available:** local voice-triggered photo effects like **retro**, **comic**, **sketch**, **pixelate**, and the rest of the existing basic image commands still work even without Gemini billing-enabled image generation
-- **Gemini billing note:** plain hardware info, camera viewing, browsing, and the rest of the normal local device flow remain free; to unlock Gemini image generation and full photo-edit capability, the saved Gemini key must be on a billing-enabled Google project
+- **Gemini billing note:** plain hardware info, camera viewing, browsing, and the rest of the normal local device flow remain free; Gemini **text** may work for light testing on a free key, but **image generation / full photo editing** has been the path most likely to require billing on the Google project
 
 ## ESP32 Agent workspace
 
@@ -673,7 +725,9 @@ GEMINI_API_KEY=your_gemini_api_key
 
 Gemini image generation in this fork currently defaults to **`gemini-2.5-flash-image`**. You can now switch the Gemini image model in the browser **Settings** panel, and the runtime still falls back to **`GEMINI_IMAGE_MODEL`** in `.env` when no browser override is saved.
 
-The browser **Settings** panel also includes an optional **Gemini Style Preset** for stronger stylized edits. When a preset is selected, Gemini combines that preset's hidden style directions with your normal edit prompt, and vague requests like “edit this photo in your favorite style” use the preset's default creative fallback.
+The browser and device text-model selector now also exposes **Gemini 2.5 Flash**, **Gemini 2.5 Flash-Lite**, and **Gemini 2.5 Pro** for the normal chatbot and the ESP32 Agent workspace. Those text requests use the saved Gemini key when a Gemini model is selected.
+
+The browser **Settings** panel also includes an optional **Gemini Style Preset** for stronger stylized edits plus an optional **Gemini photo-edit confirm** toggle. When a preset is selected, Gemini combines that preset's hidden style directions with your normal edit prompt, and vague requests like “edit this photo in your favorite style” use the preset's default creative fallback.
 
 ## Speech recognition notes for this fork
 
@@ -709,7 +763,7 @@ TTS_SERVER=espeak-ng
 
 ## Settings UI notes
 
-The browser simulator includes a settings panel for the Groq key, Gemini key, Gemini image model, Gemini style preset, the low-tier Gemini image **balance / auto-reload** controls, preset personalities, freeform personality editing, a **Save Personality As** box for named favorites, voice mode, record time, text scroll speed, **HAT font color**, UI theme, **camera source**, **per-camera 90-degree rotation controls**, HAT header mode, HAT screensaver mode, **HAT screensaver delay**, **HAT screen blank timeout**, **room monitor auto-capture interval**, **weather latitude/longitude**, the saved **music shuffle** toggle, and a shutdown button for clean power-off without SSH.
+The browser simulator includes a settings panel for the Groq key, Gemini key, the shared **AI Model** selector, Gemini image model, Gemini style preset, the optional Gemini photo-edit confirm toggle, the low-tier Gemini image **balance / auto-reload** controls, preset personalities, freeform personality editing, a **Save Personality As** box for named favorites, voice mode, record time, text scroll speed, **HAT font color**, UI theme, **camera source**, **per-camera 90-degree rotation controls**, HAT header mode, HAT screensaver mode, **HAT screensaver delay**, **HAT screen blank timeout**, **room monitor auto-capture interval**, **weather latitude/longitude**, the saved **music shuffle** toggle, and a shutdown button for clean power-off without SSH.
 
 The Groq and Gemini keys can be stored there without editing `.env`. Runtime settings are saved to the local settings file on the Pi, and both **Gemini vision** and **Gemini image generation** in this fork will use the saved browser key before falling back to `GEMINI_API_KEY` from `.env`.
 

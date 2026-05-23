@@ -6,7 +6,7 @@ import {
   geminiTTSSpeaker,
   geminiTTSModel,
   geminiTTSLanguageCode,
-  gemini,
+  getGeminiClient,
 } from "./gemini";
 import dotenv from "dotenv";
 import { TTSResult } from "../../type";
@@ -17,6 +17,7 @@ const geminiTTS = async (
   text: string
 ): Promise<TTSResult> => {
   try {
+    const gemini = getGeminiClient();
     if (!gemini) {
       console.error("Google Gemini API key is not set.");
       return { duration: 0 };

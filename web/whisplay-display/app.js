@@ -51,6 +51,7 @@ const geminiKeyInput = document.getElementById("geminiKeyInput");
 const geminiKeyHint = document.getElementById("geminiKeyHint");
 const geminiImageModelSelect = document.getElementById("geminiImageModelSelect");
 const geminiImagePresetSelect = document.getElementById("geminiImagePresetSelect");
+const geminiImageEditConfirmModeCheckbox = document.getElementById("geminiImageEditConfirmModeCheckbox");
 const geminiLowTierImageBalanceInput = document.getElementById("geminiLowTierImageBalanceInput");
 const geminiLowTierAutoReloadEnabledCheckbox = document.getElementById("geminiLowTierAutoReloadEnabledCheckbox");
 const geminiLowTierAutoReloadThresholdInput = document.getElementById("geminiLowTierAutoReloadThresholdInput");
@@ -1697,6 +1698,11 @@ function applySettings(settings) {
     geminiImagePresetSelect.value =
       settings.geminiImagePreset || geminiImagePresetOptions[0]?.id || DEFAULT_GEMINI_IMAGE_PRESET;
   }
+  if (geminiImageEditConfirmModeCheckbox) {
+    geminiImageEditConfirmModeCheckbox.checked = Boolean(
+      settings.geminiImageEditConfirmMode,
+    );
+  }
   if (geminiLowTierImageBalanceInput) {
     geminiLowTierImageBalanceInput.value = Number(
       settings.geminiLowTierImageBalanceUsd ?? 0,
@@ -2222,6 +2228,9 @@ async function saveSettings({ clearGroqApiKey = false } = {}) {
       geminiImageModelSelect?.value || geminiImageModelOptions[0]?.id || DEFAULT_GEMINI_IMAGE_MODEL,
     geminiImagePreset:
       geminiImagePresetSelect?.value || geminiImagePresetOptions[0]?.id || DEFAULT_GEMINI_IMAGE_PRESET,
+    geminiImageEditConfirmMode: Boolean(
+      geminiImageEditConfirmModeCheckbox?.checked,
+    ),
     geminiLowTierImageBalanceUsd:
       parseOptionalFloat(geminiLowTierImageBalanceInput?.value) ?? 0,
     geminiLowTierAutoReloadEnabled: Boolean(

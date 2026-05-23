@@ -6,9 +6,9 @@ import {
   type PersonalityPreset,
 } from "./personality-presets";
 import {
-  DEFAULT_BOTNET_MODEL,
-  normalizeBotNetModel,
-} from "./botnet-models";
+  DEFAULT_TEXT_LLM_MODEL,
+  normalizeTextLlmModel,
+} from "./text-llm-models";
 import {
   normalizeEsp32AgentErrorPersonalityPrompt,
   normalizeEsp32AgentPersonalityPrompt,
@@ -77,6 +77,7 @@ export interface RuntimeSettings {
   geminiApiKey: string;
   geminiImageModel: GeminiImageModel;
   geminiImagePreset: GeminiImagePresetId;
+  geminiImageEditConfirmMode: boolean;
   geminiLowTierImageBalanceUsd: number;
   geminiLowTierAutoReloadEnabled: boolean;
   geminiLowTierAutoReloadThresholdUsd: number;
@@ -116,6 +117,7 @@ export interface RuntimeSettingsUpdate {
   geminiApiKey?: string;
   geminiImageModel?: string;
   geminiImagePreset?: string;
+  geminiImageEditConfirmMode?: boolean;
   geminiLowTierImageBalanceUsd?: number;
   geminiLowTierAutoReloadEnabled?: boolean;
   geminiLowTierAutoReloadThresholdUsd?: number;
@@ -158,12 +160,13 @@ const SETTINGS_PATH = path.resolve(
 const DEFAULT_VOICE_MODE: VoiceMode = "text-only";
 const DEFAULT_GEMINI_IMAGE_MODEL: GeminiImageModel = "gemini-2.5-flash-image";
 const DEFAULT_GEMINI_IMAGE_PRESET: GeminiImagePresetId = "none";
+const DEFAULT_GEMINI_IMAGE_EDIT_CONFIRM_MODE = false;
 export const GEMINI_LOW_TIER_IMAGE_COST_USD = 0.04;
 const DEFAULT_GEMINI_LOW_TIER_IMAGE_BALANCE_USD = 0;
 const DEFAULT_GEMINI_LOW_TIER_AUTO_RELOAD_ENABLED = false;
 const DEFAULT_GEMINI_LOW_TIER_AUTO_RELOAD_THRESHOLD_USD = 1;
 const DEFAULT_GEMINI_LOW_TIER_AUTO_RELOAD_AMOUNT_USD = 10;
-const DEFAULT_LLM_MODEL = DEFAULT_BOTNET_MODEL;
+const DEFAULT_LLM_MODEL = DEFAULT_TEXT_LLM_MODEL;
 const DEFAULT_MUSIC_SHUFFLE = false;
 const DEFAULT_VOLUME_LEVEL = 9;
 const DEFAULT_SCROLL_SPEED_LEVEL = 5;
@@ -594,7 +597,7 @@ function normalizeCurrencyValue(
 }
 
 function normalizeLlmModel(value: unknown): string {
-  return normalizeBotNetModel(value ?? DEFAULT_LLM_MODEL);
+  return normalizeTextLlmModel(value ?? DEFAULT_LLM_MODEL);
 }
 
 function sanitizeSettings(input: Partial<RuntimeSettings> | null | undefined): RuntimeSettings {
@@ -605,6 +608,10 @@ function sanitizeSettings(input: Partial<RuntimeSettings> | null | undefined): R
       typeof input?.geminiApiKey === "string" ? input.geminiApiKey.trim() : "",
     geminiImageModel: normalizeGeminiImageModel(input?.geminiImageModel),
     geminiImagePreset: normalizeGeminiImagePreset(input?.geminiImagePreset),
+    geminiImageEditConfirmMode:
+      typeof input?.geminiImageEditConfirmMode === "boolean"
+        ? input.geminiImageEditConfirmMode
+        : DEFAULT_GEMINI_IMAGE_EDIT_CONFIRM_MODE,
     geminiLowTierImageBalanceUsd: normalizeCurrencyValue(
       input?.geminiLowTierImageBalanceUsd,
       DEFAULT_GEMINI_LOW_TIER_IMAGE_BALANCE_USD,
@@ -718,6 +725,10 @@ export function saveRuntimeSettings(
 
   if (typeof update.geminiImagePreset === "string") {
     next.geminiImagePreset = normalizeGeminiImagePreset(update.geminiImagePreset);
+  }
+
+  if (typeof update.geminiImageEditConfirmMode === "boolean") {
+    next.geminiImageEditConfirmMode = update.geminiImageEditConfirmMode;
   }
 
   if (typeof update.geminiLowTierImageBalanceUsd === "number") {
@@ -1082,6 +1093,7 @@ export function getPublicRuntimeSettings(): {
   geminiApiKeyConfigured: boolean;
   geminiImageModel: GeminiImageModel;
   geminiImagePreset: GeminiImagePresetId;
+  geminiImageEditConfirmMode: boolean;
   geminiLowTierImageBalanceUsd: number;
   geminiLowTierAutoReloadEnabled: boolean;
   geminiLowTierAutoReloadThresholdUsd: number;
@@ -1120,6 +1132,7 @@ export function getPublicRuntimeSettings(): {
     geminiApiKeyConfigured: Boolean(settings.geminiApiKey),
     geminiImageModel: settings.geminiImageModel,
     geminiImagePreset: settings.geminiImagePreset || DEFAULT_GEMINI_IMAGE_PRESET,
+    geminiImageEditConfirmMode: Boolean(settings.geminiImageEditConfirmMode),
     geminiLowTierImageBalanceUsd: settings.geminiLowTierImageBalanceUsd,
     geminiLowTierAutoReloadEnabled: settings.geminiLowTierAutoReloadEnabled,
     geminiLowTierAutoReloadThresholdUsd: settings.geminiLowTierAutoReloadThresholdUsd,

@@ -1,9 +1,10 @@
 import fs from "fs";
-import { gemini, geminiModel } from "./gemini";
+import { getGeminiClient, geminiModel } from "./gemini";
 
 export const recognizeAudio = async (
   audioFilePath: string
 ): Promise<string> => {
+  const gemini = getGeminiClient();
   if (!gemini) {
     console.error("Gemini API key is not set.");
     return "";

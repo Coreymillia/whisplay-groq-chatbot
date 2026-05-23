@@ -21,10 +21,10 @@ import {
 } from "../../device/audio";
 import { chatWithLLMStream, resetChatHistory } from "../../cloud-api/server";
 import { isImMode } from "../../cloud-api/llm";
+import { streamPlainTextModelResponse } from "../../cloud-api/text-model-router";
 import { getSystemPromptWithKnowledge } from "../Knowledge";
 import { enableRAG } from "../../cloud-api/knowledge";
 import { getSystemPrompt } from "../../config/llm-config";
-import { getOpenAIClient, getOpenAILLMModel } from "../../cloud-api/openai/openai";
 import { cameraDir, imageDir } from "../../utils/dir";
 import {
   activateInteractiveImage,
@@ -105,6 +105,7 @@ import {
 } from "../../device/weather";
 import { getBotNetManager } from "../../device/botnet";
 import { getBotNetModelLabel } from "../../config/botnet-models";
+import { getTextLlmProvider } from "../../config/text-llm-models";
 
 const imageIntentPatterns = [
   /\bwhat do you see\b/i,
@@ -360,6 +361,79 @@ const VOICE_HELP_EXIT_HOLD_MS = 1800;
 const VOICE_COMMAND_HELP_PAGES = buildVoiceCommandHelpPages();
 const TEXT_AUTO_REPLAY_PAUSE_MS = 900;
 
+interface PendingImageEditConfirmation {
+  prompt: string;
+  imagePath: string;
+}
+
+let pendingImageEditConfirmation: PendingImageEditConfirmation | null = null;
+
+function clearPendingImageEditConfirmation(): void {
+  pendingImageEditConfirmation = null;
+}
+
+function setPendingImageEditConfirmation(prompt: string, imagePath: string): void {
+  pendingImageEditConfirmation = {
+    prompt: prompt.trim(),
+    imagePath,
+  };
+}
+
+function getPendingImageEditConfirmation(): PendingImageEditConfirmation | null {
+  return pendingImageEditConfirmation;
+}
+
+function shouldUseImageEditConfirmMode(): boolean {
+  return Boolean(getRuntimeSettings().geminiImageEditConfirmMode);
+}
+
+function isConfirmableImageEditRequest(prompt: string): boolean {
+  return shouldRouteToImageGeneration(prompt) && shouldUseImageContextForGeneration(prompt);
+}
+
+function parseImageEditConfirmCommand(prompt: string): {
+  type: "confirm" | "show" | "add" | "replace" | "cancel";
+  value?: string;
+} | null {
+  const trimmed = prompt.trim();
+  if (!trimmed) {
+    return null;
+  }
+  if (/^\s*confirm\s*[.!?]*$/i.test(trimmed)) {
+    return { type: "confirm" };
+  }
+  if (/^\s*confirm\s+prompt\s*[.!?]*$/i.test(trimmed)) {
+    return { type: "show" };
+  }
+  if (/^\s*cancel\s*[.!?]*$/i.test(trimmed)) {
+    return { type: "cancel" };
+  }
+  const addMatch = trimmed.match(/^\s*add\s+([\s\S]+?)\s*[.!?]*$/i);
+  if (addMatch?.[1]) {
+    return { type: "add", value: addMatch[1].trim() };
+  }
+  const replaceMatch = trimmed.match(/^\s*start\s+over\s+([\s\S]+?)\s*[.!?]*$/i);
+  if (replaceMatch?.[1]) {
+    return { type: "replace", value: replaceMatch[1].trim() };
+  }
+  return null;
+}
+
+function formatPendingImageEditPrompt(prompt: string): string {
+  const compactPrompt = prompt.trim().replace(/\s+/g, " ");
+  if (compactPrompt.length <= 140) {
+    return compactPrompt;
+  }
+  return `${compactPrompt.slice(0, 137)}...`;
+}
+
+function buildImageEditConfirmMessage(prompt: string): string {
+  return (
+    `[confirm]Pending edit:\n${formatPendingImageEditPrompt(prompt)}\n\n` +
+    "Say confirm, add..., start over..., or cancel."
+  );
+}
+
 function shouldRouteToVision(prompt: string): boolean {
   const trimmed = prompt.trim();
   if (!trimmed || !hasInteractiveImage()) {
@@ -571,6 +645,23 @@ function getAvailableGalleryEntries(): Array<{
   return entries;
 }
 
+function getAvailableManualGalleryEntries(): Array<{
+  id: "photos";
+  label: string;
+  flow: "photo_browser";
+}> {
+  if (!listCapturedImgs().length) {
+    return [];
+  }
+  return [
+    {
+      id: "photos",
+      label: "Camera Photos",
+      flow: "photo_browser",
+    },
+  ];
+}
+
 function shouldShutdown(prompt: string): boolean {
   const trimmed = prompt.trim();
   return shutdownIntentPatterns.some((pattern) => pattern.test(trimmed));
@@ -747,6 +838,7 @@ async function captureAndPrepareLatestImage(): Promise<string> {
   activateInteractiveImage(captureImagePath, "manual-capture");
   queueDisplayImage(captureImagePath);
   clearLatestVisionAnalysis();
+  clearPendingImageEditConfirmation();
   return captureImagePath;
 }
 
@@ -759,41 +851,32 @@ async function streamVisionRelayReply(
   visionAnalysis: string,
   onChunk: (chunk: string) => void,
 ): Promise<string> {
-  const openai = getOpenAIClient();
-  if (!openai) {
+  try {
+    return await streamPlainTextModelResponse({
+      model: getRuntimeSettings().llmModel,
+      messages: [
+        {
+          role: "system",
+          content:
+            `${getSystemPrompt()}\n` +
+            "You are answering a question about an already analyzed image. " +
+            "Use the supplied vision analysis as your only visual context. " +
+            "Reply naturally in your active personality, stay concise, and do not mention Gemini, tools, or backend analysis unless the user asks.",
+        },
+        {
+          role: "user",
+          content:
+            `User question: ${userPrompt}\n\n` +
+            `Vision analysis:\n${visionAnalysis}\n\n` +
+            "Answer the user's question naturally. If the analysis seems uncertain, briefly say so.",
+        },
+      ],
+      onChunk,
+    });
+  } catch (error) {
+    console.error("Vision relay reply failed:", error);
     return "";
   }
-  const stream = await openai.chat.completions.create({
-    model: getOpenAILLMModel(),
-    stream: true,
-    messages: [
-      {
-        role: "system",
-        content:
-          `${getSystemPrompt()}\n` +
-          "You are answering a question about an already analyzed image. " +
-          "Use the supplied vision analysis as your only visual context. " +
-          "Reply naturally in your active personality, stay concise, and do not mention Gemini, tools, or backend analysis unless the user asks.",
-      },
-      {
-        role: "user",
-        content:
-          `User question: ${userPrompt}\n\n` +
-          `Vision analysis:\n${visionAnalysis}\n\n` +
-          "Answer the user's question naturally. If the analysis seems uncertain, briefly say so.",
-      },
-    ],
-  });
-  let answer = "";
-  for await (const chunk of stream) {
-    const text = chunk.choices[0]?.delta?.content || "";
-    if (!text) {
-      continue;
-    }
-    answer += text;
-    onChunk(text);
-  }
-  return answer.trim();
 }
 
 async function streamWeatherRelayReply(
@@ -801,40 +884,31 @@ async function streamWeatherRelayReply(
   weatherSummary: string,
   onChunk: (chunk: string) => void,
 ): Promise<string> {
-  const openai = getOpenAIClient();
-  if (!openai) {
+  try {
+    return await streamPlainTextModelResponse({
+      model: getRuntimeSettings().llmModel,
+      messages: [
+        {
+          role: "system",
+          content:
+            `${getSystemPrompt()}\n` +
+            "You are answering a weather question using supplied NOAA/NWS forecast data. " +
+            "Stay concise, practical, and in character. Use only the supplied weather data. " +
+            "If alerts exist, mention them clearly. Do not invent extra forecast details.",
+        },
+        {
+          role: "user",
+          content:
+            `Weather data:\n${weatherSummary}\n\n` +
+            `User question: ${userPrompt}`,
+        },
+      ],
+      onChunk,
+    });
+  } catch (error) {
+    console.error("Weather relay reply failed:", error);
     return "";
   }
-  const stream = await openai.chat.completions.create({
-    model: getOpenAILLMModel(),
-    stream: true,
-    messages: [
-      {
-        role: "system",
-        content:
-          `${getSystemPrompt()}\n` +
-          "You are answering a weather question using supplied NOAA/NWS forecast data. " +
-          "Stay concise, practical, and in character. Use only the supplied weather data. " +
-          "If alerts exist, mention them clearly. Do not invent extra forecast details.",
-      },
-      {
-        role: "user",
-        content:
-          `Weather data:\n${weatherSummary}\n\n` +
-          `User question: ${userPrompt}`,
-      },
-    ],
-  });
-  let answer = "";
-  for await (const chunk of stream) {
-    const text = chunk.choices[0]?.delta?.content || "";
-    if (!text) {
-      continue;
-    }
-    answer += text;
-    onChunk(text);
-  }
-  return answer.trim();
 }
 
 export const flowStates: Record<FlowName, FlowStateHandler> = {
@@ -897,6 +971,7 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
       activateInteractiveImage(captureImagePath, "manual-capture");
       setPendingCapturedImgForChat(captureImagePath);
       clearLatestVisionAnalysis();
+      clearPendingImageEditConfirmation();
       latestCapturePath = captureImagePath;
       display({
         image: captureImagePath,
@@ -1061,6 +1136,7 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
         }
         activateInteractiveImage(imagePath, "manual-selection");
         queueDisplayImage(imagePath);
+        clearPendingImageEditConfirmation();
         display({
           status: "photo ready",
           image: imagePath,
@@ -1152,6 +1228,7 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
         }
         activateInteractiveImage(imagePath, "other");
         queueDisplayImage(imagePath);
+        clearPendingImageEditConfirmation();
         display({
           status: "photo ready",
           image: imagePath,
@@ -1507,7 +1584,9 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
     ctx.musicDisplayText = "";
     if (ctx.asrText) {
       recordConversationTurn("user", ctx.asrText);
-      recordRpdMessage(1);
+      if (getTextLlmProvider(getRuntimeSettings().llmModel) !== "gemini") {
+        recordRpdMessage(1);
+      }
     }
     display({
       status: "answering...",
@@ -1657,6 +1736,108 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
       });
       ctx.transitionTo("image");
     };
+    const runImageGenerationRequest = (
+      prompt: string,
+      withImageContext: boolean,
+      baseImagePath = "",
+    ): void => {
+      display({
+        text: "[generateImage]Creating image...",
+      });
+      void runReplyFlow(async () => {
+        if (baseImagePath) {
+          activateInteractiveImage(baseImagePath, "other");
+          queueDisplayImage(baseImagePath);
+          display({
+            image: baseImagePath,
+            image_icon_visible: false,
+          });
+        }
+        await llmFuncMap.generateImage({
+          prompt,
+          withImageContext,
+        })
+          .then((result) => {
+            if (currentAnswerId !== ctx.answerId) {
+              return;
+            }
+            const cleaned = stripToolTag(result);
+            if (result.startsWith(ToolReturnTag.Error)) {
+              trackingPartial(
+                cleaned || "I couldn't create that image right now.",
+              );
+              endPartial();
+              return;
+            }
+            const generatedImagePath = getLatestGenImg();
+            if (generatedImagePath) {
+              activateInteractiveImage(generatedImagePath, "other");
+              display({ image: generatedImagePath });
+            }
+            trackingPartial(cleaned || "Image created. Take a look.");
+            endPartial();
+          })
+          .catch((error) => {
+            console.error("Image generation routing failed:", error);
+            if (currentAnswerId !== ctx.answerId) {
+              return;
+            }
+            trackingPartial("I couldn't create that image right now.");
+            endPartial();
+          });
+      });
+    };
+    const pendingImageEdit = getPendingImageEditConfirmation();
+    const imageEditCommand = parseImageEditConfirmCommand(ctx.asrText);
+    if (pendingImageEdit && imageEditCommand) {
+      if (imageEditCommand.type === "cancel") {
+        clearPendingImageEditConfirmation();
+        transitionDirectlyToImage(
+          "Canceled the pending image edit.",
+          pendingImageEdit.imagePath,
+        );
+        return;
+      }
+      if (imageEditCommand.type === "show") {
+        transitionDirectlyToImage(
+          buildImageEditConfirmMessage(pendingImageEdit.prompt),
+          pendingImageEdit.imagePath,
+        );
+        return;
+      }
+      if (imageEditCommand.type === "add" && imageEditCommand.value) {
+        const nextPrompt = `${pendingImageEdit.prompt}. ${imageEditCommand.value}`;
+        setPendingImageEditConfirmation(nextPrompt, pendingImageEdit.imagePath);
+        transitionDirectlyToImage(
+          buildImageEditConfirmMessage(nextPrompt),
+          pendingImageEdit.imagePath,
+        );
+        return;
+      }
+      if (imageEditCommand.type === "replace" && imageEditCommand.value) {
+        setPendingImageEditConfirmation(
+          imageEditCommand.value,
+          pendingImageEdit.imagePath,
+        );
+        transitionDirectlyToImage(
+          buildImageEditConfirmMessage(imageEditCommand.value),
+          pendingImageEdit.imagePath,
+        );
+        return;
+      }
+      if (imageEditCommand.type === "confirm") {
+        clearPendingImageEditConfirmation();
+        runImageGenerationRequest(
+          pendingImageEdit.prompt,
+          true,
+          pendingImageEdit.imagePath,
+        );
+        return;
+      }
+    }
+    if (pendingImageEdit && !isConfirmableImageEditRequest(ctx.asrText)) {
+      clearPendingImageEditConfirmation();
+    }
     if (shouldOpenSettings(ctx.asrText)) {
       ctx.openSettingsMenu();
       return;
@@ -1836,18 +2017,14 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
       return;
     }
     if (shouldBrowsePhotos(ctx.asrText)) {
-      const galleries = getAvailableGalleryEntries();
+      const galleries = getAvailableManualGalleryEntries();
       if (!galleries.length) {
-        display({ text: "[gallery]No saved photos or AI images yet." });
-        finishDirectMessage("No saved photos or AI images yet.");
+        display({ text: "[gallery]No saved photos yet." });
+        finishDirectMessage("No saved photos yet.");
         return;
       }
       ctx.endWakeSession();
-      if (galleries.length === 1) {
-        ctx.transitionTo(galleries[0].flow);
-        return;
-      }
-      ctx.transitionTo("gallery_menu");
+      ctx.transitionTo(galleries[0].flow);
       return;
     }
     if (shouldCaptureImage(ctx.asrText)) {
@@ -1996,43 +2173,20 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
           shouldRouteToImageGeneration(ctx.asrText) &&
           typeof llmFuncMap.generateImage === "function"
         ) {
-          display({
-            text: "[generateImage]Creating image...",
-          });
-          void runReplyFlow(async () => {
-            await llmFuncMap.generateImage({
-              prompt: ctx.asrText,
-              withImageContext: shouldUseImageContextForGeneration(ctx.asrText),
-            })
-              .then((result) => {
-                if (currentAnswerId !== ctx.answerId) {
-                  return;
-                }
-                const cleaned = stripToolTag(result);
-                if (result.startsWith(ToolReturnTag.Error)) {
-                  trackingPartial(
-                    cleaned || "I couldn't create that image right now.",
-                  );
-                  endPartial();
-                  return;
-                }
-                const generatedImagePath = getLatestGenImg();
-                if (generatedImagePath) {
-                  activateInteractiveImage(generatedImagePath, "other");
-                  display({ image: generatedImagePath });
-                }
-                trackingPartial(cleaned || "Image created. Take a look.");
-                endPartial();
-              })
-              .catch((error) => {
-                console.error("Image generation routing failed:", error);
-                if (currentAnswerId !== ctx.answerId) {
-                  return;
-                }
-                trackingPartial("I couldn't create that image right now.");
-                endPartial();
-              });
-          });
+          const withImageContext = shouldUseImageContextForGeneration(ctx.asrText);
+          if (shouldUseImageEditConfirmMode() && withImageContext) {
+            const currentImagePath = getLatestShowedImage();
+            if (currentImagePath) {
+              setPendingImageEditConfirmation(ctx.asrText, currentImagePath);
+              transitionDirectlyToImage(
+                buildImageEditConfirmMessage(ctx.asrText),
+                currentImagePath,
+              );
+              return;
+            }
+          }
+          clearPendingImageEditConfirmation();
+          runImageGenerationRequest(ctx.asrText, withImageContext);
           return;
         }
         if (shouldRouteToVision(ctx.asrText) && typeof llmFuncMap.describeImage === "function") {

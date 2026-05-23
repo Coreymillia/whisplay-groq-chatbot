@@ -62,6 +62,7 @@ import {
   saveNamedPersonalityPreset,
   saveRuntimeSettings,
 } from "../config/runtime-settings";
+import { TEXT_LLM_MODEL_OPTIONS } from "../config/text-llm-models";
 import {
   DEFAULT_ESP32_AGENT_ERROR_PERSONALITY_PROMPT,
   DEFAULT_ESP32_AGENT_PERSONALITY_PROMPT,
@@ -1938,7 +1939,7 @@ export class WebDisplayServer implements WebAudioBridgeServer {
       ctx.body = {
         settings: getPublicRuntimeSettings(),
         presets: getPersonalityPresets(settings.savedPersonalityPresets),
-        llmModelOptions: BOTNET_MODEL_OPTIONS,
+        llmModelOptions: TEXT_LLM_MODEL_OPTIONS,
         geminiImageModelOptions: GEMINI_IMAGE_MODEL_OPTIONS,
         geminiImagePresetOptions: GEMINI_IMAGE_PRESET_OPTIONS,
         volumeLevelOptions: VOLUME_LEVEL_OPTIONS,
@@ -1959,6 +1960,7 @@ export class WebDisplayServer implements WebAudioBridgeServer {
         geminiApiKey: getBodyString(body, "geminiApiKey"),
         geminiImageModel: getBodyString(body, "geminiImageModel"),
         geminiImagePreset: getBodyString(body, "geminiImagePreset"),
+        geminiImageEditConfirmMode: getBodyBoolean(body, "geminiImageEditConfirmMode"),
         geminiLowTierImageBalanceUsd: getBodyNumber(body, "geminiLowTierImageBalanceUsd"),
         geminiLowTierAutoReloadEnabled: getBodyBoolean(body, "geminiLowTierAutoReloadEnabled"),
         geminiLowTierAutoReloadThresholdUsd: getBodyNumber(
@@ -2001,7 +2003,7 @@ export class WebDisplayServer implements WebAudioBridgeServer {
         ok: true,
         settings: getPublicRuntimeSettings(),
         presets: getPersonalityPresets(settings.savedPersonalityPresets),
-        llmModelOptions: BOTNET_MODEL_OPTIONS,
+        llmModelOptions: TEXT_LLM_MODEL_OPTIONS,
         geminiImageModelOptions: GEMINI_IMAGE_MODEL_OPTIONS,
         geminiImagePresetOptions: GEMINI_IMAGE_PRESET_OPTIONS,
         volumeLevelOptions: VOLUME_LEVEL_OPTIONS,

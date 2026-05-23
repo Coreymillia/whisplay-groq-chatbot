@@ -8,7 +8,7 @@ import {
   readEsp32AgentProjectErrorLog,
   writeEsp32AgentProjectFile,
 } from "./workspace";
-import { getOpenAIClient, getOpenAILLMModel } from "../cloud-api/openai/openai";
+import { createJsonTextModelResponse } from "../cloud-api/text-model-router";
 import { getRuntimeSettings } from "../config/runtime-settings";
 
 export interface Esp32AgentProposedOperation {
@@ -183,11 +183,7 @@ export async function generateEsp32AgentProposal(input: {
   if (!prompt) {
     throw new Error("Agent prompt is required.");
   }
-
-  const openai = getOpenAIClient();
-  if (!openai) {
-    throw new Error("Configure an OpenAI-compatible API key before using Agent chat.");
-  }
+  const project = getEsp32AgentProject(input.projectId);
 
   const runtime = getRuntimeSettings();
   const mode = input.mode === "error_fix" ? "error_fix" : "general";
@@ -210,10 +206,8 @@ export async function generateEsp32AgentProposal(input: {
       : "",
   ].join(" ");
 
-  const completion = await openai.chat.completions.create({
-    model: getOpenAILLMModel(),
-    stream: false,
-    response_format: { type: "json_object" },
+  const content = await createJsonTextModelResponse({
+    model: project.agentModel,
     messages: [
       {
         role: "system",
@@ -228,9 +222,7 @@ export async function generateEsp32AgentProposal(input: {
         content: prompt,
       },
     ],
-  } as any);
-
-  const content = completion.choices?.[0]?.message?.content || "{}";
+  });
   let parsed: any = {};
   try {
     parsed = JSON.parse(content);

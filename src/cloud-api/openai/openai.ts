@@ -2,13 +2,16 @@ import { OpenAI, ClientOptions } from "openai";
 import { proxyFetch } from "../proxy-fetch";
 import dotenv from "dotenv";
 import { getRuntimeSettings } from "../../config/runtime-settings";
+import { isGeminiTextLlmModel } from "../../config/text-llm-models";
 
 dotenv.config();
 
 const openAiBaseURL = process.env.OPENAI_API_BASE_URL;
 
 export const getOpenAILLMModel = (): string =>
-  getRuntimeSettings().llmModel || process.env.OPENAI_LLM_MODEL || "gpt-4o";
+  isGeminiTextLlmModel(getRuntimeSettings().llmModel)
+    ? process.env.OPENAI_LLM_MODEL || "gpt-4o"
+    : getRuntimeSettings().llmModel || process.env.OPENAI_LLM_MODEL || "gpt-4o";
 
 export const getOpenAIVisionModel = (): string =>
   process.env.OPENAI_VISION_MODEL || process.env.OPENAI_LLM_MODEL || "gpt-4o";

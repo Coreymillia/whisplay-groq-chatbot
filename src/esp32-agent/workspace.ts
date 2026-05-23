@@ -3,9 +3,9 @@ import path from "path";
 import { randomUUID } from "crypto";
 import { esp32AgentProjectsDir } from "../utils/dir";
 import {
-  DEFAULT_BOTNET_MODEL,
-  normalizeBotNetModel,
-} from "../config/botnet-models";
+  DEFAULT_TEXT_LLM_MODEL,
+  normalizeTextLlmModel,
+} from "../config/text-llm-models";
 
 type Esp32AgentBoardFamily = "cyd";
 type Esp32AgentDisplayProfile = "standard" | "inverted";
@@ -286,7 +286,9 @@ function hydrateProjectManifest(
   const normalizedUploadPort = normalizeUploadPort(manifest.uploadPort);
   return {
     ...manifest,
-    agentModel: normalizeBotNetModel(manifest.agentModel || DEFAULT_BOTNET_MODEL),
+    agentModel: normalizeTextLlmModel(
+      manifest.agentModel || DEFAULT_TEXT_LLM_MODEL,
+    ),
     uploadPort: normalizedUploadPort,
     buildCommand: renderCommand(preset.buildCommandTemplate, manifest.workspacePath),
     uploadCommand: buildUploadCommand(
@@ -382,7 +384,9 @@ function createProjectManifest(input: {
     id: projectId,
     name: trimmedName,
     slug: slugBase,
-    agentModel: normalizeBotNetModel(input.agentModel || DEFAULT_BOTNET_MODEL),
+    agentModel: normalizeTextLlmModel(
+      input.agentModel || DEFAULT_TEXT_LLM_MODEL,
+    ),
     uploadPort: "",
     presetId: input.preset.id,
     boardFamily: input.preset.boardFamily,
@@ -599,8 +603,8 @@ function parseProjectBundleOrThrow(bundleContent: string): Esp32AgentProjectBund
       boardFamily: typedBundle.project.boardFamily || "cyd",
       displayProfile: typedBundle.project.displayProfile || "standard",
       templateSourcePath: String(typedBundle.project.templateSourcePath || ""),
-      agentModel: normalizeBotNetModel(
-        String(typedBundle.project.agentModel || DEFAULT_BOTNET_MODEL),
+      agentModel: normalizeTextLlmModel(
+        String(typedBundle.project.agentModel || DEFAULT_TEXT_LLM_MODEL),
       ),
       uploadPort: normalizeUploadPort(typedBundle.project.uploadPort),
     },
@@ -796,7 +800,7 @@ export function updateEsp32AgentProjectSettings(input: {
 }): Esp32AgentProjectManifest {
   return updateProjectManifest(input.projectId, (project) => ({
     ...project,
-    agentModel: normalizeBotNetModel(input.agentModel || project.agentModel),
+    agentModel: normalizeTextLlmModel(input.agentModel || project.agentModel),
     uploadPort:
       typeof input.uploadPort === "string"
         ? normalizeUploadPort(input.uploadPort)
