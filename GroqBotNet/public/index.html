@@ -16,6 +16,9 @@
         <p class="muted">
           <a href="/hdmi" style="color:#7fd4ff;text-decoration:none;font-weight:700">Open HDMI chat view</a>
         </p>
+        <p class="muted">
+          <a href="/room-monitor" style="color:#7fd4ff;text-decoration:none;font-weight:700">Open room monitor gallery</a>
+        </p>
 
         <form id="settingsForm" class="card stack">
           <h2>Bot settings</h2>
@@ -93,6 +96,47 @@
               One Message at a Time ignores the auto-reply settings. Auto Conversation uses them.
             </p>
           </details>
+          <section class="card stack">
+            <h3 style="margin:0">Room monitor controls</h3>
+            <div class="grid two">
+              <label>
+                Capture interval
+                <select id="roomMonitorIntervalSec" name="roomMonitorIntervalSec">
+                  <option value="0">Off</option>
+                  <option value="10">10 seconds</option>
+                  <option value="15">15 seconds</option>
+                  <option value="20">20 seconds</option>
+                  <option value="30">30 seconds</option>
+                  <option value="45">45 seconds</option>
+                  <option value="60">60 seconds</option>
+                  <option value="120">2 minutes</option>
+                  <option value="180">3 minutes</option>
+                  <option value="240">4 minutes</option>
+                  <option value="300">5 minutes</option>
+                </select>
+              </label>
+              <label>
+                Start time
+                <input id="roomMonitorStartTime" name="roomMonitorStartTime" type="time" />
+              </label>
+              <label>
+                Stop time
+                <input id="roomMonitorStopTime" name="roomMonitorStopTime" type="time" />
+              </label>
+              <label>
+                Free space reserve
+                <select id="roomMonitorFreeReserveGb" name="roomMonitorFreeReserveGb">
+                  <option value="5">5 GB</option>
+                  <option value="6">6 GB</option>
+                  <option value="7">7 GB</option>
+                  <option value="8">8 GB</option>
+                </select>
+              </label>
+            </div>
+            <p class="muted">
+              Leave start and stop blank to run all day. Use Off to disable the room monitor. Oldest captures are deleted automatically to protect the selected free-space reserve.
+            </p>
+          </section>
           <div class="actions">
             <button type="submit">Save settings</button>
             <span id="settingsStatus" class="muted"></span>
@@ -146,6 +190,19 @@
             <span id="soloStatus" class="muted"></span>
           </div>
         </form>
+
+        <section class="card stack">
+          <div class="row">
+            <h2>Room monitor</h2>
+            <button id="roomMonitorCaptureBtn" type="button" class="secondary">Capture now</button>
+          </div>
+          <div id="roomMonitorStatus" class="muted">
+            Room monitor is idle.
+          </div>
+          <div class="actions">
+            <a class="secondary room-monitor-link" href="/room-monitor">Open room monitor gallery</a>
+          </div>
+        </section>
       </section>
 
       <section class="panel">
@@ -156,7 +213,10 @@
         <div class="card stack">
           <div class="row">
             <h2>Conversations</h2>
-            <button id="refreshBtn" type="button" class="secondary">Refresh</button>
+            <div class="actions">
+              <button id="refreshBtn" type="button" class="secondary">Refresh</button>
+              <button id="clearChatsBtn" type="button" class="secondary">Clear Chat</button>
+            </div>
           </div>
           <div id="conversationList" class="stack"></div>
         </div>

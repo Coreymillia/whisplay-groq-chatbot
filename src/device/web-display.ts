@@ -8,9 +8,10 @@ import Router from "@koa/router";
 import bodyParser from "koa-bodyparser";
 import serve from "koa-static";
 import { WebSocketServer, WebSocket, RawData } from "ws";
-import { dataDir, cameraFeedDir } from "../utils/dir";
+import { dataDir, cameraDir, cameraFeedDir, imageDir } from "../utils/dir";
 import {
   activateInteractiveImage,
+  getActiveImageFileNameInDir,
   deleteCapturedImgs,
   deleteCapturedImgsForDay,
   deleteCapturedImg,
@@ -91,11 +92,18 @@ import { musicDir } from "../utils/dir";
 import { getBotNetManager } from "./botnet";
 import {
   applyRoomMonitorSettings,
+  deleteSavedRoomMonitorCaptures,
+  deleteRemoteRoomMonitorCaptures,
+  deleteRemoteRoomMonitorCapturesForDay,
   deleteRoomMonitorCaptures,
   deleteRoomMonitorCapturesForDay,
+  getRemoteRoomMonitorImage,
   getRoomMonitorCapturePath,
   getRoomMonitorStatus,
   getSavedRoomMonitorCapturePath,
+  importRemoteRoomMonitorCaptures,
+  listRemoteRoomMonitorCaptureDays,
+  listRemoteRoomMonitorCapturesForDay,
   listRoomMonitorCaptureDays,
   listRoomMonitorCaptures,
   listRoomMonitorCapturesForDay,
@@ -413,6 +421,12 @@ export class WebDisplayServer implements WebAudioBridgeServer {
       ctx.set("Cache-Control", "no-store");
       ctx.type = "text/html";
       ctx.body = fs.createReadStream(path.join(staticRoot, "saved-gallery.html"));
+    });
+
+    this.router.get("/remote-room-monitor-gallery", (ctx) => {
+      ctx.set("Cache-Control", "no-store");
+      ctx.type = "text/html";
+      ctx.body = fs.createReadStream(path.join(staticRoot, "remote-room-monitor-gallery.html"));
     });
 
     this.router.get("/photo-gallery", (ctx) => {
@@ -1068,6 +1082,7 @@ export class WebDisplayServer implements WebAudioBridgeServer {
 
     this.router.get("/api/photos", (ctx) => {
       ctx.set("Cache-Control", "no-store");
+      const selectedFileName = getActiveImageFileNameInDir(cameraDir);
       const photos = listCapturedImgs().map((photoPath) => {
         const stats = fs.statSync(photoPath);
         const fileName = path.basename(photoPath);
@@ -1081,11 +1096,13 @@ export class WebDisplayServer implements WebAudioBridgeServer {
       ctx.body = {
         photos,
         status: getCapturedImgStatus(),
+        selectedFileName,
       };
     });
 
     this.router.get("/api/generated-images", (ctx) => {
       ctx.set("Cache-Control", "no-store");
+      const selectedFileName = getActiveImageFileNameInDir(imageDir);
       const photos = listGeneratedImgs().map((photoPath) => {
         const stats = fs.statSync(photoPath);
         const fileName = path.basename(photoPath);
@@ -1099,6 +1116,7 @@ export class WebDisplayServer implements WebAudioBridgeServer {
       ctx.body = {
         photos,
         status: getGeneratedImgStatus(),
+        selectedFileName,
       };
     });
 
@@ -1130,6 +1148,7 @@ export class WebDisplayServer implements WebAudioBridgeServer {
         ctx.body = {
           photos,
           dayKey: String(ctx.params.dayKey || ""),
+          selectedFileName: getActiveImageFileNameInDir(cameraDir),
         };
       } catch (error) {
         ctx.status = 400;
@@ -1171,6 +1190,7 @@ export class WebDisplayServer implements WebAudioBridgeServer {
         ctx.body = {
           photos,
           dayKey: String(ctx.params.dayKey || ""),
+          selectedFileName: getActiveImageFileNameInDir(imageDir),
         };
       } catch (error) {
         ctx.status = 400;
@@ -1345,6 +1365,31 @@ export class WebDisplayServer implements WebAudioBridgeServer {
       };
     });
 
+    this.router.delete("/api/room-monitor/saved", (ctx) => {
+      const rawBody = (ctx.request as any).body;
+      const fileNames = Array.isArray(rawBody?.fileNames)
+        ? rawBody.fileNames.filter((entry: unknown): entry is string => typeof entry === "string")
+        : [];
+      try {
+        const result = deleteSavedRoomMonitorCaptures(fileNames);
+        ctx.body = {
+          ok: true,
+          deleted: result.deleted,
+          skipped: result.skipped,
+          status: getRoomMonitorStatus(),
+        };
+      } catch (error) {
+        ctx.status = 400;
+        ctx.body = {
+          ok: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Failed to delete saved room monitor photos.",
+        };
+      }
+    });
+
     this.router.get("/api/room-monitor/saved/image/:fileName", (ctx) => {
       ctx.set("Cache-Control", "no-store");
       const fileName = decodeURIComponent(String(ctx.params.fileName || ""));
@@ -1356,6 +1401,140 @@ export class WebDisplayServer implements WebAudioBridgeServer {
       }
       ctx.type = getImageMimeType(photoPath);
       ctx.body = fs.createReadStream(photoPath);
+    });
+
+    this.router.get("/api/remote-room-monitor/gallery/days", async (ctx) => {
+      ctx.set("Cache-Control", "no-store");
+      try {
+        const payload = await listRemoteRoomMonitorCaptureDays();
+        ctx.body = payload;
+      } catch (error) {
+        ctx.status = 400;
+        ctx.body = {
+          ok: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Failed to load remote room monitor gallery.",
+        };
+      }
+    });
+
+    this.router.get("/api/remote-room-monitor/gallery/day/:dayKey", async (ctx) => {
+      ctx.set("Cache-Control", "no-store");
+      try {
+        const payload = await listRemoteRoomMonitorCapturesForDay(
+          String(ctx.params.dayKey || ""),
+        );
+        ctx.body = payload;
+      } catch (error) {
+        ctx.status = 400;
+        ctx.body = {
+          ok: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Failed to load remote room monitor day gallery.",
+        };
+      }
+    });
+
+    this.router.post("/api/remote-room-monitor/gallery/move", async (ctx) => {
+      const rawBody = (ctx.request as any).body;
+      const fileNames = Array.isArray(rawBody?.fileNames)
+        ? rawBody.fileNames.filter((entry: unknown): entry is string => typeof entry === "string")
+        : [];
+      try {
+        const result = await importRemoteRoomMonitorCaptures(fileNames);
+        const latest = await listRemoteRoomMonitorCaptureDays();
+        ctx.body = {
+          ok: true,
+          moved: result.moved,
+          skipped: result.skipped,
+          days: latest.days,
+          savedCount: listSavedRoomMonitorCaptures().length,
+          status: latest.status,
+        };
+      } catch (error) {
+        ctx.status = 400;
+        ctx.body = {
+          ok: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Failed to move remote room monitor photos.",
+        };
+      }
+    });
+
+    this.router.delete("/api/remote-room-monitor/gallery", async (ctx) => {
+      const rawBody = (ctx.request as any).body;
+      const fileNames = Array.isArray(rawBody?.fileNames)
+        ? rawBody.fileNames.filter((entry: unknown): entry is string => typeof entry === "string")
+        : [];
+      try {
+        const result = await deleteRemoteRoomMonitorCaptures(fileNames);
+        const latest = await listRemoteRoomMonitorCaptureDays();
+        ctx.body = {
+          ok: true,
+          deleted: result.deleted,
+          skipped: result.skipped,
+          days: latest.days,
+          savedCount: listSavedRoomMonitorCaptures().length,
+          status: latest.status,
+        };
+      } catch (error) {
+        ctx.status = 400;
+        ctx.body = {
+          ok: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Failed to delete selected remote room monitor photos.",
+        };
+      }
+    });
+
+    this.router.delete("/api/remote-room-monitor/gallery/day/:dayKey", async (ctx) => {
+      try {
+        const result = await deleteRemoteRoomMonitorCapturesForDay(
+          String(ctx.params.dayKey || ""),
+        );
+        const latest = await listRemoteRoomMonitorCaptureDays();
+        ctx.body = {
+          ok: true,
+          deleted: result.deleted,
+          skipped: result.skipped,
+          days: latest.days,
+          savedCount: listSavedRoomMonitorCaptures().length,
+          status: latest.status,
+        };
+      } catch (error) {
+        ctx.status = 400;
+        ctx.body = {
+          ok: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Failed to delete remote room monitor day.",
+        };
+      }
+    });
+
+    this.router.get("/api/remote-room-monitor/photos/image/:fileName", async (ctx) => {
+      ctx.set("Cache-Control", "no-store");
+      try {
+        const fileName = decodeURIComponent(String(ctx.params.fileName || ""));
+        const image = await getRemoteRoomMonitorImage(fileName);
+        ctx.type = image.contentType;
+        ctx.body = image.data;
+      } catch (error) {
+        ctx.status = 404;
+        ctx.body =
+          error instanceof Error
+            ? error.message
+            : "Remote room monitor photo not found";
+      }
     });
 
     this.router.get("/api/photos/image/:fileName", (ctx) => {
@@ -1401,6 +1580,23 @@ export class WebDisplayServer implements WebAudioBridgeServer {
         });
       }
       ctx.body = { ok: true };
+    });
+
+    this.router.post("/api/photos/select", (ctx) => {
+      const body = normalizeRequestBody((ctx.request as any).body);
+      const fileName = getBodyString(body, "fileName") || "";
+      const selectedPath = getCapturedImgPath(fileName);
+      if (!selectedPath) {
+        ctx.status = 404;
+        ctx.body = { ok: false, error: "Photo not found." };
+        return;
+      }
+      activateInteractiveImage(selectedPath, "manual-selection");
+      queueDisplayImage(selectedPath);
+      ctx.body = {
+        ok: true,
+        selectedFileName: path.basename(selectedPath),
+      };
     });
 
     this.router.delete("/api/photos/gallery", (ctx) => {
@@ -1497,6 +1693,23 @@ export class WebDisplayServer implements WebAudioBridgeServer {
               : "Failed to delete AI image day.",
         };
       }
+    });
+
+    this.router.post("/api/generated-images/select", (ctx) => {
+      const body = normalizeRequestBody((ctx.request as any).body);
+      const fileName = getBodyString(body, "fileName") || "";
+      const selectedPath = getGeneratedImgPath(fileName);
+      if (!selectedPath) {
+        ctx.status = 404;
+        ctx.body = { ok: false, error: "AI image not found." };
+        return;
+      }
+      activateInteractiveImage(selectedPath, "other");
+      queueDisplayImage(selectedPath);
+      ctx.body = {
+        ok: true,
+        selectedFileName: path.basename(selectedPath),
+      };
     });
 
     this.router.get("/api/music/tracks", async (ctx) => {
@@ -1961,6 +2174,14 @@ export class WebDisplayServer implements WebAudioBridgeServer {
         geminiImageModel: getBodyString(body, "geminiImageModel"),
         geminiImagePreset: getBodyString(body, "geminiImagePreset"),
         geminiImageEditConfirmMode: getBodyBoolean(body, "geminiImageEditConfirmMode"),
+        geminiImagePromptHelperEnabled: getBodyBoolean(
+          body,
+          "geminiImagePromptHelperEnabled",
+        ),
+        geminiImagePromptHelperTokenLimit: getBodyNumber(
+          body,
+          "geminiImagePromptHelperTokenLimit",
+        ),
         geminiLowTierImageBalanceUsd: getBodyNumber(body, "geminiLowTierImageBalanceUsd"),
         geminiLowTierAutoReloadEnabled: getBodyBoolean(body, "geminiLowTierAutoReloadEnabled"),
         geminiLowTierAutoReloadThresholdUsd: getBodyNumber(

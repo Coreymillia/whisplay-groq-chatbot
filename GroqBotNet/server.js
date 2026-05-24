@@ -2,6 +2,7 @@ const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
+const { execFile, spawnSync } = require("child_process");
 const { BotNetHubTransport, DEFAULT_SESSION, sanitizeSession, normalizeUrl } = require("./online-transport");
 
 const PORT = Number.parseInt(process.env.PORT || "18990", 10);
@@ -13,8 +14,10 @@ const SETTINGS_PATH = path.join(DATA_DIR, "settings.json");
 const CONVERSATIONS_PATH = path.join(DATA_DIR, "conversations.json");
 const STATE_PATH = path.join(DATA_DIR, "state.json");
 const HUB_SESSION_PATH = path.join(DATA_DIR, "botnet-hub-session.json");
+const ROOM_MONITOR_DIR = path.join(DATA_DIR, "room-monitor");
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
+fs.mkdirSync(ROOM_MONITOR_DIR, { recursive: true });
 
 const DEFAULT_SETTINGS = {
   enabled: true,
@@ -32,6 +35,10 @@ const DEFAULT_SETTINGS = {
   replyDelaySec: 6,
   maxBotReplies: 8,
   maxRequestsPerHour: 30,
+  roomMonitorIntervalSec: 0,
+  roomMonitorStartTime: "",
+  roomMonitorStopTime: "",
+  roomMonitorFreeReserveGb: 8,
   groqApiKey: "",
 };
 
@@ -40,6 +47,12 @@ const DEFAULT_STATE = {
 };
 
 const timers = new Map();
+let roomMonitorTimer = null;
+let roomMonitorCaptureInProgress = false;
+let roomMonitorLastCaptureAt = null;
+let roomMonitorLastError = "";
+let roomMonitorDetectedCamera = "";
+let roomMonitorCameraCommand = "";
 
 function readJson(filePath, fallback) {
   try {
@@ -59,6 +72,46 @@ function normalizePositiveInt(value, fallback, minimum = 1, maximum = 500) {
     return fallback;
   }
   return Math.min(maximum, Math.max(minimum, parsed));
+}
+
+function normalizeRoomMonitorIntervalSec(value, fallback) {
+  const parsed = Number.parseInt(String(value ?? ""), 10);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+  if (parsed <= 0) {
+    return 0;
+  }
+  return Math.min(86400, Math.max(10, parsed));
+}
+
+function normalizeFileName(value) {
+  return path.basename(String(value || "").trim());
+}
+
+function normalizeTimeOfDay(value) {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) {
+    return "";
+  }
+  const match = trimmed.match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) {
+    return "";
+  }
+  const hours = Number.parseInt(match[1], 10);
+  const minutes = Number.parseInt(match[2], 10);
+  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) {
+    return "";
+  }
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+}
+
+function normalizeRoomMonitorFreeReserveGb(value, fallback) {
+  const parsed = Number.parseInt(String(value ?? ""), 10);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+  return Math.min(8, Math.max(5, parsed));
 }
 
 function normalizeBotnetMode(value) {
@@ -90,6 +143,20 @@ function loadSettings() {
       1,
       500,
     ),
+    roomMonitorIntervalSec: normalizeRoomMonitorIntervalSec(
+      loaded.roomMonitorIntervalSec,
+      DEFAULT_SETTINGS.roomMonitorIntervalSec,
+    ),
+    roomMonitorStartTime: normalizeTimeOfDay(
+      loaded.roomMonitorStartTime || DEFAULT_SETTINGS.roomMonitorStartTime,
+    ),
+    roomMonitorStopTime: normalizeTimeOfDay(
+      loaded.roomMonitorStopTime || DEFAULT_SETTINGS.roomMonitorStopTime,
+    ),
+    roomMonitorFreeReserveGb: normalizeRoomMonitorFreeReserveGb(
+      loaded.roomMonitorFreeReserveGb,
+      DEFAULT_SETTINGS.roomMonitorFreeReserveGb,
+    ),
   };
 }
 
@@ -116,6 +183,20 @@ function sanitizeSettingsUpdate(body, currentSettings) {
       currentSettings.maxRequestsPerHour,
       1,
       500,
+    ),
+    roomMonitorIntervalSec: normalizeRoomMonitorIntervalSec(
+      body.roomMonitorIntervalSec,
+      currentSettings.roomMonitorIntervalSec,
+    ),
+    roomMonitorStartTime: normalizeTimeOfDay(
+      body.roomMonitorStartTime ?? currentSettings.roomMonitorStartTime,
+    ),
+    roomMonitorStopTime: normalizeTimeOfDay(
+      body.roomMonitorStopTime ?? currentSettings.roomMonitorStopTime,
+    ),
+    roomMonitorFreeReserveGb: normalizeRoomMonitorFreeReserveGb(
+      body.roomMonitorFreeReserveGb,
+      currentSettings.roomMonitorFreeReserveGb,
     ),
     groqApiKey:
       typeof body.groqApiKey === "string" && body.groqApiKey.trim().length > 0
@@ -154,6 +235,312 @@ function getPublicSettings() {
     groqApiKeyConfigured: Boolean(settings.groqApiKey),
     groqApiKey: "",
   };
+}
+
+function getPiCameraCommand() {
+  if (roomMonitorCameraCommand) {
+    return roomMonitorCameraCommand;
+  }
+  for (const candidate of ["rpicam-still", "libcamera-still"]) {
+    const result = spawnSync("which", [candidate], { encoding: "utf8" });
+    if (result.status === 0 && result.stdout.trim()) {
+      roomMonitorCameraCommand = result.stdout.trim();
+      return roomMonitorCameraCommand;
+    }
+  }
+  return "";
+}
+
+function execFileAsync(command, args, options = {}) {
+  return new Promise((resolve, reject) => {
+    execFile(command, args, options, (error, stdout, stderr) => {
+      if (error) {
+        const detail = String(stderr || stdout || error.message || "").trim();
+        reject(new Error(detail || `Command failed: ${path.basename(command)}`));
+        return;
+      }
+      resolve({ stdout: String(stdout || ""), stderr: String(stderr || "") });
+    });
+  });
+}
+
+async function refreshRoomMonitorCameraInfo() {
+  const command = getPiCameraCommand();
+  if (!command) {
+    roomMonitorDetectedCamera = "";
+    return [];
+  }
+  try {
+    const { stdout, stderr } = await execFileAsync(command, ["--list-cameras"], {
+      timeout: 10000,
+      maxBuffer: 1024 * 1024,
+    });
+    const text = `${stdout}\n${stderr}`;
+    const lines = text
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(
+        (line) =>
+          line &&
+          !/^available cameras/i.test(line) &&
+          !/^options:/i.test(line) &&
+          !/^-+$/.test(line),
+      );
+    roomMonitorDetectedCamera =
+      lines.find((line) => /^\d+\s*:/.test(line)) ||
+      lines[0] ||
+      "Raspberry Pi camera detected";
+    return lines;
+  } catch (error) {
+    roomMonitorDetectedCamera = "";
+    throw error;
+  }
+}
+
+function clearRoomMonitorTimer() {
+  if (roomMonitorTimer) {
+    clearTimeout(roomMonitorTimer);
+    roomMonitorTimer = null;
+  }
+}
+
+function parseRoomMonitorTimeParts(value) {
+  const normalized = normalizeTimeOfDay(value);
+  if (!normalized) {
+    return null;
+  }
+  const [hours, minutes] = normalized.split(":").map((part) => Number.parseInt(part, 10));
+  return { hours, minutes, totalMinutes: hours * 60 + minutes };
+}
+
+function isWithinRoomMonitorActiveWindow(now = new Date()) {
+  const start = parseRoomMonitorTimeParts(settings.roomMonitorStartTime);
+  const stop = parseRoomMonitorTimeParts(settings.roomMonitorStopTime);
+  if (!start || !stop) {
+    return true;
+  }
+  if (start.totalMinutes === stop.totalMinutes) {
+    return true;
+  }
+  const currentMinutes = now.getHours() * 60 + now.getMinutes();
+  if (start.totalMinutes < stop.totalMinutes) {
+    return currentMinutes >= start.totalMinutes && currentMinutes < stop.totalMinutes;
+  }
+  return currentMinutes >= start.totalMinutes || currentMinutes < stop.totalMinutes;
+}
+
+function getNextRoomMonitorWindowStartDelayMs(now = new Date()) {
+  const start = parseRoomMonitorTimeParts(settings.roomMonitorStartTime);
+  const stop = parseRoomMonitorTimeParts(settings.roomMonitorStopTime);
+  if (!start || !stop || start.totalMinutes === stop.totalMinutes) {
+    return settings.roomMonitorIntervalSec * 1000;
+  }
+
+  const next = new Date(now);
+  next.setSeconds(0, 0);
+  next.setHours(start.hours, start.minutes, 0, 0);
+  if (next <= now && isWithinRoomMonitorActiveWindow(now)) {
+    next.setDate(next.getDate() + 1);
+  } else if (next <= now && !isWithinRoomMonitorActiveWindow(now)) {
+    next.setDate(next.getDate() + 1);
+  }
+  return Math.max(1000, next.getTime() - now.getTime());
+}
+
+function scheduleRoomMonitorCapture() {
+  clearRoomMonitorTimer();
+  if (settings.roomMonitorIntervalSec <= 0) {
+    return;
+  }
+  const delayMs = isWithinRoomMonitorActiveWindow()
+    ? settings.roomMonitorIntervalSec * 1000
+    : getNextRoomMonitorWindowStartDelayMs();
+  roomMonitorTimer = setTimeout(() => {
+    captureRoomMonitorImage().catch((error) => {
+      roomMonitorLastError = error instanceof Error ? error.message : String(error);
+      scheduleRoomMonitorCapture();
+    });
+  }, delayMs);
+}
+
+function applyRoomMonitorSettings() {
+  try {
+    enforceRoomMonitorStorageReserve();
+  } catch (error) {
+    roomMonitorLastError = error instanceof Error ? error.message : String(error);
+  }
+  scheduleRoomMonitorCapture();
+}
+
+function getRoomMonitorFilePath(fileName) {
+  const safeFileName = normalizeFileName(fileName);
+  if (!safeFileName) {
+    return "";
+  }
+  const filePath = path.resolve(ROOM_MONITOR_DIR, safeFileName);
+  if (!filePath.startsWith(`${path.resolve(ROOM_MONITOR_DIR)}${path.sep}`)) {
+    return "";
+  }
+  if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
+    return "";
+  }
+  return filePath;
+}
+
+function deleteRoomMonitorCaptures(fileNames) {
+  const deleted = [];
+  const skipped = [];
+  for (const fileName of Array.isArray(fileNames) ? fileNames : []) {
+    const filePath = getRoomMonitorFilePath(fileName);
+    if (!filePath) {
+      skipped.push(String(fileName || ""));
+      continue;
+    }
+    fs.unlinkSync(filePath);
+    deleted.push(path.basename(filePath));
+  }
+  return { deleted, skipped };
+}
+
+function getRoomMonitorFreeBytes() {
+  const result = spawnSync("df", ["-B1", ROOM_MONITOR_DIR], { encoding: "utf8" });
+  if (result.status !== 0) {
+    throw new Error(result.stderr?.trim() || "Failed to read free disk space.");
+  }
+  const lines = result.stdout
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const dataLine = lines[lines.length - 1] || "";
+  const columns = dataLine.split(/\s+/);
+  const available = Number.parseInt(columns[3] || "", 10);
+  if (!Number.isFinite(available)) {
+    throw new Error("Failed to parse free disk space.");
+  }
+  return available;
+}
+
+function enforceRoomMonitorStorageReserve() {
+  const reserveBytes = settings.roomMonitorFreeReserveGb * 1024 * 1024 * 1024;
+  if (reserveBytes <= 0) {
+    return [];
+  }
+
+  let freeBytes = getRoomMonitorFreeBytes();
+  const deleted = [];
+  if (freeBytes >= reserveBytes) {
+    return deleted;
+  }
+
+  const oldestFirst = listRoomMonitorCaptures(5000).slice().sort((a, b) => a.capturedAt - b.capturedAt);
+  for (const capture of oldestFirst) {
+    const filePath = getRoomMonitorFilePath(capture.fileName);
+    if (!filePath) {
+      continue;
+    }
+    fs.unlinkSync(filePath);
+    deleted.push(capture.fileName);
+    freeBytes += capture.sizeBytes || 0;
+    if (freeBytes >= reserveBytes) {
+      break;
+    }
+  }
+  return deleted;
+}
+
+function listRoomMonitorCaptures(limit = 60) {
+  const entries = fs
+    .readdirSync(ROOM_MONITOR_DIR, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && /\.(?:jpe?g|png)$/i.test(entry.name))
+    .map((entry) => {
+      const filePath = path.join(ROOM_MONITOR_DIR, entry.name);
+      const stats = fs.statSync(filePath);
+      return {
+        fileName: entry.name,
+        capturedAt: stats.mtimeMs,
+        sizeBytes: stats.size,
+        url: `/api/room-monitor/image?file=${encodeURIComponent(entry.name)}`,
+        downloadUrl: `/api/room-monitor/image?file=${encodeURIComponent(entry.name)}&download=1`,
+      };
+    })
+    .sort((a, b) => b.capturedAt - a.capturedAt);
+  return entries.slice(0, limit);
+}
+
+function getRoomMonitorStatus() {
+  const captures = listRoomMonitorCaptures(2000);
+  const totalSizeBytes = captures.reduce((sum, entry) => sum + entry.sizeBytes, 0);
+  let freeSpaceBytes = 0;
+  try {
+    freeSpaceBytes = getRoomMonitorFreeBytes();
+  } catch (error) {
+    roomMonitorLastError =
+      roomMonitorLastError ||
+      (error instanceof Error ? error.message : String(error));
+  }
+  return {
+    enabled: settings.roomMonitorIntervalSec > 0,
+    intervalSec: settings.roomMonitorIntervalSec,
+    activeNow: isWithinRoomMonitorActiveWindow(),
+    startTime: settings.roomMonitorStartTime,
+    stopTime: settings.roomMonitorStopTime,
+    freeReserveGb: settings.roomMonitorFreeReserveGb,
+    captureInProgress: roomMonitorCaptureInProgress,
+    lastCaptureAt: roomMonitorLastCaptureAt,
+    lastError: roomMonitorLastError,
+    detectedCamera: roomMonitorDetectedCamera,
+    cameraCommand: path.basename(getPiCameraCommand() || ""),
+    totalCount: captures.length,
+    totalSizeBytes,
+    freeSpaceBytes,
+    captures: captures.slice(0, 40),
+  };
+}
+
+async function captureRoomMonitorImage(force = false) {
+  if (roomMonitorCaptureInProgress) {
+    return false;
+  }
+  if (!force && !isWithinRoomMonitorActiveWindow()) {
+    scheduleRoomMonitorCapture();
+    return false;
+  }
+
+  const command = getPiCameraCommand();
+  if (!command) {
+    roomMonitorLastError =
+      "No Raspberry Pi camera capture command found. Install rpicam-still or libcamera-still.";
+    return false;
+  }
+
+  roomMonitorCaptureInProgress = true;
+  const outputPath = path.join(ROOM_MONITOR_DIR, `room-monitor-${Date.now()}.jpg`);
+
+  try {
+    enforceRoomMonitorStorageReserve();
+    await refreshRoomMonitorCameraInfo();
+    await execFileAsync(
+      command,
+      ["--nopreview", "--timeout", "1500", "--output", outputPath],
+      {
+        timeout: 20000,
+        maxBuffer: 1024 * 1024,
+      },
+    );
+    roomMonitorLastCaptureAt = Date.now();
+    roomMonitorLastError = "";
+    enforceRoomMonitorStorageReserve();
+    return true;
+  } catch (error) {
+    roomMonitorLastError = error instanceof Error ? error.message : String(error);
+    if (fs.existsSync(outputPath)) {
+      fs.unlinkSync(outputPath);
+    }
+    throw error;
+  } finally {
+    roomMonitorCaptureInProgress = false;
+    scheduleRoomMonitorCapture();
+  }
 }
 
 const hubTransport = new BotNetHubTransport({
@@ -877,6 +1264,15 @@ function stopConversation(conversationId) {
   return true;
 }
 
+function clearAllConversations() {
+  conversations = [];
+  for (const timer of timers.values()) {
+    clearTimeout(timer);
+  }
+  timers.clear();
+  saveConversations();
+}
+
 function sendJson(res, statusCode, payload) {
   res.writeHead(statusCode, {
     "Content-Type": "application/json; charset=utf-8",
@@ -901,12 +1297,20 @@ function contentTypeFor(filePath) {
   if (filePath.endsWith(".html")) return "text/html; charset=utf-8";
   if (filePath.endsWith(".js")) return "application/javascript; charset=utf-8";
   if (filePath.endsWith(".css")) return "text/css; charset=utf-8";
+  if (filePath.endsWith(".jpg") || filePath.endsWith(".jpeg")) return "image/jpeg";
+  if (filePath.endsWith(".png")) return "image/png";
   return "text/plain; charset=utf-8";
 }
 
 function serveStatic(req, res) {
   const requestPath =
-    req.url === "/" ? "/index.html" : req.url === "/hdmi" ? "/hdmi.html" : req.url;
+    req.url === "/"
+      ? "/index.html"
+      : req.url === "/hdmi"
+        ? "/hdmi.html"
+        : req.url === "/room-monitor"
+          ? "/room-monitor.html"
+          : req.url;
   const filePath = path.normalize(path.join(PUBLIC_DIR, requestPath));
   if (!filePath.startsWith(PUBLIC_DIR) || !fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
     res.writeHead(404);
@@ -921,6 +1325,7 @@ function getStatePayload() {
   return {
     settings: getPublicSettings(),
     online: hubTransport.getPublicState(),
+    roomMonitor: getRoomMonitorStatus(),
     conversations,
     stats: {
       requestsUsedThisHour: runtimeState.requestTimestamps.filter(
@@ -952,7 +1357,62 @@ const server = http.createServer(async (req, res) => {
         hubTransport.disconnect();
       }
       saveSettings();
+      applyRoomMonitorSettings();
       sendJson(res, 200, { ok: true, settings: getPublicSettings() });
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/room-monitor/capture") {
+      await captureRoomMonitorImage(true);
+      sendJson(res, 200, { ok: true, roomMonitor: getRoomMonitorStatus() });
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/room-monitor/images") {
+      const limitValue = Number.parseInt(url.searchParams.get("limit") || "", 10);
+      const limit =
+        Number.isFinite(limitValue) && limitValue > 0
+          ? Math.min(limitValue, 5000)
+          : 40;
+      const roomMonitor = getRoomMonitorStatus();
+      roomMonitor.captures = listRoomMonitorCaptures(limit);
+      sendJson(res, 200, { ok: true, roomMonitor });
+      return;
+    }
+
+    if (req.method === "DELETE" && url.pathname === "/api/room-monitor/images") {
+      const body = await readBody(req);
+      const fileNames = Array.isArray(body.fileNames)
+        ? body.fileNames.filter((entry) => typeof entry === "string")
+        : [];
+      const result = deleteRoomMonitorCaptures(fileNames);
+      sendJson(res, 200, {
+        ok: true,
+        deleted: result.deleted,
+        skipped: result.skipped,
+        roomMonitor: getRoomMonitorStatus(),
+      });
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/room-monitor/image") {
+      const fileName = url.searchParams.get("file") || "";
+      const filePath = getRoomMonitorFilePath(fileName);
+      if (!filePath) {
+        sendJson(res, 404, { ok: false, error: "Image not found." });
+        return;
+      }
+      const download = url.searchParams.get("download") === "1";
+      res.writeHead(200, {
+        "Content-Type": contentTypeFor(filePath),
+        "Cache-Control": "no-store",
+        ...(download
+          ? {
+              "Content-Disposition": `attachment; filename="${path.basename(filePath)}"`,
+            }
+          : {}),
+      });
+      fs.createReadStream(filePath).pipe(res);
       return;
     }
 
@@ -989,6 +1449,12 @@ const server = http.createServer(async (req, res) => {
         sendJson(res, 404, { ok: false, error: "Conversation not found." });
         return;
       }
+      sendJson(res, 200, { ok: true, ...getStatePayload() });
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/conversations/clear") {
+      clearAllConversations();
       sendJson(res, 200, { ok: true, ...getStatePayload() });
       return;
     }
@@ -1053,6 +1519,11 @@ const server = http.createServer(async (req, res) => {
   } catch (error) {
     sendJson(res, 500, { ok: false, error: error instanceof Error ? error.message : "Unknown error." });
   }
+});
+
+applyRoomMonitorSettings();
+refreshRoomMonitorCameraInfo().catch((error) => {
+  roomMonitorLastError = error instanceof Error ? error.message : String(error);
 });
 
 server.listen(PORT, HOST, () => {

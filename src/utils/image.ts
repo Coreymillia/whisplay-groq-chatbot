@@ -28,6 +28,12 @@ let pendingCapturedImgConsumed = false;
 let interactiveImagePath = "";
 let interactiveImageSource: InteractiveImageSource = "other";
 
+const isPathWithinDir = (targetPath: string, dirPath: string): boolean => {
+  const resolvedTarget = path.resolve(targetPath);
+  const resolvedDir = path.resolve(dirPath);
+  return resolvedTarget === resolvedDir || resolvedTarget.startsWith(`${resolvedDir}${path.sep}`);
+};
+
 const setLatestShowedImage = (imagePath: string) => {
   latestShowedImg = imagePath ? path.resolve(imagePath) : "";
 };
@@ -61,6 +67,15 @@ export const getInteractiveImage = (): string => {
 
 export const getInteractiveImageSource = (): InteractiveImageSource | "" => {
   return hasInteractiveImage() ? interactiveImageSource : "";
+};
+
+export const getActiveImageFileNameInDir = (dirPath: string): string => {
+  if (!hasInteractiveImage()) {
+    return "";
+  }
+  return isPathWithinDir(interactiveImagePath, dirPath)
+    ? path.basename(interactiveImagePath)
+    : "";
 };
 
 const readImagesFromDir = (dirPath: string): string[] =>

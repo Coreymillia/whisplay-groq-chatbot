@@ -52,6 +52,8 @@ const geminiKeyHint = document.getElementById("geminiKeyHint");
 const geminiImageModelSelect = document.getElementById("geminiImageModelSelect");
 const geminiImagePresetSelect = document.getElementById("geminiImagePresetSelect");
 const geminiImageEditConfirmModeCheckbox = document.getElementById("geminiImageEditConfirmModeCheckbox");
+const geminiImagePromptHelperEnabledCheckbox = document.getElementById("geminiImagePromptHelperEnabledCheckbox");
+const geminiImagePromptHelperTokenLimitInput = document.getElementById("geminiImagePromptHelperTokenLimitInput");
 const geminiLowTierImageBalanceInput = document.getElementById("geminiLowTierImageBalanceInput");
 const geminiLowTierAutoReloadEnabledCheckbox = document.getElementById("geminiLowTierAutoReloadEnabledCheckbox");
 const geminiLowTierAutoReloadThresholdInput = document.getElementById("geminiLowTierAutoReloadThresholdInput");
@@ -90,6 +92,16 @@ const settingsStatus = document.getElementById("settingsStatus");
 const roomMonitorStatus = document.getElementById("roomMonitorStatus");
 const roomMonitorGalleryList = document.getElementById("roomMonitorGalleryList");
 const roomMonitorToggleBtn = document.getElementById("roomMonitorToggleBtn");
+const remoteRoomMonitorStatus = document.getElementById("remoteRoomMonitorStatus");
+const remoteRoomMonitorGalleryList = document.getElementById("remoteRoomMonitorGalleryList");
+const remoteRoomMonitorToggleBtn = document.getElementById("remoteRoomMonitorToggleBtn");
+const workspaceLeftColumn = document.getElementById("workspaceLeftColumn");
+const workspaceRightColumn = document.getElementById("workspaceRightColumn");
+const visionCard = document.getElementById("visionCard");
+const settingsCard = document.getElementById("settingsCard");
+const generatedGalleryCard = document.getElementById("generatedGalleryCard");
+const roomMonitorCard = document.getElementById("roomMonitorCard");
+const remoteRoomMonitorCard = document.getElementById("remoteRoomMonitorCard");
 const botNetEnabledCheckbox = document.getElementById("botNetEnabledCheckbox");
 const botNetModeSelect = document.getElementById("botNetModeSelect");
 const botNetModelSelect = document.getElementById("botNetModelSelect");
@@ -127,6 +139,22 @@ const dim = document.getElementById("dim");
 const imageLayer = document.getElementById("imageLayer");
 const imageDisplay = document.getElementById("imageDisplay");
 
+function mountWorkspaceColumns() {
+  if (!workspaceLeftColumn || !workspaceRightColumn) {
+    return;
+  }
+  [visionCard, generatedGalleryCard, roomMonitorCard, remoteRoomMonitorCard].forEach((card) => {
+    if (card) {
+      workspaceLeftColumn.appendChild(card);
+    }
+  });
+  if (settingsCard) {
+    workspaceRightColumn.appendChild(settingsCard);
+  }
+}
+
+mountWorkspaceColumns();
+
 let scrollTop = 0;
 let scrollSpeed = 0;
 let scrollSpeedFactor = 1;
@@ -145,11 +173,15 @@ let visionAnalysisVisible = false;
 let latestVisionAnalysisStamp = 0;
 let savedPhotos = [];
 let generatedGalleryPhotos = [];
+let selectedManualPhotoFileName = "";
+let selectedGeneratedPhotoFileName = "";
 let savedChatHistories = [];
 let screenBlankTimeoutOptions = [];
 let roomMonitorIntervalOptions = [];
 let roomMonitorDays = [];
 let roomMonitorGalleryState = null;
+let remoteRoomMonitorDays = [];
+let remoteRoomMonitorGalleryState = null;
 let musicTracks = [];
 let botNetState = null;
 let botNetSettingsDirty = false;
@@ -178,6 +210,7 @@ const DEFAULT_SCREENSAVER_MODE = "retro-geometry";
 const DEFAULT_IDLE_TIMEOUT_SEC = 120;
 const DEFAULT_GEMINI_IMAGE_MODEL = "gemini-2.5-flash-image";
 const DEFAULT_GEMINI_IMAGE_PRESET = "none";
+const DEFAULT_GEMINI_IMAGE_PROMPT_HELPER_TOKEN_LIMIT = 120;
 let currentLlmModel = "";
 let currentGroqHeaderBadgeMode = DEFAULT_GROQ_HEADER_BADGE_MODE;
 
@@ -408,6 +441,7 @@ async function saveBotNetSettings(showSavedStatus = true) {
     true,
   );
   await loadBotNetState();
+  void loadRemoteRoomMonitorPhotos();
   if (showSavedStatus) {
     setBotNetStatus("BotNet settings saved.");
   }
@@ -1076,6 +1110,18 @@ function renderSavedPhotos() {
     const actions = document.createElement("div");
     actions.className = "saved-photo-actions";
 
+    const selectBtn = document.createElement("button");
+    selectBtn.type = "button";
+    selectBtn.className = "button compact";
+    selectBtn.textContent =
+      photo.fileName === selectedManualPhotoFileName
+        ? "Selected for Editing"
+        : "Select for Editing";
+    selectBtn.disabled = photo.fileName === selectedManualPhotoFileName;
+    selectBtn.addEventListener("click", () => {
+      selectGalleryPhoto("/api/photos/select", photo.fileName, "manual");
+    });
+
     const downloadLink = document.createElement("a");
     downloadLink.className = "button compact saved-photo-download";
     downloadLink.textContent = "Download";
@@ -1093,6 +1139,7 @@ function renderSavedPhotos() {
     card.appendChild(img);
     card.appendChild(label);
     card.appendChild(meta);
+    actions.appendChild(selectBtn);
     actions.appendChild(downloadLink);
     actions.appendChild(deleteBtn);
     card.appendChild(actions);
@@ -1153,6 +1200,18 @@ function renderGeneratedGalleryPreview() {
     const actions = document.createElement("div");
     actions.className = "saved-photo-actions";
 
+    const selectBtn = document.createElement("button");
+    selectBtn.type = "button";
+    selectBtn.className = "button compact";
+    selectBtn.textContent =
+      photo.fileName === selectedGeneratedPhotoFileName
+        ? "Selected for Editing"
+        : "Select for Editing";
+    selectBtn.disabled = photo.fileName === selectedGeneratedPhotoFileName;
+    selectBtn.addEventListener("click", () => {
+      selectGalleryPhoto("/api/generated-images/select", photo.fileName, "generated");
+    });
+
     const downloadLink = document.createElement("a");
     downloadLink.className = "button compact saved-photo-download";
     downloadLink.textContent = "Download";
@@ -1162,6 +1221,7 @@ function renderGeneratedGalleryPreview() {
     card.appendChild(img);
     card.appendChild(label);
     card.appendChild(meta);
+    actions.appendChild(selectBtn);
     actions.appendChild(downloadLink);
     card.appendChild(actions);
     generatedGalleryList.appendChild(card);
@@ -1178,6 +1238,7 @@ async function loadSavedPhotos() {
     }
     const payload = await response.json();
     savedPhotos = Array.isArray(payload.photos) ? payload.photos : [];
+    selectedManualPhotoFileName = payload.selectedFileName || "";
     renderSavedPhotos();
   } catch (error) {
     console.error("Failed to load saved photos:", error);
@@ -1197,6 +1258,7 @@ async function loadGeneratedGalleryPreview() {
     }
     const payload = await response.json();
     generatedGalleryPhotos = Array.isArray(payload.photos) ? payload.photos : [];
+    selectedGeneratedPhotoFileName = payload.selectedFileName || "";
     renderGeneratedGalleryPreview();
   } catch (error) {
     console.error("Failed to load generated gallery preview:", error);
@@ -1228,6 +1290,38 @@ async function deleteSavedPhoto(fileName) {
     console.error("Failed to delete saved photo:", error);
     const message = error instanceof Error ? error.message : String(error);
     setSavedPhotosStatus(`Delete failed: ${message}`, true);
+  }
+}
+
+async function selectGalleryPhoto(apiPath, fileName, galleryType) {
+  try {
+    const response = await fetch(apiPath, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ fileName }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || payload.ok === false) {
+      throw new Error(payload.error || `HTTP ${response.status}`);
+    }
+    if (galleryType === "generated") {
+      selectedGeneratedPhotoFileName = payload.selectedFileName || fileName;
+      setGeneratedGalleryStatus(`Selected ${selectedGeneratedPhotoFileName} for editing.`);
+      renderGeneratedGalleryPreview();
+      return;
+    }
+    selectedManualPhotoFileName = payload.selectedFileName || fileName;
+    setSavedPhotosStatus(`Selected ${selectedManualPhotoFileName} for editing.`);
+    renderSavedPhotos();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (galleryType === "generated") {
+      setGeneratedGalleryStatus(`Select failed: ${message}`, true);
+    } else {
+      setSavedPhotosStatus(`Select failed: ${message}`, true);
+    }
   }
 }
 
@@ -1703,6 +1797,17 @@ function applySettings(settings) {
       settings.geminiImageEditConfirmMode,
     );
   }
+  if (geminiImagePromptHelperEnabledCheckbox) {
+    geminiImagePromptHelperEnabledCheckbox.checked = Boolean(
+      settings.geminiImagePromptHelperEnabled,
+    );
+  }
+  if (geminiImagePromptHelperTokenLimitInput) {
+    geminiImagePromptHelperTokenLimitInput.value = String(
+      Number(settings.geminiImagePromptHelperTokenLimit) ||
+        DEFAULT_GEMINI_IMAGE_PROMPT_HELPER_TOKEN_LIMIT,
+    );
+  }
   if (geminiLowTierImageBalanceInput) {
     geminiLowTierImageBalanceInput.value = Number(
       settings.geminiLowTierImageBalanceUsd ?? 0,
@@ -1926,6 +2031,40 @@ function setRoomMonitorGalleryStatus(message, isError = false) {
   roomMonitorStatus.style.color = isError ? "#ff8a8a" : "";
 }
 
+function setRemoteRoomMonitorGalleryStatus(message, isError = false) {
+  if (!remoteRoomMonitorStatus) return;
+  remoteRoomMonitorStatus.textContent = message;
+  remoteRoomMonitorStatus.style.color = isError ? "#ff8a8a" : "";
+}
+
+function renderMonitorDayPreviewCards(targetEl, days, options = {}) {
+  if (!targetEl) return;
+  targetEl.innerHTML = "";
+  const summaryOnly = Boolean(options.summaryOnly);
+  for (const day of days.slice(0, 4)) {
+    const card = document.createElement("div");
+    card.className = "saved-photo-card";
+
+    const label = document.createElement("div");
+    label.className = "saved-photo-name";
+    label.textContent = day.label;
+
+    const meta = document.createElement("div");
+    meta.className = "saved-photo-meta";
+    meta.textContent = `${day.count} photo${day.count === 1 ? "" : "s"} · ${formatBytes(day.totalSizeBytes)}`;
+
+    if (!summaryOnly) {
+      const img = document.createElement("img");
+      img.src = `${day.coverImageUrl}?ts=${day.updatedAt}`;
+      img.alt = day.label;
+      card.appendChild(img);
+    }
+    card.appendChild(label);
+    card.appendChild(meta);
+    targetEl.appendChild(card);
+  }
+}
+
 function renderRoomMonitorPhotos(status = null) {
   roomMonitorGalleryState = status || roomMonitorGalleryState;
   const currentStatus = roomMonitorGalleryState;
@@ -1965,28 +2104,7 @@ function renderRoomMonitorPhotos(status = null) {
     summary += ` · Last error: ${currentStatus.lastError}`;
   }
   setRoomMonitorGalleryStatus(summary, Boolean(currentStatus?.lastError));
-
-  for (const day of roomMonitorDays.slice(0, 4)) {
-    const card = document.createElement("div");
-    card.className = "saved-photo-card";
-
-    const img = document.createElement("img");
-    img.src = `${day.coverImageUrl}?ts=${day.updatedAt}`;
-    img.alt = day.label;
-
-    const label = document.createElement("div");
-    label.className = "saved-photo-name";
-    label.textContent = day.label;
-
-    const meta = document.createElement("div");
-    meta.className = "saved-photo-meta";
-    meta.textContent = `${day.count} photo${day.count === 1 ? "" : "s"} · ${formatBytes(day.totalSizeBytes)}`;
-
-    card.appendChild(img);
-    card.appendChild(label);
-    card.appendChild(meta);
-    roomMonitorGalleryList.appendChild(card);
-  }
+  renderMonitorDayPreviewCards(roomMonitorGalleryList, roomMonitorDays, { summaryOnly: true });
 }
 
 async function loadRoomMonitorPhotos() {
@@ -2006,6 +2124,71 @@ async function loadRoomMonitorPhotos() {
     roomMonitorGalleryState = null;
     renderRoomMonitorPhotos(null);
     setRoomMonitorGalleryStatus("Failed to load room monitor gallery.", true);
+  }
+}
+
+function renderRemoteRoomMonitorPhotos(status = null) {
+  remoteRoomMonitorGalleryState = status || remoteRoomMonitorGalleryState;
+  const currentStatus = remoteRoomMonitorGalleryState;
+  if (!remoteRoomMonitorGalleryList) return;
+  remoteRoomMonitorGalleryList.innerHTML = "";
+
+  if (!remoteRoomMonitorDays.length) {
+    const baseMessage = currentStatus?.peerUrl
+      ? "No remote room monitor day folders yet."
+      : "Set Connect to Bot in the GroqBotNet card first.";
+    const detail = currentStatus?.lastError ? `${baseMessage} Last error: ${currentStatus.lastError}` : baseMessage;
+    setRemoteRoomMonitorGalleryStatus(detail, Boolean(currentStatus?.lastError));
+    const empty = document.createElement("div");
+    empty.className = "saved-photos-empty";
+    empty.textContent = currentStatus?.peerUrl
+      ? "Open Remote Gallery to browse GroqBotNet captures and move them into Saved Gallery."
+      : "Save a GroqBotNet peer URL first, then refresh this page.";
+    remoteRoomMonitorGalleryList.appendChild(empty);
+    return;
+  }
+
+  const peerLabel = currentStatus?.peerUrl || "GroqBotNet peer";
+  const usageLabel = `${formatBytes(currentStatus?.totalSizeBytes || 0)} remote used`;
+  const freeSpaceLabel = `${formatBytes(currentStatus?.freeSpaceBytes || 0)} remote free`;
+  const reserveLabel = `keeps ${formatBytes(currentStatus?.freeSpaceReserveBytes || 0)} remote open`;
+  const intervalLabel = formatRoomMonitorIntervalLabel(currentStatus?.intervalSec || 0);
+  let summary = `${peerLabel} · ${currentStatus?.enabled ? `Auto ${intervalLabel}` : "Auto off"} · ${remoteRoomMonitorDays.length} day folder${remoteRoomMonitorDays.length === 1 ? "" : "s"} · ${currentStatus?.totalCount || 0} image${currentStatus?.totalCount === 1 ? "" : "s"} · ${usageLabel} · ${freeSpaceLabel} · ${reserveLabel}`;
+  if (currentStatus?.captureInProgress) {
+    summary += " · Capturing now";
+  } else if (currentStatus?.lastCaptureAt) {
+    summary += ` · Last capture ${new Date(currentStatus.lastCaptureAt).toLocaleString()}`;
+  }
+  if (currentStatus?.savedCount) {
+    summary += ` · ${currentStatus.savedCount} saved here`;
+  }
+  if (currentStatus?.lastError) {
+    summary += ` · Last error: ${currentStatus.lastError}`;
+  }
+  setRemoteRoomMonitorGalleryStatus(summary, Boolean(currentStatus?.lastError));
+  renderMonitorDayPreviewCards(remoteRoomMonitorGalleryList, remoteRoomMonitorDays, { summaryOnly: true });
+}
+
+async function loadRemoteRoomMonitorPhotos() {
+  try {
+    const response = await fetch(`/api/remote-room-monitor/gallery/days?ts=${Date.now()}`, {
+      cache: "no-store",
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || payload.ok === false) {
+      throw new Error(payload.error || `HTTP ${response.status}`);
+    }
+    remoteRoomMonitorDays = Array.isArray(payload.days) ? payload.days : [];
+    renderRemoteRoomMonitorPhotos(payload.status || null);
+  } catch (error) {
+    console.error("Failed to load remote room monitor gallery:", error);
+    remoteRoomMonitorDays = [];
+    remoteRoomMonitorGalleryState = null;
+    renderRemoteRoomMonitorPhotos(null);
+    setRemoteRoomMonitorGalleryStatus(
+      error instanceof Error ? error.message : "Failed to load remote room monitor gallery.",
+      true,
+    );
   }
 }
 
@@ -2231,6 +2414,12 @@ async function saveSettings({ clearGroqApiKey = false } = {}) {
     geminiImageEditConfirmMode: Boolean(
       geminiImageEditConfirmModeCheckbox?.checked,
     ),
+    geminiImagePromptHelperEnabled: Boolean(
+      geminiImagePromptHelperEnabledCheckbox?.checked,
+    ),
+    geminiImagePromptHelperTokenLimit:
+      parseInt(geminiImagePromptHelperTokenLimitInput?.value || "120", 10) ||
+      DEFAULT_GEMINI_IMAGE_PROMPT_HELPER_TOKEN_LIMIT,
     geminiLowTierImageBalanceUsd:
       parseOptionalFloat(geminiLowTierImageBalanceInput?.value) ?? 0,
     geminiLowTierAutoReloadEnabled: Boolean(
@@ -2425,6 +2614,7 @@ loadVisionAnalysis();
 loadSavedPhotos();
 loadGeneratedGalleryPreview();
 loadRoomMonitorPhotos();
+loadRemoteRoomMonitorPhotos();
 loadChatHistories();
 setVisionAnalysisVisible(false);
 requestAnimationFrame(animateScroll);
@@ -2672,6 +2862,12 @@ if (savedPhotosToggleBtn) {
 if (roomMonitorToggleBtn) {
   roomMonitorToggleBtn.addEventListener("click", () => {
     window.open("/room-monitor-gallery", "_blank", "noopener");
+  });
+}
+
+if (remoteRoomMonitorToggleBtn) {
+  remoteRoomMonitorToggleBtn.addEventListener("click", () => {
+    window.open("/remote-room-monitor-gallery", "_blank", "noopener");
   });
 }
 

@@ -148,3 +148,46 @@ export async function createJsonTextModelResponse(input: {
   } as any);
   return completion.choices?.[0]?.message?.content || "{}";
 }
+
+export async function createPlainTextModelResponse(input: {
+  model: string;
+  messages: PlainTextModelMessage[];
+  maxOutputTokens?: number;
+}): Promise<string> {
+  const provider = getTextLlmProvider(input.model);
+  if (provider === "gemini") {
+    const gemini = getGeminiClient();
+    if (!gemini) {
+      throw new Error("Configure a Gemini API key before using Gemini text models.");
+    }
+    const prompt = input.messages
+      .map((message) => `${message.role.toUpperCase()}:\n${message.content}`)
+      .join("\n\n");
+    const response = await gemini.models.generateContent({
+      model: input.model,
+      contents: prompt,
+      config:
+        typeof input.maxOutputTokens === "number"
+          ? { maxOutputTokens: input.maxOutputTokens }
+          : undefined,
+    });
+    return (response.text || "").trim();
+  }
+
+  const openai = getOpenAIClient();
+  if (!openai) {
+    throw new Error(
+      "Configure a Groq/OpenAI-compatible API key before using this text model.",
+    );
+  }
+  const completion = await openai.chat.completions.create({
+    model: input.model,
+    stream: false,
+    max_tokens: input.maxOutputTokens,
+    messages: input.messages.map((message) => ({
+      role: message.role,
+      content: message.content,
+    })),
+  });
+  return completion.choices?.[0]?.message?.content?.trim() || "";
+}

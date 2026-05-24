@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>GroqBotNet Room Monitor</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="wrap">
+      <section class="panel">
+        <div class="card stack">
+          <div class="row">
+            <div>
+              <h1 style="margin:0">Room Monitor</h1>
+              <div class="muted" id="roomMonitorMeta">Loading room monitor state...</div>
+            </div>
+            <div class="actions">
+              <button id="captureNowBtn" type="button" class="secondary">Capture now</button>
+              <button id="refreshRoomMonitorBtn" type="button" class="secondary">Refresh</button>
+              <a class="secondary" href="/">Back to control page</a>
+            </div>
+          </div>
+          <div id="roomMonitorStatus" class="muted">Waiting for status...</div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="card stack">
+          <div class="row">
+            <h2 style="margin:0">Captured Images</h2>
+            <span class="muted" id="captureCountText">0 images</span>
+          </div>
+          <div id="roomMonitorGallery" class="list"></div>
+        </div>
+      </section>
+    </main>
+    <script src="/room-monitor.js"></script>
+  </body>
+  </html>

@@ -279,6 +279,8 @@
           <div class="music-track-list" id="musicTrackList"></div>
         </div>
         <div class="workspace-grid">
+          <div class="workspace-column workspace-column-left" id="workspaceLeftColumn"></div>
+          <div class="workspace-column workspace-column-right" id="workspaceRightColumn"></div>
           <div class="card" id="visionCard">
             <div class="title">Vision Test</div>
             <div class="vision-grid">
@@ -403,6 +405,32 @@
                 </label>
                 <div class="field-hint">
                   When enabled, Gemini image edits wait for confirm, add, start over, or cancel before the edit runs.
+                </div>
+              </div>
+
+              <div class="settings-field">
+                <label class="music-shuffle-toggle" for="geminiImagePromptHelperEnabledCheckbox">
+                  <input id="geminiImagePromptHelperEnabledCheckbox" type="checkbox" />
+                  <span>Experimental personality image prompt helper</span>
+                </label>
+                <div class="field-hint">
+                  When enabled, Whisplay rewrites photo-edit requests into one short image prompt using the selected chatbot personality and model before Gemini runs the edit.
+                </div>
+              </div>
+
+              <div class="settings-field">
+                <label class="field-label" for="geminiImagePromptHelperTokenLimitInput">Prompt Helper Token Limit</label>
+                <input
+                  class="settings-input"
+                  id="geminiImagePromptHelperTokenLimitInput"
+                  type="number"
+                  min="32"
+                  max="512"
+                  step="1"
+                  placeholder="120"
+                />
+                <div class="field-hint">
+                  Only used by the experimental image prompt helper. Lower values keep helper replies short and cheap.
                 </div>
               </div>
 
@@ -743,6 +771,28 @@
               </div>
             </div>
           </div>
+          <div class="card" id="generatedGalleryCard">
+            <div class="title">AI / Edited Images</div>
+            <div class="saved-photos-header">
+              <div>
+                <div class="field-label saved-photos-title">Generated Gallery</div>
+                <div class="field-hint saved-photos-subtitle" id="generatedGalleryStatus">Loading AI gallery...</div>
+              </div>
+              <div class="settings-actions" style="margin-top:0;">
+                <button
+                  class="button secondary compact"
+                  id="generatedGalleryToggleBtn"
+                  type="button"
+                >
+                  Open AI Gallery
+                </button>
+              </div>
+            </div>
+            <div class="field-hint" style="margin-bottom:12px;">
+              Gemini-generated and edited images stay in their own gallery so they do not mix with manual captures.
+            </div>
+            <div id="generatedGalleryList" class="saved-photos-grid"></div>
+          </div>
           <div class="card" id="roomMonitorCard">
             <div class="title">Room Monitor</div>
             <div class="saved-photos-header">
@@ -768,27 +818,30 @@
             </div>
             <div id="roomMonitorGalleryList" class="saved-photos-grid"></div>
           </div>
-          <div class="card" id="generatedGalleryCard">
-            <div class="title">AI / Edited Images</div>
+          <div class="card" id="remoteRoomMonitorCard">
+            <div class="title">Remote Room Monitor</div>
             <div class="saved-photos-header">
               <div>
-                <div class="field-label saved-photos-title">Generated Gallery</div>
-                <div class="field-hint saved-photos-subtitle" id="generatedGalleryStatus">Loading AI gallery...</div>
+                <div class="field-label saved-photos-title">GroqBotNet Import</div>
+                <div class="field-hint saved-photos-subtitle" id="remoteRoomMonitorStatus">Loading remote room monitor gallery...</div>
               </div>
               <div class="settings-actions" style="margin-top:0;">
                 <button
                   class="button secondary compact"
-                  id="generatedGalleryToggleBtn"
+                  id="remoteRoomMonitorToggleBtn"
                   type="button"
                 >
-                  Open AI Gallery
+                  Open Remote Gallery
+                </button>
+                <a class="button secondary compact" href="/saved-gallery" target="_blank" rel="noopener">
+                  Open Saved Gallery
                 </button>
               </div>
             </div>
             <div class="field-hint" style="margin-bottom:12px;">
-              Gemini-generated and edited images stay in their own gallery so they do not mix with manual captures.
+              Pull still captures from the saved GroqBotNet peer URL, then move selected photos into this Whisplay saved gallery without keeping duplicates on the remote Pi.
             </div>
-            <div id="generatedGalleryList" class="saved-photos-grid"></div>
+            <div id="remoteRoomMonitorGalleryList" class="saved-photos-grid"></div>
           </div>
         </div>
       </div>

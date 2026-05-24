@@ -89,6 +89,21 @@ button.secondary {
   color: #d9e4ef;
 }
 
+a.secondary,
+.room-monitor-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 10px;
+  background: #273246;
+  color: #d9e4ef;
+  padding: 10px 14px;
+  cursor: pointer;
+  font-weight: 700;
+  text-decoration: none;
+}
+
 .actions {
   display: flex;
   align-items: center;
@@ -134,6 +149,12 @@ button.secondary {
   margin-bottom: 6px;
   font-size: 12px;
   color: #a8b7c8;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
 @media (max-width: 980px) {

@@ -22,7 +22,10 @@ import {
 } from "../../device/audio";
 import { chatWithLLMStream, resetChatHistory } from "../../cloud-api/server";
 import { isImMode } from "../../cloud-api/llm";
-import { streamPlainTextModelResponse } from "../../cloud-api/text-model-router";
+import {
+  createPlainTextModelResponse,
+  streamPlainTextModelResponse,
+} from "../../cloud-api/text-model-router";
 import { getSystemPromptWithKnowledge } from "../Knowledge";
 import { enableRAG } from "../../cloud-api/knowledge";
 import { getSystemPrompt } from "../../config/llm-config";
@@ -392,6 +395,10 @@ function shouldUseImageEditConfirmMode(): boolean {
   return Boolean(getRuntimeSettings().geminiImageEditConfirmMode);
 }
 
+function shouldUseImagePromptHelper(withImageContext: boolean): boolean {
+  return withImageContext && Boolean(getRuntimeSettings().geminiImagePromptHelperEnabled);
+}
+
 function isConfirmableImageEditRequest(prompt: string): boolean {
   return shouldRouteToImageGeneration(prompt) && shouldUseImageContextForGeneration(prompt);
 }
@@ -437,6 +444,54 @@ function buildImageEditConfirmMessage(prompt: string): string {
     `[confirm]Pending edit:\n${formatPendingImageEditPrompt(prompt)}\n\n` +
     "Say confirm, add..., start over..., or cancel."
   );
+}
+
+function extractImagePromptHelperRequest(prompt: string): string {
+  const trimmed = prompt.trim().replace(/\s+/g, " ");
+  const stripped = trimmed
+    .replace(
+      /^(?:edit|restyle|transform|change|make|turn|give|apply)\s+(?:this|the|that|my)?\s*(?:image|photo|picture)\b[:,-]?\s*/i,
+      "",
+    )
+    .replace(/^with\s+/i, "")
+    .trim();
+  return stripped || trimmed;
+}
+
+function normalizeImagePromptHelperOutput(output: string, fallback: string): string {
+  const compact = output
+    .replace(/^["'`]+|["'`]+$/g, "")
+    .replace(/^(?:prompt|image prompt|photo edit prompt)\s*:\s*/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return compact || fallback;
+}
+
+async function buildPersonalityImagePrompt(userPrompt: string): Promise<string> {
+  const runtimeSettings = getRuntimeSettings();
+  const helperRequest = extractImagePromptHelperRequest(userPrompt);
+  const helperPrompt = await createPlainTextModelResponse({
+    model: runtimeSettings.llmModel,
+    maxOutputTokens: runtimeSettings.geminiImagePromptHelperTokenLimit,
+    messages: [
+      {
+        role: "system",
+        content:
+          `${getSystemPrompt()}\n` +
+          "You are an experimental photo-edit prompt helper. " +
+          "Rewrite the user's rough photo-edit request into exactly one short, vivid image-edit prompt. " +
+          "Output only the final prompt with no explanation, no list, no quotes, and no markdown. " +
+          "Keep it concise, concrete, and useful for editing an existing photo. " +
+          "Do not include assistant commentary or command phrases like edit photo, confirm, add to, or start over.",
+      },
+      {
+        role: "user",
+        content:
+          `Rewrite this photo-edit request into one concise prompt for an existing image:\n${helperRequest}`,
+      },
+    ],
+  });
+  return normalizeImagePromptHelperOutput(helperPrompt, helperRequest);
 }
 
 function stopCameraCaptureCue(resetToDefault = true): void {
@@ -2254,6 +2309,45 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
           typeof llmFuncMap.generateImage === "function"
         ) {
           const withImageContext = shouldUseImageContextForGeneration(ctx.asrText);
+          if (shouldUseImagePromptHelper(withImageContext)) {
+            const currentImagePath = getLatestShowedImage();
+            if (currentImagePath) {
+              display({
+                status: "photo edit",
+                emoji: STATE_EMOJIS.answering,
+                RGB: "#8a4dff",
+                image_icon_visible: false,
+                text: "[promptHelper]Refining your photo edit prompt...",
+              });
+              void runReplyFlow(async () => {
+                try {
+                  const helperPrompt = await buildPersonalityImagePrompt(ctx.asrText);
+                  if (currentAnswerId !== ctx.answerId) {
+                    return;
+                  }
+                  if (shouldUseImageEditConfirmMode()) {
+                    setPendingImageEditConfirmation(helperPrompt, currentImagePath);
+                    transitionToPromptStage(
+                      buildImageEditConfirmMessage(helperPrompt),
+                    );
+                    return;
+                  }
+                  clearPendingImageEditConfirmation();
+                  runImageGenerationRequest(helperPrompt, true, currentImagePath);
+                } catch (error) {
+                  console.error("Image prompt helper failed:", error);
+                  if (currentAnswerId !== ctx.answerId) {
+                    return;
+                  }
+                  transitionDirectlyToImage(
+                    "Prompt helper failed, so I did not run the edit.",
+                    currentImagePath,
+                  );
+                }
+              });
+              return;
+            }
+          }
           if (shouldUseImageEditConfirmMode() && withImageContext) {
             const currentImagePath = getLatestShowedImage();
             if (currentImagePath) {

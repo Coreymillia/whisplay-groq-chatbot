@@ -426,6 +426,13 @@ body::before {
   align-items: start;
 }
 
+.workspace-column {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
 .title {
   font-size: 12px;
   letter-spacing: 0.08em;
@@ -883,9 +890,12 @@ body::before {
   }
 
   .utility-grid,
-  .workspace-grid,
   .vision-grid,
   .settings-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .workspace-grid {
     grid-template-columns: 1fr;
   }
 

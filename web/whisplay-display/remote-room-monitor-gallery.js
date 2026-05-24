@@ -1,5 +1,3 @@
-const mode = document.body.dataset.galleryView || "monitor";
-
 const dayList = document.getElementById("galleryDayList");
 const dayTitle = document.getElementById("galleryDayTitle");
 const pageStatus = document.getElementById("galleryStatus");
@@ -20,13 +18,13 @@ const viewerCloseBtn = document.getElementById("galleryViewerCloseBtn");
 const viewerPrevBtn = document.getElementById("galleryViewerPrevBtn");
 const viewerNextBtn = document.getElementById("galleryViewerNextBtn");
 
-let roomMonitorDays = [];
+let remoteDays = [];
 let activeDayKey = "";
 let activeDayPhotos = [];
 let selectedFileNames = new Set();
-let savedPhotos = [];
 let viewerIndex = 0;
 let slideshowTimer = null;
+let latestStatus = null;
 
 function setStatus(message, isError = false) {
   if (!pageStatus) return;
@@ -37,7 +35,7 @@ function setStatus(message, isError = false) {
 async function fetchJson(url, options) {
   const response = await fetch(url, options);
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) {
+  if (!response.ok || data?.ok === false) {
     throw new Error(data?.error || `Request failed: ${response.status}`);
   }
   return data;
@@ -65,26 +63,15 @@ function stopSlideshow() {
 }
 
 function showViewerPhoto(index) {
-  if (!savedPhotos.length || !viewerImage || !viewerCaption || !viewer) {
+  if (!activeDayPhotos.length || !viewerImage || !viewerCaption || !viewer) {
     return;
   }
-  viewerIndex = (index + savedPhotos.length) % savedPhotos.length;
-  const photo = savedPhotos[viewerIndex];
+  viewerIndex = (index + activeDayPhotos.length) % activeDayPhotos.length;
+  const photo = activeDayPhotos[viewerIndex];
   viewerImage.src = `${photo.imageUrl}?ts=${photo.updatedAt}`;
   viewerImage.alt = photo.fileName;
   viewerCaption.textContent = `${photo.fileName} · ${new Date(photo.updatedAt).toLocaleString()} · ${formatBytes(photo.sizeBytes)}`;
   viewer.classList.add("open");
-}
-
-function startSlideshow() {
-  stopSlideshow();
-  const seconds = Number(slideshowInterval?.value || 1);
-  slideshowTimer = window.setInterval(() => {
-    showViewerPhoto(viewerIndex + 1);
-  }, Math.max(0.5, seconds) * 1000);
-  if (slideshowToggleBtn) {
-    slideshowToggleBtn.textContent = "Stop Slideshow";
-  }
 }
 
 function toggleSlideshow() {
@@ -92,17 +79,23 @@ function toggleSlideshow() {
     stopSlideshow();
     return;
   }
-  startSlideshow();
+  const seconds = Math.max(0.5, Number(slideshowInterval?.value || 1));
+  slideshowTimer = window.setInterval(() => {
+    showViewerPhoto(viewerIndex + 1);
+  }, seconds * 1000);
+  if (slideshowToggleBtn) {
+    slideshowToggleBtn.textContent = "Stop Slideshow";
+  }
 }
 
 function renderDayList() {
   if (!dayList) return;
   dayList.innerHTML = "";
-  if (!roomMonitorDays.length) {
-    dayList.innerHTML = '<div class="gallery-empty">No daily room monitor folders yet.</div>';
+  if (!remoteDays.length) {
+    dayList.innerHTML = '<div class="gallery-empty">No remote day folders yet.</div>';
     return;
   }
-  roomMonitorDays.forEach((day) => {
+  remoteDays.forEach((day) => {
     const item = document.createElement("button");
     item.type = "button";
     item.className = `gallery-day-item${day.dayKey === activeDayKey ? " active" : ""}`;
@@ -134,10 +127,10 @@ function updateSelectionButtons() {
   if (deleteSelectedBtn) {
     deleteSelectedBtn.disabled = selectedCount === 0;
     deleteSelectedBtn.textContent =
-      selectedCount === 0 ? "Delete Selected" : `Delete Selected (${selectedCount})`;
+      selectedCount === 0 ? "Delete Selected Remote" : `Delete Selected Remote (${selectedCount})`;
   }
   if (deleteDayBtn) {
-    deleteDayBtn.disabled = mode !== "monitor" || activeDayPhotos.length === 0;
+    deleteDayBtn.disabled = activeDayPhotos.length === 0;
   }
   if (moveSelectedBtn) {
     moveSelectedBtn.disabled = selectedCount === 0;
@@ -148,30 +141,35 @@ function updateSelectionButtons() {
     clearSelectionBtn.disabled = selectedCount === 0;
   }
   if (selectAllBtn) {
-    selectAllBtn.disabled = mode !== "monitor" || activeDayPhotos.length === 0;
+    selectAllBtn.disabled = activeDayPhotos.length === 0;
   }
 }
 
-function renderMonitorPhotos() {
+function renderPhotos() {
   if (!photoGrid) return;
   photoGrid.innerHTML = "";
   if (dayTitle) {
     dayTitle.textContent = activeDayKey
-      ? roomMonitorDays.find((day) => day.dayKey === activeDayKey)?.label || "Room Monitor Day"
-      : "Room Monitor Day";
+      ? remoteDays.find((day) => day.dayKey === activeDayKey)?.label || "Remote Room Monitor Day"
+      : "Remote Room Monitor Day";
   }
   if (!activeDayPhotos.length) {
-    photoGrid.innerHTML = '<div class="gallery-empty">Select a day folder to browse its captures.</div>';
+    photoGrid.innerHTML = '<div class="gallery-empty">Select a day folder to browse its remote captures.</div>';
     updateSelectionButtons();
     return;
   }
-  activeDayPhotos.forEach((photo) => {
+
+  activeDayPhotos.forEach((photo, index) => {
     const card = document.createElement("div");
     card.className = "gallery-photo-card";
 
     const img = document.createElement("img");
     img.src = `${photo.imageUrl}?ts=${photo.updatedAt}`;
     img.alt = photo.fileName;
+    img.style.cursor = "pointer";
+    img.addEventListener("click", () => {
+      showViewerPhoto(index);
+    });
 
     const name = document.createElement("div");
     name.className = "gallery-photo-name";
@@ -233,114 +231,64 @@ function renderMonitorPhotos() {
   updateSelectionButtons();
 }
 
-function renderSavedPhotos() {
-  if (!photoGrid) return;
-  photoGrid.innerHTML = "";
-  if (dayTitle) {
-    dayTitle.textContent = "Saved Gallery";
-  }
-  if (!savedPhotos.length) {
-    photoGrid.innerHTML = '<div class="gallery-empty">No saved gallery photos yet.</div>';
-    return;
-  }
-  savedPhotos.forEach((photo, index) => {
-    const card = document.createElement("div");
-    card.className = "gallery-photo-card";
-
-    const img = document.createElement("img");
-    img.src = `${photo.imageUrl}?ts=${photo.updatedAt}`;
-    img.alt = photo.fileName;
-    img.style.cursor = "pointer";
-    img.addEventListener("click", () => {
-      showViewerPhoto(index);
-    });
-
-    const name = document.createElement("div");
-    name.className = "gallery-photo-name";
-    name.textContent = photo.fileName;
-
-    const meta = document.createElement("div");
-    meta.className = "gallery-meta";
-    meta.textContent = `${new Date(photo.updatedAt).toLocaleString()} · ${formatBytes(photo.sizeBytes)}`;
-
-    const actions = document.createElement("div");
-    actions.className = "gallery-photo-actions";
-
-    const openBtn = document.createElement("button");
-    openBtn.type = "button";
-    openBtn.className = "gallery-button";
-    openBtn.textContent = "View Fullscreen";
-    openBtn.addEventListener("click", () => {
-      showViewerPhoto(index);
-    });
-
-    const downloadLink = document.createElement("a");
-    downloadLink.className = "gallery-link secondary";
-    downloadLink.href = photo.imageUrl;
-    downloadLink.download = photo.fileName;
-    downloadLink.textContent = "Download";
-
-    const deleteBtn = document.createElement("button");
-    deleteBtn.type = "button";
-    deleteBtn.className = "gallery-button secondary";
-    deleteBtn.textContent = "Delete";
-    deleteBtn.addEventListener("click", () => {
-      void deleteSavedPhoto(photo.fileName);
-    });
-
-    actions.appendChild(openBtn);
-    actions.appendChild(downloadLink);
-    actions.appendChild(deleteBtn);
-    card.appendChild(img);
-    card.appendChild(name);
-    card.appendChild(meta);
-    card.appendChild(actions);
-    photoGrid.appendChild(card);
-  });
-}
-
 async function loadDayPhotos(dayKey) {
   activeDayKey = dayKey;
   selectedFileNames.clear();
   renderDayList();
   updateSelectionButtons();
-  setStatus("Loading day folder...");
-  const payload = await fetchJson(`/api/room-monitor/gallery/day/${encodeURIComponent(dayKey)}?ts=${Date.now()}`, {
+  setStatus("Loading remote day folder...");
+  const payload = await fetchJson(`/api/remote-room-monitor/gallery/day/${encodeURIComponent(dayKey)}?ts=${Date.now()}`, {
     cache: "no-store",
   });
+  latestStatus = payload.status || latestStatus;
   activeDayPhotos = Array.isArray(payload.photos) ? payload.photos : [];
-  renderMonitorPhotos();
+  renderPhotos();
   setStatus(
     activeDayPhotos.length
-      ? `Loaded ${activeDayPhotos.length} photo${activeDayPhotos.length === 1 ? "" : "s"} for ${dayKey}.`
-      : `No photos found for ${dayKey}.`,
+      ? `Loaded ${activeDayPhotos.length} remote photo${activeDayPhotos.length === 1 ? "" : "s"} for ${dayKey}.`
+      : `No remote photos found for ${dayKey}.`,
   );
 }
 
-async function loadMonitorGallery() {
-  setStatus("Loading room monitor folders...");
-  const payload = await fetchJson(`/api/room-monitor/gallery/days?ts=${Date.now()}`, {
-    cache: "no-store",
-  });
-  roomMonitorDays = Array.isArray(payload.days) ? payload.days : [];
-  renderDayList();
-  if (pageMeta && payload.status) {
-    pageMeta.textContent = `${payload.status.totalCount || 0} capture${payload.status.totalCount === 1 ? "" : "s"} across ${payload.status.dayCount || roomMonitorDays.length} day folder${(payload.status.dayCount || roomMonitorDays.length) === 1 ? "" : "s"} · ${payload.status.savedCount || 0} saved`;
-  }
-  if (savedCountText && payload.status) {
-    savedCountText.textContent = `${payload.status.savedCount || 0} saved`;
-  }
-  if (!activeDayKey && roomMonitorDays.length) {
-    await loadDayPhotos(roomMonitorDays[0].dayKey);
+function updateMeta(status) {
+  latestStatus = status || latestStatus;
+  if (!pageMeta || !latestStatus) {
     return;
   }
-  if (activeDayKey && roomMonitorDays.some((day) => day.dayKey === activeDayKey)) {
+  const peerLabel = latestStatus.peerUrl || "GroqBotNet peer";
+  const summary = [
+    peerLabel,
+    `${latestStatus.totalCount || 0} capture${latestStatus.totalCount === 1 ? "" : "s"}`,
+    `${latestStatus.dayCount || remoteDays.length} day folder${(latestStatus.dayCount || remoteDays.length) === 1 ? "" : "s"}`,
+    `${latestStatus.savedCount || 0} saved here`,
+    latestStatus.freeSpaceBytes ? `Remote free ${formatBytes(latestStatus.freeSpaceBytes)}` : null,
+    latestStatus.freeSpaceReserveBytes ? `Remote reserve ${formatBytes(latestStatus.freeSpaceReserveBytes)}` : null,
+  ].filter(Boolean);
+  pageMeta.textContent = summary.join(" · ");
+  if (savedCountText) {
+    savedCountText.textContent = `${latestStatus.savedCount || 0} saved`;
+  }
+}
+
+async function loadRemoteGallery() {
+  setStatus("Loading remote room monitor folders...");
+  const payload = await fetchJson(`/api/remote-room-monitor/gallery/days?ts=${Date.now()}`, {
+    cache: "no-store",
+  });
+  remoteDays = Array.isArray(payload.days) ? payload.days : [];
+  updateMeta(payload.status || null);
+  renderDayList();
+  if (!activeDayKey && remoteDays.length) {
+    await loadDayPhotos(remoteDays[0].dayKey);
+    return;
+  }
+  if (activeDayKey && remoteDays.some((day) => day.dayKey === activeDayKey)) {
     await loadDayPhotos(activeDayKey);
     return;
   }
   activeDayPhotos = [];
-  renderMonitorPhotos();
-  setStatus(roomMonitorDays.length ? "Choose a day folder." : "No room monitor folders yet.");
+  renderPhotos();
+  setStatus(remoteDays.length ? "Choose a remote day folder." : "No remote room monitor folders yet.");
 }
 
 async function moveSelectedPhotos(fileNames) {
@@ -349,22 +297,19 @@ async function moveSelectedPhotos(fileNames) {
     setStatus("Select at least one photo first.", true);
     return;
   }
-  setStatus(`Moving ${uniqueNames.length} photo${uniqueNames.length === 1 ? "" : "s"} to Saved Gallery...`);
-  const payload = await fetchJson("/api/room-monitor/gallery/move", {
+  setStatus(`Moving ${uniqueNames.length} remote photo${uniqueNames.length === 1 ? "" : "s"} to Saved Gallery...`);
+  const payload = await fetchJson("/api/remote-room-monitor/gallery/move", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ fileNames: uniqueNames }),
   });
   uniqueNames.forEach((fileName) => selectedFileNames.delete(fileName));
-  if (savedCountText) {
-    savedCountText.textContent = `${payload.savedCount || 0} saved`;
-  }
-  await loadMonitorGallery();
+  updateMeta(payload.status || null);
+  await loadRemoteGallery();
   setStatus(
     payload.moved?.length
-      ? `Moved ${payload.moved.length} photo${payload.moved.length === 1 ? "" : "s"} to Saved Gallery.`
-      : "No photos were moved.",
-    false,
+      ? `Moved ${payload.moved.length} remote photo${payload.moved.length === 1 ? "" : "s"} into Saved Gallery.${payload.skipped?.length ? ` Skipped ${payload.skipped.length}.` : ""}`
+      : "No remote photos were moved.",
   );
 }
 
@@ -374,94 +319,57 @@ async function deleteSelectedPhotos(fileNames) {
     setStatus("Select at least one photo first.", true);
     return;
   }
-  if (!window.confirm(`Delete ${uniqueNames.length} selected room monitor photo${uniqueNames.length === 1 ? "" : "s"}?`)) {
+  if (!window.confirm(`Delete ${uniqueNames.length} selected remote room monitor photo${uniqueNames.length === 1 ? "" : "s"}?`)) {
     return;
   }
-  setStatus(`Deleting ${uniqueNames.length} selected photo${uniqueNames.length === 1 ? "" : "s"}...`);
-  const payload = await fetchJson("/api/room-monitor/gallery", {
+  setStatus(`Deleting ${uniqueNames.length} selected remote photo${uniqueNames.length === 1 ? "" : "s"}...`);
+  const payload = await fetchJson("/api/remote-room-monitor/gallery", {
     method: "DELETE",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ fileNames: uniqueNames }),
   });
   uniqueNames.forEach((fileName) => selectedFileNames.delete(fileName));
-  if (savedCountText) {
-    savedCountText.textContent = `${payload.savedCount || 0} saved`;
-  }
-  await loadMonitorGallery();
+  updateMeta(payload.status || null);
+  await loadRemoteGallery();
   setStatus(
-    payload.deleted
-      ? `Deleted ${payload.deleted} room monitor photo${payload.deleted === 1 ? "" : "s"}.`
-      : "No photos were deleted.",
+    payload.deleted?.length
+      ? `Deleted ${payload.deleted.length} remote photo${payload.deleted.length === 1 ? "" : "s"}.${payload.skipped?.length ? ` Skipped ${payload.skipped.length}.` : ""}`
+      : "No remote photos were deleted.",
   );
 }
 
 async function deleteCurrentDay() {
   if (!activeDayKey) {
-    setStatus("Choose a day folder first.", true);
+    setStatus("Choose a remote day folder first.", true);
     return;
   }
-  const activeDayLabel = roomMonitorDays.find((day) => day.dayKey === activeDayKey)?.label || activeDayKey;
-  if (!window.confirm(`Delete all room monitor photos from ${activeDayLabel}?`)) {
+  const activeDayLabel = remoteDays.find((day) => day.dayKey === activeDayKey)?.label || activeDayKey;
+  if (!window.confirm(`Delete all remote room monitor photos from ${activeDayLabel}?`)) {
     return;
   }
-  setStatus(`Deleting all photos from ${activeDayLabel}...`);
-  const payload = await fetchJson(`/api/room-monitor/gallery/day/${encodeURIComponent(activeDayKey)}`, {
+  setStatus(`Deleting all remote photos from ${activeDayLabel}...`);
+  const payload = await fetchJson(`/api/remote-room-monitor/gallery/day/${encodeURIComponent(activeDayKey)}`, {
     method: "DELETE",
   });
   selectedFileNames.clear();
   activeDayKey = "";
-  if (savedCountText) {
-    savedCountText.textContent = `${payload.savedCount || 0} saved`;
-  }
-  await loadMonitorGallery();
-  setStatus(
-    payload.deleted
-      ? `Deleted ${payload.deleted} room monitor photo${payload.deleted === 1 ? "" : "s"} from ${activeDayLabel}.`
-      : `No photos were deleted from ${activeDayLabel}.`,
-  );
-}
-
-async function loadSavedGallery() {
-  setStatus("Loading saved gallery...");
-  const payload = await fetchJson(`/api/room-monitor/saved?ts=${Date.now()}`, {
-    cache: "no-store",
-  });
-  savedPhotos = Array.isArray(payload.photos) ? payload.photos : [];
-  renderSavedPhotos();
-  if (pageMeta) {
-    pageMeta.textContent = `${savedPhotos.length} saved photo${savedPhotos.length === 1 ? "" : "s"} ready for fullscreen viewing and slideshow.`;
-  }
-  setStatus(savedPhotos.length ? "Saved gallery loaded." : "No saved gallery photos yet.");
-}
-
-async function deleteSavedPhoto(fileName) {
-  if (!window.confirm(`Delete ${fileName} from Saved Gallery?`)) {
-    return;
-  }
-  const payload = await fetchJson("/api/room-monitor/saved", {
-    method: "DELETE",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ fileNames: [fileName] }),
-  });
-  if (savedCountText && payload.status) {
-    savedCountText.textContent = `${payload.status.savedCount || 0} saved`;
-  }
-  await loadSavedGallery();
+  updateMeta(payload.status || null);
+  await loadRemoteGallery();
   setStatus(
     payload.deleted?.length
-      ? `Deleted ${payload.deleted.length} saved photo${payload.deleted.length === 1 ? "" : "s"}.`
-      : "No saved photos were deleted.",
+      ? `Deleted ${payload.deleted.length} remote photo${payload.deleted.length === 1 ? "" : "s"} from ${activeDayLabel}.${payload.skipped?.length ? ` Skipped ${payload.skipped.length}.` : ""}`
+      : `No remote photos were deleted from ${activeDayLabel}.`,
   );
 }
 
 selectAllBtn?.addEventListener("click", () => {
   activeDayPhotos.forEach((photo) => selectedFileNames.add(photo.fileName));
-  renderMonitorPhotos();
+  renderPhotos();
 });
 
 clearSelectionBtn?.addEventListener("click", () => {
   selectedFileNames.clear();
-  renderMonitorPhotos();
+  renderPhotos();
 });
 
 moveSelectedBtn?.addEventListener("click", () => {
@@ -506,18 +414,6 @@ viewer?.addEventListener("click", (event) => {
   }
 });
 
-if (mode === "saved") {
-  if (selectAllBtn) selectAllBtn.style.display = "none";
-  if (clearSelectionBtn) clearSelectionBtn.style.display = "none";
-  if (deleteDayBtn) deleteDayBtn.style.display = "none";
-  if (deleteSelectedBtn) deleteSelectedBtn.style.display = "none";
-  if (moveSelectedBtn) moveSelectedBtn.style.display = "none";
-  if (savedCountText) savedCountText.style.display = "none";
-  void loadSavedGallery().catch((error) => {
-    setStatus(error instanceof Error ? error.message : "Failed to load saved gallery.", true);
-  });
-} else {
-  void loadMonitorGallery().catch((error) => {
-    setStatus(error instanceof Error ? error.message : "Failed to load room monitor gallery.", true);
-  });
-}
+void loadRemoteGallery().catch((error) => {
+  setStatus(error instanceof Error ? error.message : "Failed to load remote room monitor gallery.", true);
+});

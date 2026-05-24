@@ -29,6 +29,13 @@ const connectHubBtn = document.getElementById("connectHubBtn");
 const createInviteBtn = document.getElementById("createInviteBtn");
 const redeemInviteBtn = document.getElementById("redeemInviteBtn");
 const disconnectHubBtn = document.getElementById("disconnectHubBtn");
+const roomMonitorIntervalSec = document.getElementById("roomMonitorIntervalSec");
+const roomMonitorStartTime = document.getElementById("roomMonitorStartTime");
+const roomMonitorStopTime = document.getElementById("roomMonitorStopTime");
+const roomMonitorFreeReserveGb = document.getElementById("roomMonitorFreeReserveGb");
+const roomMonitorStatus = document.getElementById("roomMonitorStatus");
+const roomMonitorCaptureBtn = document.getElementById("roomMonitorCaptureBtn");
+const clearChatsBtn = document.getElementById("clearChatsBtn");
 
 let activeSoloConversationId = null;
 let currentOnline = null;
@@ -109,6 +116,18 @@ function fillSettings(settings, online, statsPayload) {
   document.getElementById("replyDelaySec").value = settings.replyDelaySec ?? 6;
   document.getElementById("maxBotReplies").value = settings.maxBotReplies ?? 8;
   document.getElementById("maxRequestsPerHour").value = settings.maxRequestsPerHour ?? 30;
+  if (roomMonitorIntervalSec) {
+    roomMonitorIntervalSec.value = settings.roomMonitorIntervalSec ?? 0;
+  }
+  if (roomMonitorStartTime) {
+    roomMonitorStartTime.value = settings.roomMonitorStartTime || "";
+  }
+  if (roomMonitorStopTime) {
+    roomMonitorStopTime.value = settings.roomMonitorStopTime || "";
+  }
+  if (roomMonitorFreeReserveGb) {
+    roomMonitorFreeReserveGb.value = String(settings.roomMonitorFreeReserveGb ?? 8);
+  }
   currentOnline = online || null;
 
   const transportSummary =
@@ -122,6 +141,48 @@ function fillSettings(settings, online, statsPayload) {
   const errorSummary = online?.lastError ? ` | hub: ${online.lastError}` : "";
   stats.textContent =
     `Mode: ${settings.botnetMode || "persona-relay"} | Transport: ${transportSummary}${linkSummary} | Groq key: ${settings.groqApiKeyConfigured ? "stored" : "missing"} | Requests used this hour: ${statsPayload.requestsUsedThisHour}${errorSummary}`;
+}
+
+function formatTimestamp(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "" : date.toLocaleString();
+}
+
+function renderRoomMonitor(roomMonitor) {
+  if (!roomMonitorStatus) {
+    return;
+  }
+
+  const statusBits = [
+    roomMonitor?.enabled
+      ? `Running every ${roomMonitor.intervalSec}s`
+      : "Disabled",
+    roomMonitor?.startTime && roomMonitor?.stopTime
+      ? `window: ${roomMonitor.startTime}-${roomMonitor.stopTime}`
+      : "window: all day",
+    Number.isFinite(roomMonitor?.freeReserveGb)
+      ? `reserve: ${roomMonitor.freeReserveGb} GB`
+      : null,
+    Number.isFinite(roomMonitor?.freeSpaceBytes)
+      ? `free: ${Math.max(0, Math.round(roomMonitor.freeSpaceBytes / (1024 * 1024 * 1024) * 10) / 10)} GB`
+      : null,
+    typeof roomMonitor?.activeNow === "boolean"
+      ? roomMonitor.activeNow
+        ? "active now"
+        : "outside active hours"
+      : null,
+    roomMonitor?.captureInProgress ? "capturing now" : null,
+    roomMonitor?.detectedCamera ? `camera: ${roomMonitor.detectedCamera}` : null,
+    roomMonitor?.cameraCommand ? `tool: ${roomMonitor.cameraCommand}` : null,
+    Number.isFinite(roomMonitor?.totalCount) ? `images: ${roomMonitor.totalCount}` : null,
+    roomMonitor?.lastCaptureAt
+      ? `last capture: ${formatTimestamp(roomMonitor.lastCaptureAt)}`
+      : null,
+    roomMonitor?.lastError ? `error: ${roomMonitor.lastError}` : null,
+  ].filter(Boolean);
+
+  roomMonitorStatus.textContent = statusBits.join(" | ") || "Room monitor is idle.";
 }
 
 function renderConversations(conversations) {
@@ -193,6 +254,7 @@ async function loadState() {
     throw new Error(payload.error || `HTTP ${response.status}`);
   }
   fillSettings(payload.settings, payload.online, payload.stats);
+  renderRoomMonitor(payload.roomMonitor || {});
   renderConversations(payload.conversations || []);
 }
 
@@ -411,6 +473,46 @@ redeemInviteBtn?.addEventListener("click", async () => {
 
 disconnectHubBtn?.addEventListener("click", async () => {
   await postAction("/api/botnet/disconnect", {}, settingsStatus, "Hub disconnected.");
+});
+
+roomMonitorCaptureBtn?.addEventListener("click", async () => {
+  setStatus(roomMonitorStatus, "Capturing...");
+  try {
+    await saveSettingsFromForm();
+    const response = await fetch("/api/room-monitor/capture", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    const payload = await response.json();
+    if (!response.ok || payload.ok === false) {
+      throw new Error(payload.error || `HTTP ${response.status}`);
+    }
+    renderRoomMonitor(payload.roomMonitor || {});
+    await loadState();
+  } catch (error) {
+    setStatus(roomMonitorStatus, error.message || String(error), true);
+  }
+});
+
+clearChatsBtn?.addEventListener("click", async () => {
+  setStatus(settingsStatus, "Clearing chat...");
+  try {
+    const response = await fetch("/api/conversations/clear", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    const payload = await response.json();
+    if (!response.ok || payload.ok === false) {
+      throw new Error(payload.error || `HTTP ${response.status}`);
+    }
+    activeSoloConversationId = null;
+    setStatus(settingsStatus, "Chat cleared.");
+    await loadState();
+  } catch (error) {
+    setStatus(settingsStatus, error.message || String(error), true);
+  }
 });
 
 loadState().catch((error) => {

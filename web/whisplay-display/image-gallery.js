@@ -24,10 +24,13 @@
   const dayApi = root.dataset.galleryDayApi || "";
   const deleteApi = root.dataset.galleryDeleteApi || "";
   const deleteDayApi = root.dataset.galleryDeleteDayApi || "";
+  const selectApi = root.dataset.gallerySelectApi || "";
+  const galleryKind = root.dataset.galleryKind || "gallery";
 
   let dayGroups = [];
   let activeDayKey = "";
   let activePhotos = [];
+  let selectedFileName = "";
   let selectedFiles = new Set();
   let viewerIndex = -1;
   let slideshowTimer = null;
@@ -157,6 +160,20 @@
       openBtn.textContent = "Open";
       openBtn.addEventListener("click", () => openViewer(index));
 
+      const selectBtn = document.createElement("button");
+      selectBtn.type = "button";
+      selectBtn.className = "gallery-button";
+      selectBtn.textContent =
+        photo.fileName === selectedFileName
+          ? "Selected for Editing"
+          : "Select for Editing";
+      selectBtn.disabled = !selectApi || photo.fileName === selectedFileName;
+      selectBtn.addEventListener("click", () => {
+        selectPhoto(photo.fileName).catch((error) => {
+          setStatus(error instanceof Error ? error.message : String(error), true);
+        });
+      });
+
       const downloadLink = document.createElement("a");
       downloadLink.className = "gallery-link";
       downloadLink.textContent = "Download";
@@ -164,6 +181,7 @@
       downloadLink.download = photo.fileName;
 
       actionRow.appendChild(openBtn);
+      actionRow.appendChild(selectBtn);
       actionRow.appendChild(downloadLink);
 
       const selectionRow = document.createElement("div");
@@ -206,6 +224,7 @@
       throw new Error(payload.error || `HTTP ${response.status}`);
     }
     activePhotos = Array.isArray(payload.photos) ? payload.photos : [];
+    selectedFileName = payload.selectedFileName || "";
     renderPhotos();
     setStatus(`${activePhotos.length} photo${activePhotos.length === 1 ? "" : "s"} on ${dayGroups.find((day) => day.dayKey === dayKey)?.label || dayKey}.`);
   }
@@ -274,6 +293,24 @@
     activeDayKey = "";
     await loadDays();
     setStatus(`Deleted ${payload.deleted || 0} photo${payload.deleted === 1 ? "" : "s"} from ${activeDay?.label || "the selected day"}.`);
+  }
+
+  async function selectPhoto(fileName) {
+    if (!selectApi) {
+      return;
+    }
+    const response = await fetch(selectApi, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fileName }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || payload.ok === false) {
+      throw new Error(payload.error || `HTTP ${response.status}`);
+    }
+    selectedFileName = payload.selectedFileName || fileName;
+    renderPhotos();
+    setStatus(`Selected ${selectedFileName} for ${galleryKind} editing.`);
   }
 
   selectAllBtn?.addEventListener("click", () => {

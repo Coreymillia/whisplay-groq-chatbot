@@ -78,6 +78,8 @@ export interface RuntimeSettings {
   geminiImageModel: GeminiImageModel;
   geminiImagePreset: GeminiImagePresetId;
   geminiImageEditConfirmMode: boolean;
+  geminiImagePromptHelperEnabled: boolean;
+  geminiImagePromptHelperTokenLimit: number;
   geminiLowTierImageBalanceUsd: number;
   geminiLowTierAutoReloadEnabled: boolean;
   geminiLowTierAutoReloadThresholdUsd: number;
@@ -118,6 +120,8 @@ export interface RuntimeSettingsUpdate {
   geminiImageModel?: string;
   geminiImagePreset?: string;
   geminiImageEditConfirmMode?: boolean;
+  geminiImagePromptHelperEnabled?: boolean;
+  geminiImagePromptHelperTokenLimit?: number;
   geminiLowTierImageBalanceUsd?: number;
   geminiLowTierAutoReloadEnabled?: boolean;
   geminiLowTierAutoReloadThresholdUsd?: number;
@@ -161,6 +165,8 @@ const DEFAULT_VOICE_MODE: VoiceMode = "text-only";
 const DEFAULT_GEMINI_IMAGE_MODEL: GeminiImageModel = "gemini-2.5-flash-image";
 const DEFAULT_GEMINI_IMAGE_PRESET: GeminiImagePresetId = "none";
 const DEFAULT_GEMINI_IMAGE_EDIT_CONFIRM_MODE = false;
+const DEFAULT_GEMINI_IMAGE_PROMPT_HELPER_ENABLED = false;
+const DEFAULT_GEMINI_IMAGE_PROMPT_HELPER_TOKEN_LIMIT = 120;
 export const GEMINI_LOW_TIER_IMAGE_COST_USD = 0.04;
 const DEFAULT_GEMINI_LOW_TIER_IMAGE_BALANCE_USD = 0;
 const DEFAULT_GEMINI_LOW_TIER_AUTO_RELOAD_ENABLED = false;
@@ -521,6 +527,14 @@ function normalizeGeminiImageModel(value: unknown): GeminiImageModel {
   return DEFAULT_GEMINI_IMAGE_MODEL;
 }
 
+function normalizeGeminiImagePromptHelperTokenLimit(value: unknown): number {
+  const numeric = typeof value === "number" ? value : parseInt(String(value), 10);
+  if (!Number.isFinite(numeric)) {
+    return DEFAULT_GEMINI_IMAGE_PROMPT_HELPER_TOKEN_LIMIT;
+  }
+  return Math.max(32, Math.min(512, Math.round(numeric)));
+}
+
 function normalizeScreensaverMode(value: unknown): ScreensaverMode {
   if (
     typeof value === "string" &&
@@ -612,6 +626,13 @@ function sanitizeSettings(input: Partial<RuntimeSettings> | null | undefined): R
       typeof input?.geminiImageEditConfirmMode === "boolean"
         ? input.geminiImageEditConfirmMode
         : DEFAULT_GEMINI_IMAGE_EDIT_CONFIRM_MODE,
+    geminiImagePromptHelperEnabled:
+      typeof input?.geminiImagePromptHelperEnabled === "boolean"
+        ? input.geminiImagePromptHelperEnabled
+        : DEFAULT_GEMINI_IMAGE_PROMPT_HELPER_ENABLED,
+    geminiImagePromptHelperTokenLimit: normalizeGeminiImagePromptHelperTokenLimit(
+      input?.geminiImagePromptHelperTokenLimit,
+    ),
     geminiLowTierImageBalanceUsd: normalizeCurrencyValue(
       input?.geminiLowTierImageBalanceUsd,
       DEFAULT_GEMINI_LOW_TIER_IMAGE_BALANCE_USD,
@@ -729,6 +750,16 @@ export function saveRuntimeSettings(
 
   if (typeof update.geminiImageEditConfirmMode === "boolean") {
     next.geminiImageEditConfirmMode = update.geminiImageEditConfirmMode;
+  }
+
+  if (typeof update.geminiImagePromptHelperEnabled === "boolean") {
+    next.geminiImagePromptHelperEnabled = update.geminiImagePromptHelperEnabled;
+  }
+
+  if (typeof update.geminiImagePromptHelperTokenLimit === "number") {
+    next.geminiImagePromptHelperTokenLimit = normalizeGeminiImagePromptHelperTokenLimit(
+      update.geminiImagePromptHelperTokenLimit,
+    );
   }
 
   if (typeof update.geminiLowTierImageBalanceUsd === "number") {
@@ -1094,6 +1125,8 @@ export function getPublicRuntimeSettings(): {
   geminiImageModel: GeminiImageModel;
   geminiImagePreset: GeminiImagePresetId;
   geminiImageEditConfirmMode: boolean;
+  geminiImagePromptHelperEnabled: boolean;
+  geminiImagePromptHelperTokenLimit: number;
   geminiLowTierImageBalanceUsd: number;
   geminiLowTierAutoReloadEnabled: boolean;
   geminiLowTierAutoReloadThresholdUsd: number;
@@ -1133,6 +1166,11 @@ export function getPublicRuntimeSettings(): {
     geminiImageModel: settings.geminiImageModel,
     geminiImagePreset: settings.geminiImagePreset || DEFAULT_GEMINI_IMAGE_PRESET,
     geminiImageEditConfirmMode: Boolean(settings.geminiImageEditConfirmMode),
+    geminiImagePromptHelperEnabled: Boolean(
+      settings.geminiImagePromptHelperEnabled,
+    ),
+    geminiImagePromptHelperTokenLimit:
+      settings.geminiImagePromptHelperTokenLimit,
     geminiLowTierImageBalanceUsd: settings.geminiLowTierImageBalanceUsd,
     geminiLowTierAutoReloadEnabled: settings.geminiLowTierAutoReloadEnabled,
     geminiLowTierAutoReloadThresholdUsd: settings.geminiLowTierAutoReloadThresholdUsd,

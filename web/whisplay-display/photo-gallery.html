@@ -14,11 +14,13 @@
 </head>
 <body
   data-gallery-title="Manual Photo Gallery"
-  data-gallery-subtitle="Browse manual captures by day, download them, delete selected photos, or clear the current day."
+  data-gallery-subtitle="Browse manual captures by day, select the active edit photo, download them, delete selected photos, or clear the current day."
   data-gallery-days-api="/api/photos/gallery/days"
   data-gallery-day-api="/api/photos/gallery/day/"
   data-gallery-delete-api="/api/photos/gallery"
   data-gallery-delete-day-api="/api/photos/gallery/day/"
+  data-gallery-select-api="/api/photos/select"
+  data-gallery-kind="manual"
   data-gallery-main-link="/"
 >
   <main class="gallery-shell">
@@ -26,7 +28,7 @@
       <div class="gallery-header">
         <div>
           <div class="gallery-title" id="galleryPageTitle">Manual Photo Gallery</div>
-          <div class="gallery-subtitle" id="galleryPageSubtitle">Browse manual captures by day, download them, delete selected photos, or clear the current day.</div>
+          <div class="gallery-subtitle" id="galleryPageSubtitle">Browse manual captures by day, select the active edit photo, download them, delete selected photos, or clear the current day.</div>
         </div>
         <div class="gallery-actions">
           <a class="gallery-link secondary" href="/" target="_blank" rel="noopener">Main UI</a>

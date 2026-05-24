@@ -97,6 +97,7 @@ Official Google docs clearly show **free vs paid tiers**, billing tiers, and mod
 - **Gemini photo editing on-device:** take a photo, then use either a **voice command on the Pi** or **browser text input** to edit the current photo with Gemini; current-photo edits now generate and display successfully on the device path
 - **Gemini text models in normal chat:** the shared device / browser / ESP32 Agent selector now includes **Gemini 2.5 Flash**, **Gemini 2.5 Flash-Lite**, and **Gemini 2.5 Pro** alongside the existing Groq-hosted text models
 - **Gemini image settings:** the browser Settings panel now includes a **Gemini Image Model** dropdown, a **Gemini Style Preset** dropdown, and a **Gemini photo-edit confirm** toggle for staged edit prompts
+- **Experimental Gemini prompt helper:** the browser Settings panel now also includes an **Experimental personality image prompt helper** toggle plus a separate **Prompt Helper Token Limit** just for that rewrite step, so rough edit requests can be turned into a short Gemini-friendly image prompt before the actual edit runs
 - **Gemini style presets:** built-in presets now include **Dali Dream**, **Melting Psychedelic**, **Neon Hallucination**, **Glitch Trip**, **Retro Cosmic Poster**, **Surreal Collage**, **Biomechanical Growth**, **Cyberpunk Noir 1980s**, **Tech Blueprint**, **Haunted Daguerreotype**, **Bas-Relief Stone Carving**, **Van Gogh**, **Picasso**, **Stencil Street Art**, and **Visionary Psychedelic**
 - **Preset fallback edits:** vague requests such as **"edit this photo in your favorite style"** or **"surprise me with this photo"** now use the selected Gemini preset as the creative fallback
 - **Gemini low-tier image balance meter:** the browser and physical HAT header now show the saved **Gemini 2.5 Flash Image** balance between the status text and the right-side Groq badge; each successful low-tier Gemini image subtracts a fixed **$0.04** and can auto-reload from user-defined settings
@@ -113,6 +114,9 @@ Official Google docs clearly show **free vs paid tiers**, billing tiers, and mod
 - **Separate HAT idle controls:** the browser UI now splits **screensaver delay** from a separate **screen blank timeout**, so the device can stay on while the backlight turns off later for power saving
 - **Room monitor gallery:** the browser UI can now auto-capture from the selected camera source on a fixed interval and keep a separate room-monitor gallery trimmed dynamically to preserve at least **8 GB** of free SD-card space by deleting the oldest captures first
 - **Dedicated image galleries:** the browser now exposes separate **Photo Gallery**, **AI / Edited Image Gallery**, and **Room Monitor Gallery** views with download support, day grouping, and delete-selected / delete-current-day actions; the manual-photo and AI-image galleries now also follow the same **leave 8 GB free** retention rule instead of the old fixed image cap
+- **Reusable edit targets:** the manual-photo and AI-image galleries now support **Select for Editing**, so an older capture or older Gemini output can stay active as the current edit target until you replace it with a new capture or pick another image
+- **Saved gallery cleanup:** the **Saved Gallery** for room-monitor keeps now supports direct browser-side delete alongside download, so imported monitor photos can be curated without SSH
+- **Remote room monitor import:** Whisplay now exposes a separate **Remote Room Monitor** gallery that reads GroqBotNet room-monitor captures over the saved BotNet peer URL, lets you browse them from the Whisplay browser UI, and **moves** selected photos into the local **Saved Gallery** so the remote Pi does not keep duplicate copies
 - **HDMI chat page:** both Whisplay and the standalone Pi Zero GroqBotNet node now expose a dedicated browser page at **`/hdmi`**; Whisplay’s view also mirrors the latest captured image or live camera feed when one is active
 - **Improved HAT readability:** reply text now wraps more naturally on the device instead of breaking as aggressively mid-word
 - **Companion CYD controls:** touch-first **Chat / Capture / Gallery / Settings** modes, top-bar **New Chat** and **Repeat**, touch mode navigation, CYD-local chat text size and color controls, and a built-in **Setup** button for reopening the Wi-Fi portal
@@ -130,10 +134,22 @@ Official Google docs clearly show **free vs paid tiers**, billing tiers, and mod
 
 - **Working now:** capture a photo, say or type an edit request, and Gemini will edit the current photo using the latest shown image as context
 - **Working now:** an optional browser-side **confirm mode** can stage Gemini photo edits and wait for **confirm / add / start over / cancel**
+- **Working now:** an optional browser-side **experimental personality prompt helper** can rewrite rough photo-edit requests into one short image prompt using the active chatbot personality/model before Gemini runs the edit
+- **Working now:** that prompt helper can either feed the normal edit flow directly or pair with **confirm mode**, so the helper-generated prompt can be reviewed with **confirm / add / start over / cancel** before Gemini edits the image
+- **Working now:** the prompt helper has its own **Prompt Helper Token Limit** setting in the browser, so keeping helper rewrites short does not change the normal chat model limits
 - **Working now:** Gemini-generated images and edited photos are saved after generation so they can be reused later in the session
-- **Working now:** the browser exposes separate manual-photo and AI-image galleries so older captures and older Gemini outputs can be reopened outside the main UI
+- **Working now:** the browser exposes separate manual-photo and AI-image galleries so older captures and older Gemini outputs can be reopened outside the main UI, selected again as the active edit target, and reused for later Gemini edits
 - **Fallback still available:** local voice-triggered photo effects like **retro**, **comic**, **sketch**, **pixelate**, and the rest of the existing basic image commands still work even without Gemini billing-enabled image generation
 - **Gemini billing note:** plain hardware info, camera viewing, browsing, and the rest of the normal local device flow remain free; Gemini **text** may work for light testing on a free key, but **image generation / full photo editing** has been the path most likely to require billing on the Google project
+
+### Remote room monitor workflow
+
+- **GroqBotNet side:** the remote Pi keeps taking room-monitor captures locally as usual
+- **Whisplay side:** save the GroqBotNet browser URL in the Whisplay **Connect to Bot** / peer URL setting
+- **Browser flow:** open **Remote Room Monitor** on Whisplay to browse the remote day folders and still images; this is a simple refresh-style gallery path, not a live-feed mirror
+- **Import behavior:** importing from the remote gallery is a true **move**, not a copy: Whisplay saves the file locally into **Saved Gallery** first, then removes it from GroqBotNet only after the local save succeeds
+- **Saved Gallery behavior:** once imported, those files can be downloaded, deleted, or kept locally for later fullscreen viewing and future edit selection workflows on Whisplay
+- **Why it matters:** this keeps the workhorse GroqBotNet Pi handling capture duty while Whisplay stays the place where you browse, keep, and later edit the photos you want
 
 ### Prompt tips for stronger Gemini preset results
 
@@ -755,7 +771,7 @@ Gemini image generation in this fork currently defaults to **`gemini-2.5-flash-i
 
 The browser and device text-model selector now also exposes **Gemini 2.5 Flash**, **Gemini 2.5 Flash-Lite**, and **Gemini 2.5 Pro** for the normal chatbot and the ESP32 Agent workspace. Those text requests use the saved Gemini key when a Gemini model is selected.
 
-The browser **Settings** panel also includes an optional **Gemini Style Preset** for stronger stylized edits plus an optional **Gemini photo-edit confirm** toggle. When a preset is selected, Gemini combines that preset's hidden style directions with your normal edit prompt, and vague requests like “edit this photo in your favorite style” use the preset's default creative fallback.
+The browser **Settings** panel also includes an optional **Gemini Style Preset** for stronger stylized edits, an optional **Gemini photo-edit confirm** toggle, and an **experimental personality prompt helper** toggle with its own helper-only token limit. When a preset is selected, Gemini combines that preset's hidden style directions with your normal edit prompt, and vague requests like “edit this photo in your favorite style” use the preset's default creative fallback.
 
 Current Gemini image presets are defined in:
 
