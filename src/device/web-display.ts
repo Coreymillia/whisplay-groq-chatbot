@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import http from "http";
+import { spawn } from "child_process";
 import { Socket } from "net";
 import { IncomingMessage } from "http";
 import Koa from "koa";
@@ -988,6 +989,32 @@ export class WebDisplayServer implements WebAudioBridgeServer {
       }
       ctx.type = getImageMimeType(safePath);
       ctx.body = fs.createReadStream(safePath);
+    });
+
+    this.router.get("/api/vision/image/companion", async (ctx) => {
+      ctx.set("Cache-Control", "no-store");
+      const latestImagePath = getLatestShowedImage();
+      if (!latestImagePath) {
+        ctx.status = 404;
+        ctx.body = "No image";
+        return;
+      }
+      const safePath = this.resolveSafeImagePath(latestImagePath);
+      if (!safePath || !fs.existsSync(safePath)) {
+        ctx.status = 404;
+        ctx.body = "Image not found";
+        return;
+      }
+
+      const width = Math.max(32, Math.min(640, parseInt(String(ctx.query.width || "300"), 10) || 300));
+      const height = Math.max(32, Math.min(480, parseInt(String(ctx.query.height || "68"), 10) || 68));
+      try {
+        ctx.type = "image/jpeg";
+        ctx.body = await this.renderCompanionImageBuffer(safePath, width, height);
+      } catch (error) {
+        ctx.status = 500;
+        ctx.body = error instanceof Error ? error.message : "Failed to render companion image.";
+      }
     });
 
     this.router.post("/api/vision/upload", (ctx) => {
@@ -2427,5 +2454,39 @@ export class WebDisplayServer implements WebAudioBridgeServer {
       return null;
     }
     return resolved;
+  }
+
+  private renderCompanionImageBuffer(
+    imagePath: string,
+    width: number,
+    height: number,
+  ): Promise<Buffer> {
+    const scriptPath = path.resolve(__dirname, "../..", "python", "render-companion-image.py");
+    return new Promise((resolve, reject) => {
+      const child = spawn("python3", [
+        scriptPath,
+        "--input",
+        imagePath,
+        "--width",
+        String(width),
+        "--height",
+        String(height),
+      ]);
+      const chunks: Buffer[] = [];
+      let stderr = "";
+
+      child.stdout.on("data", (chunk: Buffer) => chunks.push(Buffer.from(chunk)));
+      child.stderr.on("data", (chunk: Buffer) => {
+        stderr += chunk.toString("utf8");
+      });
+      child.on("error", reject);
+      child.on("close", (code) => {
+        if (code === 0 && chunks.length > 0) {
+          resolve(Buffer.concat(chunks));
+          return;
+        }
+        reject(new Error(stderr.trim() || "Companion image render failed."));
+      });
+    });
   }
 }

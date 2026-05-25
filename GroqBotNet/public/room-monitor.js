@@ -36,6 +36,11 @@ function renderRoomMonitor(roomMonitor) {
     Number.isFinite(roomMonitor?.freeSpaceBytes)
       ? `free ${Math.max(0, Math.round(roomMonitor.freeSpaceBytes / (1024 * 1024 * 1024) * 10) / 10)} GB`
       : null,
+    typeof roomMonitor?.autoBrightnessEnabled === "boolean"
+      ? roomMonitor.autoBrightnessEnabled
+        ? "auto brightness on"
+        : "auto brightness off"
+      : null,
     typeof roomMonitor?.activeNow === "boolean"
       ? roomMonitor.activeNow
         ? "active now"
@@ -43,6 +48,7 @@ function renderRoomMonitor(roomMonitor) {
       : null,
     roomMonitor?.captureInProgress ? "capturing now" : null,
     roomMonitor?.lastCaptureAt ? `last capture ${formatTimestamp(roomMonitor.lastCaptureAt)}` : null,
+    roomMonitor?.lastBrightnessSummary || null,
     roomMonitor?.lastError ? `error: ${roomMonitor.lastError}` : null,
   ].filter(Boolean);
   setRoomMonitorStatus(statusBits.join(" | ") || "Room monitor is idle.");

@@ -278,6 +278,13 @@ These are a few representative shots of the current build. GitHub README pages a
   <img src="images/IMG_20260521_173152523_HDR.jpg" alt="Another Gemini photo editing example on the Whisplay HAT" width="48%" />
 </p>
 
+### GroqBotNet companion photo editor
+
+<p align="center">
+  <img src="images/IMG_20260525_150528164_HDR.jpg" alt="GroqBotNet companion photo editor showing the updated edit workflow" width="48%" />
+  <img src="images/IMG_20260525_150710310_HDR.jpg" alt="GroqBotNet companion photo editor with the new dual-screen edit display" width="48%" />
+</p>
+
 <p align="center">
   <img src="images/IMG_20260521_173748583.jpg" alt="Whisplay opening screen on the device" width="32%" />
   <img src="images/IMG_20260521_173833830.jpg" alt="Additional Whisplay screensaver example" width="32%" />

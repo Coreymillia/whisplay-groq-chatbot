@@ -11,6 +11,7 @@ const stats = document.getElementById("stats");
 const botnetMode = document.getElementById("botnetMode");
 const transportMode = document.getElementById("transportMode");
 const peerUrl = document.getElementById("peerUrl");
+const tftDisplayMode = document.getElementById("tftDisplayMode");
 const nodeHandle = document.getElementById("nodeHandle");
 const hubUrl = document.getElementById("hubUrl");
 const inviteCode = document.getElementById("inviteCode");
@@ -33,8 +34,21 @@ const roomMonitorIntervalSec = document.getElementById("roomMonitorIntervalSec")
 const roomMonitorStartTime = document.getElementById("roomMonitorStartTime");
 const roomMonitorStopTime = document.getElementById("roomMonitorStopTime");
 const roomMonitorFreeReserveGb = document.getElementById("roomMonitorFreeReserveGb");
+const roomMonitorAutoBrightness = document.getElementById("roomMonitorAutoBrightness");
+const aiImageSyncEnabled = document.getElementById("aiImageSyncEnabled");
+const aiImageSyncIntervalSec = document.getElementById("aiImageSyncIntervalSec");
+const companionIdleTimeoutSec = document.getElementById("companionIdleTimeoutSec");
+const companionIdleMode = document.getElementById("companionIdleMode");
+const companionOledIdleMode = document.getElementById("companionOledIdleMode");
+const companionTextColor = document.getElementById("companionTextColor");
+const companionScrollSpeedSec = document.getElementById("companionScrollSpeedSec");
 const roomMonitorStatus = document.getElementById("roomMonitorStatus");
 const roomMonitorCaptureBtn = document.getElementById("roomMonitorCaptureBtn");
+const aiImageStatus = document.getElementById("aiImageStatus");
+const aiImageRecent = document.getElementById("aiImageRecent");
+const aiRemoteList = document.getElementById("aiRemoteList");
+const aiImportAllBtn = document.getElementById("aiImportAllBtn");
+const aiRefreshBtn = document.getElementById("aiRefreshBtn");
 const clearChatsBtn = document.getElementById("clearChatsBtn");
 
 let activeSoloConversationId = null;
@@ -101,7 +115,7 @@ function updateTransportUi(mode) {
   if (disconnectHubBtn) disconnectHubBtn.disabled = !onlineMode;
 }
 
-function fillSettings(settings, online, statsPayload) {
+function fillSettings(settings, online, statsPayload, companionSnapshot) {
   document.getElementById("botName").value = settings.botName || "";
   updateBotnetModeUi(settings.botnetMode || "persona-relay");
   updateTransportUi(settings.transportMode || "lan-direct");
@@ -109,6 +123,9 @@ function fillSettings(settings, online, statsPayload) {
   document.getElementById("groqApiKey").value = "";
   document.getElementById("publicBaseUrl").value = settings.publicBaseUrl || "";
   document.getElementById("peerUrl").value = settings.peerUrl || "";
+  if (tftDisplayMode) {
+    tftDisplayMode.value = settings.tftDisplayMode || "auto";
+  }
   document.getElementById("nodeHandle").value = settings.nodeHandle || "";
   document.getElementById("hubUrl").value = settings.hubUrl || "";
   document.getElementById("personalityPrompt").value = settings.personalityPrompt || "";
@@ -128,6 +145,30 @@ function fillSettings(settings, online, statsPayload) {
   if (roomMonitorFreeReserveGb) {
     roomMonitorFreeReserveGb.value = String(settings.roomMonitorFreeReserveGb ?? 8);
   }
+  if (roomMonitorAutoBrightness) {
+    roomMonitorAutoBrightness.checked = settings.roomMonitorAutoBrightness !== false;
+  }
+  if (aiImageSyncEnabled) {
+    aiImageSyncEnabled.checked = settings.aiImageSyncEnabled !== false;
+  }
+  if (aiImageSyncIntervalSec) {
+    aiImageSyncIntervalSec.value = String(settings.aiImageSyncIntervalSec ?? 30);
+  }
+  if (companionIdleTimeoutSec) {
+    companionIdleTimeoutSec.value = String(settings.companionIdleTimeoutSec ?? 20);
+  }
+  if (companionIdleMode) {
+    companionIdleMode.value = settings.companionIdleMode || "slideshow";
+  }
+  if (companionOledIdleMode) {
+    companionOledIdleMode.value = settings.companionOledIdleMode || "rain";
+  }
+  if (companionTextColor) {
+    companionTextColor.value = settings.companionTextColor || "multicolor";
+  }
+  if (companionScrollSpeedSec) {
+    companionScrollSpeedSec.value = String(settings.companionScrollSpeedSec ?? 0.25);
+  }
   currentOnline = online || null;
 
   const transportSummary =
@@ -139,8 +180,17 @@ function fillSettings(settings, online, statsPayload) {
       ? ` | link: ${online?.linkId ? `${online.peerHandle || online.peerNodeId || "paired"} (${online.peerOnline ? "peer online" : "peer offline"})` : "not paired"}`
       : "";
   const errorSummary = online?.lastError ? ` | hub: ${online.lastError}` : "";
+  const displaySummary = settings.tftDisplayMode ? ` | TFT: ${settings.tftDisplayMode}` : "";
+  const displayTuningSummary = ` | idle: ${settings.companionIdleTimeoutSec ?? 20}s ${settings.companionIdleMode || "slideshow"} / top ${settings.companionOledIdleMode || "rain"} | text: ${settings.companionTextColor || "multicolor"} | scroll: ${settings.companionScrollSpeedSec ?? 0.25}s`;
+  const companionSummary = companionSnapshot?.configured
+    ? ` | companion: ${
+        companionSnapshot.reachable
+          ? `${companionSnapshot.status || "idle"}${companionSnapshot.badgeText ? ` (${companionSnapshot.badgeText})` : ""}`
+          : (companionSnapshot.lastError || "unreachable")
+      }`
+    : "";
   stats.textContent =
-    `Mode: ${settings.botnetMode || "persona-relay"} | Transport: ${transportSummary}${linkSummary} | Groq key: ${settings.groqApiKeyConfigured ? "stored" : "missing"} | Requests used this hour: ${statsPayload.requestsUsedThisHour}${errorSummary}`;
+    `Mode: ${settings.botnetMode || "persona-relay"} | Transport: ${transportSummary}${linkSummary}${displaySummary}${displayTuningSummary}${companionSummary} | Groq key: ${settings.groqApiKeyConfigured ? "stored" : "missing"} | Requests used this hour: ${statsPayload.requestsUsedThisHour}${errorSummary}`;
 }
 
 function formatTimestamp(value) {
@@ -167,6 +217,11 @@ function renderRoomMonitor(roomMonitor) {
     Number.isFinite(roomMonitor?.freeSpaceBytes)
       ? `free: ${Math.max(0, Math.round(roomMonitor.freeSpaceBytes / (1024 * 1024 * 1024) * 10) / 10)} GB`
       : null,
+    typeof roomMonitor?.autoBrightnessEnabled === "boolean"
+      ? roomMonitor.autoBrightnessEnabled
+        ? "auto brightness on"
+        : "auto brightness off"
+      : null,
     typeof roomMonitor?.activeNow === "boolean"
       ? roomMonitor.activeNow
         ? "active now"
@@ -176,6 +231,7 @@ function renderRoomMonitor(roomMonitor) {
     roomMonitor?.detectedCamera ? `camera: ${roomMonitor.detectedCamera}` : null,
     roomMonitor?.cameraCommand ? `tool: ${roomMonitor.cameraCommand}` : null,
     Number.isFinite(roomMonitor?.totalCount) ? `images: ${roomMonitor.totalCount}` : null,
+    roomMonitor?.lastBrightnessSummary || null,
     roomMonitor?.lastCaptureAt
       ? `last capture: ${formatTimestamp(roomMonitor.lastCaptureAt)}`
       : null,
@@ -183,6 +239,109 @@ function renderRoomMonitor(roomMonitor) {
   ].filter(Boolean);
 
   roomMonitorStatus.textContent = statusBits.join(" | ") || "Room monitor is idle.";
+}
+
+function renderAiImageArchive(aiImageArchive) {
+  if (!aiImageStatus) {
+    return;
+  }
+
+  const statusBits = [
+    aiImageArchive?.enabled
+      ? `auto import every ${aiImageArchive.intervalSec}s`
+      : "auto import disabled",
+    aiImageArchive?.sourceUrl ? `source: ${aiImageArchive.sourceUrl}` : "source: not configured",
+    Number.isFinite(aiImageArchive?.reserveGb) ? `reserve: ${aiImageArchive.reserveGb} GB` : null,
+    Number.isFinite(aiImageArchive?.freeSpaceBytes)
+      ? `free: ${Math.max(0, Math.round(aiImageArchive.freeSpaceBytes / (1024 * 1024 * 1024) * 10) / 10)} GB`
+      : null,
+    aiImageArchive?.syncInProgress ? "syncing now" : null,
+    Number.isFinite(aiImageArchive?.totalCount) ? `images: ${aiImageArchive.totalCount}` : null,
+    aiImageArchive?.lastImportedAt ? `last import: ${formatTimestamp(aiImageArchive.lastImportedAt)}` : null,
+    aiImageArchive?.lastSyncAt ? `last sync: ${formatTimestamp(aiImageArchive.lastSyncAt)}` : null,
+    aiImageArchive?.lastError ? `error: ${aiImageArchive.lastError}` : null,
+  ].filter(Boolean);
+  aiImageStatus.textContent = statusBits.join(" | ") || "AI archive is idle.";
+
+  if (aiImageRecent) {
+    const photos = Array.isArray(aiImageArchive?.photos) ? aiImageArchive.photos : [];
+    if (!photos.length) {
+      aiImageRecent.innerHTML = '<div class="muted">No imported AI images yet.</div>';
+    } else {
+      aiImageRecent.innerHTML = photos
+        .slice(0, 8)
+        .map(
+          (photo) => `
+            <article class="mini-card">
+              <div><strong>${photo.fileName}</strong>${photo.isLatest ? ' <span class="muted">(displaying)</span>' : ""}</div>
+              <div class="muted">${formatTimestamp(photo.importedAt)} · ${Math.max(1, Math.round((photo.sizeBytes || 0) / 1024))} KB</div>
+              <div class="actions">
+                <a class="secondary" href="${photo.imageUrl}" target="_blank" rel="noopener">View</a>
+              </div>
+            </article>
+          `,
+        )
+        .join("");
+    }
+  }
+}
+
+function renderRemoteAiImages(sourceUrl, photos) {
+  if (!aiRemoteList) {
+    return;
+  }
+  const items = Array.isArray(photos) ? photos : [];
+  if (!items.length) {
+    aiRemoteList.innerHTML = '<div class="muted">No remote AI images found yet.</div>';
+    return;
+  }
+  aiRemoteList.innerHTML = items
+    .slice(0, 10)
+    .map(
+      (photo) => `
+        <article class="mini-card">
+          <div><strong>${photo.fileName}</strong>${photo.imported ? ' <span class="muted">(imported)</span>' : ""}</div>
+          <div class="muted">${formatTimestamp(photo.updatedAt)} · ${Math.max(1, Math.round((photo.sizeBytes || 0) / 1024))} KB</div>
+          <div class="actions">
+            <a class="secondary" href="${sourceUrl || ""}${photo.imageUrl}" target="_blank" rel="noopener">View</a>
+            <button type="button" class="secondary" data-import-ai="${photo.fileName}" ${photo.imported ? "disabled" : ""}>Import</button>
+          </div>
+        </article>
+      `,
+    )
+    .join("");
+
+  document.querySelectorAll("[data-import-ai]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      setStatus(aiImageStatus, `Importing ${button.dataset.importAi}...`);
+      try {
+        await saveSettingsFromForm();
+        const response = await fetch("/api/remote-ai-images/import", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ fileName: button.dataset.importAi || "" }),
+        });
+        const payload = await response.json();
+        if (!response.ok || payload.ok === false) {
+          throw new Error(payload.error || `HTTP ${response.status}`);
+        }
+        renderAiImageArchive(payload.aiImageArchive || {});
+        await loadRemoteAiImages();
+        await loadState();
+      } catch (error) {
+        setStatus(aiImageStatus, error.message || String(error), true);
+      }
+    });
+  });
+}
+
+async function loadRemoteAiImages() {
+  const response = await fetch("/api/remote-ai-images", { cache: "no-store" });
+  const payload = await response.json();
+  if (!response.ok || payload.ok === false) {
+    throw new Error(payload.error || `HTTP ${response.status}`);
+  }
+  renderRemoteAiImages(payload.sourceUrl || "", payload.photos || []);
 }
 
 function renderConversations(conversations) {
@@ -253,8 +412,9 @@ async function loadState() {
   if (!response.ok || payload.ok === false) {
     throw new Error(payload.error || `HTTP ${response.status}`);
   }
-  fillSettings(payload.settings, payload.online, payload.stats);
+  fillSettings(payload.settings, payload.online, payload.stats, payload.companionSnapshot || {});
   renderRoomMonitor(payload.roomMonitor || {});
+  renderAiImageArchive(payload.aiImageArchive || {});
   renderConversations(payload.conversations || []);
 }
 
@@ -283,6 +443,8 @@ function validateBotnetSetup() {
 async function saveSettingsFromForm() {
   const formData = new FormData(settingsForm);
   const body = Object.fromEntries(formData.entries());
+  body.roomMonitorAutoBrightness = Boolean(roomMonitorAutoBrightness?.checked);
+  body.aiImageSyncEnabled = Boolean(aiImageSyncEnabled?.checked);
   const response = await fetch("/api/settings", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -515,6 +677,37 @@ clearChatsBtn?.addEventListener("click", async () => {
   }
 });
 
-loadState().catch((error) => {
+aiImportAllBtn?.addEventListener("click", async () => {
+  setStatus(aiImageStatus, "Importing all new AI images...");
+  try {
+    await saveSettingsFromForm();
+    const response = await fetch("/api/remote-ai-images/import-all-new", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    const payload = await response.json();
+    if (!response.ok || payload.ok === false) {
+      throw new Error(payload.error || `HTTP ${response.status}`);
+    }
+    renderAiImageArchive(payload.aiImageArchive || {});
+    await loadRemoteAiImages();
+    await loadState();
+  } catch (error) {
+    setStatus(aiImageStatus, error.message || String(error), true);
+  }
+});
+
+aiRefreshBtn?.addEventListener("click", async () => {
+  setStatus(aiImageStatus, "Refreshing remote AI image list...");
+  try {
+    await loadRemoteAiImages();
+    await loadState();
+  } catch (error) {
+    setStatus(aiImageStatus, error.message || String(error), true);
+  }
+});
+
+Promise.all([loadState(), loadRemoteAiImages()]).catch((error) => {
   setStatus(startStatus, `Initial load failed: ${error.message || error}`, true);
 });

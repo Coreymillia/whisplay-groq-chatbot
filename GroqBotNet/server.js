@@ -15,9 +15,13 @@ const CONVERSATIONS_PATH = path.join(DATA_DIR, "conversations.json");
 const STATE_PATH = path.join(DATA_DIR, "state.json");
 const HUB_SESSION_PATH = path.join(DATA_DIR, "botnet-hub-session.json");
 const ROOM_MONITOR_DIR = path.join(DATA_DIR, "room-monitor");
+const AI_IMAGE_IMPORT_DIR = path.join(DATA_DIR, "ai-imports");
+const AI_IMAGE_IMPORT_INDEX_PATH = path.join(AI_IMAGE_IMPORT_DIR, "index.json");
+const ROOM_MONITOR_AUTO_BRIGHTNESS_SCRIPT = path.join(ROOT_DIR, "display", "auto_brightness.py");
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
 fs.mkdirSync(ROOM_MONITOR_DIR, { recursive: true });
+fs.mkdirSync(AI_IMAGE_IMPORT_DIR, { recursive: true });
 
 const DEFAULT_SETTINGS = {
   enabled: true,
@@ -39,6 +43,16 @@ const DEFAULT_SETTINGS = {
   roomMonitorStartTime: "",
   roomMonitorStopTime: "",
   roomMonitorFreeReserveGb: 8,
+  roomMonitorAutoBrightness: true,
+  aiImageSyncEnabled: true,
+  aiImageSyncIntervalSec: 30,
+  tftDisplayMode: "auto",
+  companionIdleTimeoutSec: 20,
+  companionIdleMode: "slideshow",
+  companionPhotoHoldSec: 20,
+  companionOledIdleMode: "rain",
+  companionTextColor: "multicolor",
+  companionScrollSpeedSec: 0.25,
   groqApiKey: "",
 };
 
@@ -53,6 +67,50 @@ let roomMonitorLastCaptureAt = null;
 let roomMonitorLastError = "";
 let roomMonitorDetectedCamera = "";
 let roomMonitorCameraCommand = "";
+let roomMonitorLastBrightnessSummary = "";
+let aiImageSyncTimer = null;
+let aiImageSyncInProgress = false;
+let aiImageSyncLastError = "";
+let aiImageSyncLastSyncAt = 0;
+let companionPollTimer = null;
+
+const DEFAULT_AI_IMAGE_ARCHIVE = {
+  latestLocalFileName: "",
+  lastImportedAt: 0,
+  entries: [],
+};
+
+const DEFAULT_COMPANION_SNAPSHOT = {
+  configured: false,
+  ready: false,
+  reachable: false,
+  sourceUrl: "",
+  status: "idle",
+  replyMessage: "",
+  editHelperText: "",
+  modelTag: "BOT",
+  modelLabel: "BOT",
+  badgeText: "",
+  requestsToday: 0,
+  remainingRequests: null,
+  balanceText: "",
+  imageAvailable: false,
+  imageUrl: "",
+  imageRevision: 0,
+  lastSuccessAt: 0,
+  lastError: "",
+};
+
+const BOTNET_MODEL_META = {
+  "llama-3.1-8b-instant": { shortLabel: "L3.1-8B", rpd: 14400 },
+  "llama-3.3-70b-versatile": { shortLabel: "L3.3-70B", rpd: 1000 },
+  "meta-llama/llama-4-scout-17b-16e-instruct": { shortLabel: "L4-Scout", rpd: 1000 },
+  "qwen/qwen3-32b": { shortLabel: "Qwen3-32B", rpd: 1000 },
+  "compound-beta": { shortLabel: "Compound", rpd: 250 },
+  "compound-beta-mini": { shortLabel: "Cmpd Mini", rpd: 250 },
+  "openai/gpt-oss-20b": { shortLabel: "GPT-20B", rpd: 1000 },
+  "openai/gpt-oss-120b": { shortLabel: "GPT-120B", rpd: 1000 },
+};
 
 function readJson(filePath, fallback) {
   try {
@@ -85,6 +143,65 @@ function normalizeRoomMonitorIntervalSec(value, fallback) {
   return Math.min(86400, Math.max(10, parsed));
 }
 
+function normalizeAiImageSyncIntervalSec(value, fallback) {
+  const parsed = Number.parseInt(String(value ?? ""), 10);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+  if (parsed <= 0) {
+    return 0;
+  }
+  return Math.min(3600, Math.max(10, parsed));
+}
+
+function normalizeTftDisplayMode(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "local" || normalized === "companion") {
+    return normalized;
+  }
+  return "auto";
+}
+
+function normalizeCompanionIdleTimeoutSec(value, fallback) {
+  return normalizePositiveInt(value, fallback, 5, 600);
+}
+
+function normalizeCompanionPhotoHoldSec(value, fallback) {
+  return normalizePositiveInt(value, fallback, 5, 600);
+}
+
+function normalizeCompanionIdleMode(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "matrix") {
+    return "matrix";
+  }
+  return "slideshow";
+}
+
+function normalizeCompanionTextColor(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (["white", "green", "cyan", "yellow", "multicolor"].includes(normalized)) {
+    return normalized;
+  }
+  return "multicolor";
+}
+
+function normalizeCompanionScrollSpeedSec(value, fallback) {
+  const parsed = Number.parseFloat(String(value ?? ""));
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+  return Math.min(2, Math.max(0.08, parsed));
+}
+
+function normalizeCompanionOledIdleMode(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "header") {
+    return "header";
+  }
+  return "rain";
+}
+
 function normalizeFileName(value) {
   return path.basename(String(value || "").trim());
 }
@@ -112,6 +229,62 @@ function normalizeRoomMonitorFreeReserveGb(value, fallback) {
     return fallback;
   }
   return Math.min(8, Math.max(5, parsed));
+}
+
+function normalizeBoolean(value, fallback) {
+  if (typeof value === "boolean") {
+    return value;
+  }
+  if (value === undefined || value === null || value === "") {
+    return fallback;
+  }
+  const normalized = String(value).trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) {
+    return true;
+  }
+  if (["0", "false", "no", "off"].includes(normalized)) {
+    return false;
+  }
+  return fallback;
+}
+
+function sanitizeAiImageArchive(archive) {
+  const entries = Array.isArray(archive?.entries)
+    ? archive.entries
+        .filter((entry) => entry && typeof entry === "object")
+        .map((entry) => ({
+          sourceUrl: normalizeUrl(entry.sourceUrl || ""),
+          remoteFileName: normalizeFileName(entry.remoteFileName || ""),
+          localFileName: normalizeFileName(entry.localFileName || ""),
+          importedAt: Number.parseInt(String(entry.importedAt || "0"), 10) || 0,
+          updatedAt: Number.parseInt(String(entry.updatedAt || "0"), 10) || 0,
+          sizeBytes: Number.parseInt(String(entry.sizeBytes || "0"), 10) || 0,
+        }))
+        .filter((entry) => entry.sourceUrl && entry.remoteFileName && entry.localFileName)
+    : [];
+
+  const seen = new Set();
+  const filtered = [];
+  for (const entry of entries) {
+    const key = `${entry.sourceUrl}|${entry.remoteFileName}`;
+    const filePath = path.join(AI_IMAGE_IMPORT_DIR, entry.localFileName);
+    if (seen.has(key) || !fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
+      continue;
+    }
+    seen.add(key);
+    filtered.push(entry);
+  }
+
+  const latestLocalFileName = normalizeFileName(archive?.latestLocalFileName || "");
+  return {
+    latestLocalFileName:
+      latestLocalFileName &&
+      filtered.some((entry) => entry.localFileName === latestLocalFileName)
+        ? latestLocalFileName
+        : filtered[0]?.localFileName || "",
+    lastImportedAt: Number.parseInt(String(archive?.lastImportedAt || "0"), 10) || 0,
+    entries: filtered.sort((a, b) => b.importedAt - a.importedAt),
+  };
 }
 
 function normalizeBotnetMode(value) {
@@ -157,6 +330,42 @@ function loadSettings() {
       loaded.roomMonitorFreeReserveGb,
       DEFAULT_SETTINGS.roomMonitorFreeReserveGb,
     ),
+    roomMonitorAutoBrightness: normalizeBoolean(
+      loaded.roomMonitorAutoBrightness,
+      DEFAULT_SETTINGS.roomMonitorAutoBrightness,
+    ),
+    aiImageSyncEnabled: normalizeBoolean(
+      loaded.aiImageSyncEnabled,
+      DEFAULT_SETTINGS.aiImageSyncEnabled,
+    ),
+    aiImageSyncIntervalSec: normalizeAiImageSyncIntervalSec(
+      loaded.aiImageSyncIntervalSec,
+      DEFAULT_SETTINGS.aiImageSyncIntervalSec,
+    ),
+    tftDisplayMode: normalizeTftDisplayMode(
+      loaded.tftDisplayMode || DEFAULT_SETTINGS.tftDisplayMode,
+    ),
+    companionIdleTimeoutSec: normalizeCompanionIdleTimeoutSec(
+      loaded.companionIdleTimeoutSec,
+      DEFAULT_SETTINGS.companionIdleTimeoutSec,
+    ),
+    companionIdleMode: normalizeCompanionIdleMode(
+      loaded.companionIdleMode || DEFAULT_SETTINGS.companionIdleMode,
+    ),
+    companionPhotoHoldSec: normalizeCompanionPhotoHoldSec(
+      loaded.companionPhotoHoldSec,
+      DEFAULT_SETTINGS.companionPhotoHoldSec,
+    ),
+    companionOledIdleMode: normalizeCompanionOledIdleMode(
+      loaded.companionOledIdleMode || DEFAULT_SETTINGS.companionOledIdleMode,
+    ),
+    companionTextColor: normalizeCompanionTextColor(
+      loaded.companionTextColor || DEFAULT_SETTINGS.companionTextColor,
+    ),
+    companionScrollSpeedSec: normalizeCompanionScrollSpeedSec(
+      loaded.companionScrollSpeedSec,
+      DEFAULT_SETTINGS.companionScrollSpeedSec,
+    ),
   };
 }
 
@@ -198,6 +407,42 @@ function sanitizeSettingsUpdate(body, currentSettings) {
       body.roomMonitorFreeReserveGb,
       currentSettings.roomMonitorFreeReserveGb,
     ),
+    roomMonitorAutoBrightness: normalizeBoolean(
+      body.roomMonitorAutoBrightness,
+      currentSettings.roomMonitorAutoBrightness,
+    ),
+    aiImageSyncEnabled: normalizeBoolean(
+      body.aiImageSyncEnabled,
+      currentSettings.aiImageSyncEnabled,
+    ),
+    aiImageSyncIntervalSec: normalizeAiImageSyncIntervalSec(
+      body.aiImageSyncIntervalSec,
+      currentSettings.aiImageSyncIntervalSec,
+    ),
+    tftDisplayMode: normalizeTftDisplayMode(
+      body.tftDisplayMode ?? currentSettings.tftDisplayMode,
+    ),
+    companionIdleTimeoutSec: normalizeCompanionIdleTimeoutSec(
+      body.companionIdleTimeoutSec,
+      currentSettings.companionIdleTimeoutSec,
+    ),
+    companionIdleMode: normalizeCompanionIdleMode(
+      body.companionIdleMode ?? currentSettings.companionIdleMode,
+    ),
+    companionPhotoHoldSec: normalizeCompanionPhotoHoldSec(
+      body.companionPhotoHoldSec,
+      currentSettings.companionPhotoHoldSec,
+    ),
+    companionOledIdleMode: normalizeCompanionOledIdleMode(
+      body.companionOledIdleMode ?? currentSettings.companionOledIdleMode,
+    ),
+    companionTextColor: normalizeCompanionTextColor(
+      body.companionTextColor ?? currentSettings.companionTextColor,
+    ),
+    companionScrollSpeedSec: normalizeCompanionScrollSpeedSec(
+      body.companionScrollSpeedSec,
+      currentSettings.companionScrollSpeedSec,
+    ),
     groqApiKey:
       typeof body.groqApiKey === "string" && body.groqApiKey.trim().length > 0
         ? body.groqApiKey.trim()
@@ -212,6 +457,12 @@ let runtimeState = {
   ...readJson(STATE_PATH, DEFAULT_STATE),
 };
 let hubSession = sanitizeSession(readJson(HUB_SESSION_PATH, DEFAULT_SESSION));
+let companionSnapshot = {
+  ...DEFAULT_COMPANION_SNAPSHOT,
+};
+let aiImageArchive = sanitizeAiImageArchive(
+  readJson(AI_IMAGE_IMPORT_INDEX_PATH, DEFAULT_AI_IMAGE_ARCHIVE),
+);
 
 function saveSettings() {
   writeJson(SETTINGS_PATH, settings);
@@ -229,12 +480,225 @@ function saveHubSession() {
   writeJson(HUB_SESSION_PATH, hubSession);
 }
 
+function saveAiImageArchive() {
+  aiImageArchive = sanitizeAiImageArchive(aiImageArchive);
+  writeJson(AI_IMAGE_IMPORT_INDEX_PATH, aiImageArchive);
+}
+
 function getPublicSettings() {
   return {
     ...settings,
     groqApiKeyConfigured: Boolean(settings.groqApiKey),
     groqApiKey: "",
   };
+}
+
+function resetCompanionSnapshot(errorMessage = "") {
+  companionSnapshot = {
+    ...DEFAULT_COMPANION_SNAPSHOT,
+    configured: Boolean(normalizeUrl(settings.peerUrl || "")),
+    sourceUrl: normalizeUrl(settings.peerUrl || ""),
+    lastError: errorMessage,
+  };
+}
+
+function getCompanionSnapshotStatus() {
+  return {
+    ...companionSnapshot,
+  };
+}
+
+function getCompanionModelMeta(modelTag) {
+  return BOTNET_MODEL_META[String(modelTag || "").trim()] || null;
+}
+
+function isCompanionEditStatus(statusText, replyMessage) {
+  const status = String(statusText || "").trim().toLowerCase();
+  const reply = String(replyMessage || "").trim().toLowerCase();
+  return (
+    status.includes("photo") ||
+    status.includes("camera") ||
+    status.includes("image") ||
+    status.includes("answering") ||
+    reply.startsWith("[camera]") ||
+    reply.includes("edit this photo") ||
+    isGenericImageSavedMessage(reply)
+  );
+}
+
+function isGenericImageSavedMessage(replyMessage) {
+  const normalized = String(replyMessage || "").trim().toLowerCase();
+  return normalized === "image file saved." || normalized.endsWith("image file saved.");
+}
+
+function getAiImportFilePath(fileName) {
+  const safeFileName = normalizeFileName(fileName);
+  if (!safeFileName) {
+    return "";
+  }
+  const filePath = path.resolve(AI_IMAGE_IMPORT_DIR, safeFileName);
+  if (!filePath.startsWith(`${path.resolve(AI_IMAGE_IMPORT_DIR)}${path.sep}`)) {
+    return "";
+  }
+  if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
+    return "";
+  }
+  return filePath;
+}
+
+function getAiImageSourceBaseUrl() {
+  return normalizeUrl(settings.peerUrl || "");
+}
+
+function buildAiImageArchiveKey(sourceUrl, remoteFileName) {
+  return `${normalizeUrl(sourceUrl)}|${normalizeFileName(remoteFileName)}`;
+}
+
+function listAiImportedImages(limit = 60) {
+  aiImageArchive = sanitizeAiImageArchive(aiImageArchive);
+  const entries = aiImageArchive.entries.map((entry) => {
+    const filePath = getAiImportFilePath(entry.localFileName);
+    if (!filePath) {
+      return null;
+    }
+    const stats = fs.statSync(filePath);
+    return {
+      sourceUrl: entry.sourceUrl,
+      remoteFileName: entry.remoteFileName,
+      fileName: entry.localFileName,
+      importedAt: entry.importedAt,
+      updatedAt: entry.updatedAt || stats.mtimeMs,
+      sizeBytes: stats.size,
+      imageUrl: `/api/ai-images/image?file=${encodeURIComponent(entry.localFileName)}`,
+      isLatest: entry.localFileName === aiImageArchive.latestLocalFileName,
+    };
+  }).filter(Boolean);
+  return entries.slice(0, limit);
+}
+
+async function fetchRemoteAiImageList() {
+  const sourceUrl = getAiImageSourceBaseUrl();
+  if (!sourceUrl) {
+    throw new Error("Connect to a Whisplay peer before syncing AI images.");
+  }
+  const response = await fetch(`${sourceUrl}/api/generated-images`, {
+    headers: { "Cache-Control": "no-store" },
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload.error || `Failed to load remote AI images (HTTP ${response.status}).`);
+  }
+
+  const importedKeys = new Set(
+    aiImageArchive.entries.map((entry) => buildAiImageArchiveKey(entry.sourceUrl, entry.remoteFileName)),
+  );
+  return {
+    sourceUrl,
+    photos: Array.isArray(payload.photos)
+      ? payload.photos
+          .filter((photo) => photo && typeof photo.fileName === "string" && typeof photo.imageUrl === "string")
+          .map((photo) => ({
+            fileName: normalizeFileName(photo.fileName),
+            imageUrl: String(photo.imageUrl),
+            updatedAt: Number.parseInt(String(photo.updatedAt || "0"), 10) || 0,
+            sizeBytes: Number.parseInt(String(photo.sizeBytes || "0"), 10) || 0,
+            imported: importedKeys.has(buildAiImageArchiveKey(sourceUrl, photo.fileName)),
+          }))
+          .filter((photo) => photo.fileName && photo.imageUrl)
+      : [],
+  };
+}
+
+async function pollCompanionSnapshot() {
+  const sourceUrl = normalizeUrl(settings.peerUrl || "");
+  if (!sourceUrl) {
+    resetCompanionSnapshot("");
+    return companionSnapshot;
+  }
+
+  const nextSnapshot = {
+    ...DEFAULT_COMPANION_SNAPSHOT,
+    configured: true,
+    sourceUrl,
+  };
+
+  try {
+    const response = await fetch(`${sourceUrl}/api/state`, {
+      headers: { "Cache-Control": "no-store" },
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload.error || `Companion poll failed with HTTP ${response.status}.`);
+    }
+    nextSnapshot.ready = Boolean(payload.ready ?? true);
+    nextSnapshot.reachable = true;
+    nextSnapshot.status = String(payload.status || "idle").trim() || "idle";
+    nextSnapshot.replyMessage = String(payload.text || "").trim();
+    const inEditMode = isCompanionEditStatus(
+      nextSnapshot.status,
+      nextSnapshot.replyMessage,
+    );
+    nextSnapshot.editHelperText = inEditMode
+      ? isGenericImageSavedMessage(nextSnapshot.replyMessage)
+        ? companionSnapshot.editHelperText || "Edited photo ready."
+        : nextSnapshot.replyMessage
+      : "";
+    nextSnapshot.modelTag = String(payload.llm_model || "BOT").trim() || "BOT";
+    const modelMeta = getCompanionModelMeta(nextSnapshot.modelTag);
+    nextSnapshot.modelLabel = modelMeta?.shortLabel || nextSnapshot.modelTag;
+    nextSnapshot.badgeText = String(payload.groq_header_badge_text || "").trim();
+    nextSnapshot.requestsToday =
+      Number.parseInt(String(payload.groq_requests_today || "0"), 10) || 0;
+    nextSnapshot.remainingRequests =
+      typeof modelMeta?.rpd === "number"
+        ? Math.max(0, modelMeta.rpd - nextSnapshot.requestsToday)
+        : null;
+    nextSnapshot.balanceText = String(payload.gemini_low_tier_image_balance_text || "").trim();
+    nextSnapshot.imageAvailable = Boolean(payload.image);
+    nextSnapshot.imageRevision = Number.parseInt(String(payload.image_revision || "0"), 10) || 0;
+    nextSnapshot.imageUrl = nextSnapshot.imageAvailable
+      ? `${sourceUrl}/image?rev=${nextSnapshot.imageRevision || Date.now()}`
+      : "";
+    nextSnapshot.lastSuccessAt = Date.now();
+    companionSnapshot = nextSnapshot;
+    return companionSnapshot;
+  } catch (error) {
+    companionSnapshot = {
+      ...companionSnapshot,
+      configured: true,
+      sourceUrl,
+      reachable: false,
+      lastError: error instanceof Error ? error.message : String(error),
+    };
+    return companionSnapshot;
+  }
+}
+
+function clearCompanionPollTimer() {
+  if (companionPollTimer) {
+    clearTimeout(companionPollTimer);
+    companionPollTimer = null;
+  }
+}
+
+function scheduleCompanionPoll() {
+  clearCompanionPollTimer();
+  if (!normalizeUrl(settings.peerUrl || "")) {
+    resetCompanionSnapshot("");
+    return;
+  }
+  companionPollTimer = setTimeout(() => {
+    pollCompanionSnapshot()
+      .catch((error) => {
+        companionSnapshot = {
+          ...companionSnapshot,
+          lastError: error instanceof Error ? error.message : String(error),
+        };
+      })
+      .finally(() => {
+        scheduleCompanionPoll();
+      });
+  }, 3000);
 }
 
 function getPiCameraCommand() {
@@ -467,6 +931,34 @@ function listRoomMonitorCaptures(limit = 60) {
   return entries.slice(0, limit);
 }
 
+function getRoomMonitorCaptureArgs(outputPath) {
+  return [
+    "--nopreview",
+    "--timeout",
+    "2500",
+    "--metering",
+    "average",
+    "--awb",
+    "auto",
+    "--output",
+    outputPath,
+  ];
+}
+
+async function applyRoomMonitorAutoBrightness(filePath) {
+  const { stdout } = await execFileAsync(
+    "python3",
+    [ROOM_MONITOR_AUTO_BRIGHTNESS_SCRIPT, filePath],
+    {
+      timeout: 45000,
+      maxBuffer: 1024 * 1024,
+    },
+  );
+  const payload = JSON.parse(String(stdout || "").trim() || "{}");
+  roomMonitorLastBrightnessSummary = payload.summary || "";
+  return payload;
+}
+
 function getRoomMonitorStatus() {
   const captures = listRoomMonitorCaptures(2000);
   const totalSizeBytes = captures.reduce((sum, entry) => sum + entry.sizeBytes, 0);
@@ -490,11 +982,185 @@ function getRoomMonitorStatus() {
     lastError: roomMonitorLastError,
     detectedCamera: roomMonitorDetectedCamera,
     cameraCommand: path.basename(getPiCameraCommand() || ""),
+    autoBrightnessEnabled: settings.roomMonitorAutoBrightness,
+    lastBrightnessSummary: roomMonitorLastBrightnessSummary,
     totalCount: captures.length,
     totalSizeBytes,
     freeSpaceBytes,
     captures: captures.slice(0, 40),
   };
+}
+
+function getAiImageArchiveStatus(limit = 8) {
+  const allPhotos = listAiImportedImages(5000);
+  const photos = allPhotos.slice(0, Math.max(1, limit));
+  const totalSizeBytes = allPhotos.reduce((sum, photo) => sum + photo.sizeBytes, 0);
+  let freeSpaceBytes = 0;
+  try {
+    freeSpaceBytes = getRoomMonitorFreeBytes();
+  } catch (error) {
+    aiImageSyncLastError =
+      aiImageSyncLastError ||
+      (error instanceof Error ? error.message : String(error));
+  }
+  return {
+    enabled: settings.aiImageSyncEnabled,
+    intervalSec: settings.aiImageSyncIntervalSec,
+    syncInProgress: aiImageSyncInProgress,
+    sourceUrl: getAiImageSourceBaseUrl(),
+    reserveGb: settings.roomMonitorFreeReserveGb,
+    lastSyncAt: aiImageSyncLastSyncAt,
+    lastImportedAt: aiImageArchive.lastImportedAt || 0,
+    lastError: aiImageSyncLastError,
+    totalCount: aiImageArchive.entries.length,
+    totalSizeBytes,
+    freeSpaceBytes,
+    latestFileName: aiImageArchive.latestLocalFileName || "",
+    latestImageUrl: photos[0]?.imageUrl || "",
+    photos,
+  };
+}
+
+function clearAiImageSyncTimer() {
+  if (aiImageSyncTimer) {
+    clearTimeout(aiImageSyncTimer);
+    aiImageSyncTimer = null;
+  }
+}
+
+function buildAiImportLocalFileName(remoteFileName) {
+  const extension = path.extname(remoteFileName).toLowerCase() || ".png";
+  const stem = path
+    .basename(remoteFileName, extension)
+    .replace(/[^a-z0-9._-]+/gi, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "") || "image";
+  return `${Date.now()}-${stem}${extension}`;
+}
+
+async function importRemoteAiImage(photo, sourceUrl) {
+  const normalizedSourceUrl = normalizeUrl(sourceUrl || getAiImageSourceBaseUrl());
+  if (!normalizedSourceUrl) {
+    throw new Error("No Whisplay source URL is configured for AI image import.");
+  }
+  const remoteFileName = normalizeFileName(photo?.fileName || "");
+  if (!remoteFileName) {
+    throw new Error("Missing remote AI image file name.");
+  }
+  const archiveKey = buildAiImageArchiveKey(normalizedSourceUrl, remoteFileName);
+  if (
+    aiImageArchive.entries.some(
+      (entry) => buildAiImageArchiveKey(entry.sourceUrl, entry.remoteFileName) === archiveKey,
+    )
+  ) {
+    return { imported: false, skipped: remoteFileName, reason: "already-imported" };
+  }
+
+  enforceRoomMonitorStorageReserve();
+  const response = await fetch(`${normalizedSourceUrl}/api/generated-images/image/${encodeURIComponent(remoteFileName)}`, {
+    headers: { "Cache-Control": "no-store" },
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to download AI image ${remoteFileName} (HTTP ${response.status}).`);
+  }
+  const buffer = Buffer.from(await response.arrayBuffer());
+  const reserveBytes = settings.roomMonitorFreeReserveGb * 1024 * 1024 * 1024;
+  const freeBytes = getRoomMonitorFreeBytes();
+  if (freeBytes - buffer.length < reserveBytes) {
+    throw new Error(
+      `Skipping ${remoteFileName}: not enough free space to keep the ${settings.roomMonitorFreeReserveGb} GB reserve without deleting imported AI images.`,
+    );
+  }
+
+  let localFileName = buildAiImportLocalFileName(remoteFileName);
+  let filePath = path.join(AI_IMAGE_IMPORT_DIR, localFileName);
+  while (fs.existsSync(filePath)) {
+    localFileName = buildAiImportLocalFileName(remoteFileName);
+    filePath = path.join(AI_IMAGE_IMPORT_DIR, localFileName);
+  }
+  fs.writeFileSync(filePath, buffer);
+
+  const importedAt = Date.now();
+  aiImageArchive.entries.unshift({
+    sourceUrl: normalizedSourceUrl,
+    remoteFileName,
+    localFileName,
+    importedAt,
+    updatedAt: Number.parseInt(String(photo?.updatedAt || "0"), 10) || importedAt,
+    sizeBytes: buffer.length,
+  });
+  aiImageArchive.latestLocalFileName = localFileName;
+  aiImageArchive.lastImportedAt = importedAt;
+  saveAiImageArchive();
+  return { imported: true, fileName: localFileName, remoteFileName };
+}
+
+async function syncRemoteAiImages(options = {}) {
+  if (aiImageSyncInProgress) {
+    return { imported: [], skipped: [], sourceUrl: getAiImageSourceBaseUrl() };
+  }
+  aiImageSyncInProgress = true;
+  try {
+    const remote = await fetchRemoteAiImageList();
+    const imported = [];
+    const skipped = [];
+    const orderedPhotos = remote.photos.slice().sort((a, b) => a.updatedAt - b.updatedAt);
+    for (const photo of orderedPhotos) {
+      if (photo.imported && !options.forceSingleFile) {
+        continue;
+      }
+      if (options.fileName && photo.fileName !== options.fileName) {
+        continue;
+      }
+      const result = await importRemoteAiImage(photo, remote.sourceUrl);
+      if (result.imported) {
+        imported.push(result.remoteFileName || photo.fileName);
+      } else {
+        skipped.push(result.skipped || photo.fileName);
+      }
+    }
+    aiImageSyncLastError = "";
+    aiImageSyncLastSyncAt = Date.now();
+    saveAiImageArchive();
+    return { imported, skipped, sourceUrl: remote.sourceUrl };
+  } catch (error) {
+    aiImageSyncLastError = error instanceof Error ? error.message : String(error);
+    throw error;
+  } finally {
+    aiImageSyncInProgress = false;
+    scheduleAiImageSync();
+  }
+}
+
+function scheduleAiImageSync() {
+  clearAiImageSyncTimer();
+  if (!settings.aiImageSyncEnabled || settings.aiImageSyncIntervalSec <= 0) {
+    return;
+  }
+  const delayMs = aiImageSyncLastSyncAt ? settings.aiImageSyncIntervalSec * 1000 : 1500;
+  aiImageSyncTimer = setTimeout(() => {
+    syncRemoteAiImages().catch((error) => {
+      aiImageSyncLastError = error instanceof Error ? error.message : String(error);
+    });
+  }, delayMs);
+}
+
+function applyAiImageSyncSettings() {
+  aiImageSyncLastError = "";
+  scheduleAiImageSync();
+}
+
+function applyCompanionSettings() {
+  pollCompanionSnapshot()
+    .catch((error) => {
+      companionSnapshot = {
+        ...companionSnapshot,
+        lastError: error instanceof Error ? error.message : String(error),
+      };
+    })
+    .finally(() => {
+      scheduleCompanionPoll();
+    });
 }
 
 async function captureRoomMonitorImage(force = false) {
@@ -515,25 +1181,32 @@ async function captureRoomMonitorImage(force = false) {
 
   roomMonitorCaptureInProgress = true;
   const outputPath = path.join(ROOM_MONITOR_DIR, `room-monitor-${Date.now()}.jpg`);
+  let captureCompleted = false;
 
   try {
     enforceRoomMonitorStorageReserve();
     await refreshRoomMonitorCameraInfo();
     await execFileAsync(
       command,
-      ["--nopreview", "--timeout", "1500", "--output", outputPath],
+      getRoomMonitorCaptureArgs(outputPath),
       {
         timeout: 20000,
         maxBuffer: 1024 * 1024,
       },
     );
     roomMonitorLastCaptureAt = Date.now();
+    captureCompleted = true;
+    if (settings.roomMonitorAutoBrightness) {
+      await applyRoomMonitorAutoBrightness(outputPath);
+    } else {
+      roomMonitorLastBrightnessSummary = "";
+    }
     roomMonitorLastError = "";
     enforceRoomMonitorStorageReserve();
     return true;
   } catch (error) {
     roomMonitorLastError = error instanceof Error ? error.message : String(error);
-    if (fs.existsSync(outputPath)) {
+    if (!captureCompleted && fs.existsSync(outputPath)) {
       fs.unlinkSync(outputPath);
     }
     throw error;
@@ -1326,6 +1999,8 @@ function getStatePayload() {
     settings: getPublicSettings(),
     online: hubTransport.getPublicState(),
     roomMonitor: getRoomMonitorStatus(),
+    aiImageArchive: getAiImageArchiveStatus(40),
+    companionSnapshot: getCompanionSnapshotStatus(),
     conversations,
     stats: {
       requestsUsedThisHour: runtimeState.requestTimestamps.filter(
@@ -1358,6 +2033,8 @@ const server = http.createServer(async (req, res) => {
       }
       saveSettings();
       applyRoomMonitorSettings();
+      applyAiImageSyncSettings();
+      applyCompanionSettings();
       sendJson(res, 200, { ok: true, settings: getPublicSettings() });
       return;
     }
@@ -1413,6 +2090,65 @@ const server = http.createServer(async (req, res) => {
           : {}),
       });
       fs.createReadStream(filePath).pipe(res);
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/ai-images") {
+      const limitValue = Number.parseInt(url.searchParams.get("limit") || "", 10);
+      const limit =
+        Number.isFinite(limitValue) && limitValue > 0
+          ? Math.min(limitValue, 200)
+          : 40;
+      sendJson(res, 200, { ok: true, aiImageArchive: getAiImageArchiveStatus(limit) });
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/ai-images/image") {
+      const fileName = url.searchParams.get("file") || "";
+      const filePath = getAiImportFilePath(fileName);
+      if (!filePath) {
+        sendJson(res, 404, { ok: false, error: "AI image not found." });
+        return;
+      }
+      res.writeHead(200, {
+        "Content-Type": contentTypeFor(filePath),
+        "Cache-Control": "no-store",
+      });
+      fs.createReadStream(filePath).pipe(res);
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/remote-ai-images") {
+      const remote = await fetchRemoteAiImageList();
+      sendJson(res, 200, { ok: true, sourceUrl: remote.sourceUrl, photos: remote.photos.slice(0, 40) });
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/remote-ai-images/import") {
+      const body = await readBody(req);
+      const fileName = normalizeFileName(body.fileName || "");
+      if (!fileName) {
+        sendJson(res, 400, { ok: false, error: "fileName is required." });
+        return;
+      }
+      const result = await syncRemoteAiImages({ fileName, forceSingleFile: true });
+      sendJson(res, 200, {
+        ok: true,
+        imported: result.imported,
+        skipped: result.skipped,
+        aiImageArchive: getAiImageArchiveStatus(40),
+      });
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/remote-ai-images/import-all-new") {
+      const result = await syncRemoteAiImages();
+      sendJson(res, 200, {
+        ok: true,
+        imported: result.imported,
+        skipped: result.skipped,
+        aiImageArchive: getAiImageArchiveStatus(40),
+      });
       return;
     }
 
@@ -1522,6 +2258,8 @@ const server = http.createServer(async (req, res) => {
 });
 
 applyRoomMonitorSettings();
+applyAiImageSyncSettings();
+applyCompanionSettings();
 refreshRoomMonitorCameraInfo().catch((error) => {
   roomMonitorLastError = error instanceof Error ? error.message : String(error);
 });

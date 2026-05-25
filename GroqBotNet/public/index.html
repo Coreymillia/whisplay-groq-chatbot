@@ -14,6 +14,10 @@
           Bare-bones Groq bot node for personality-driven bot-to-bot conversations.
         </p>
         <p class="muted">
+          Users connect to this browser UI with the <strong>GroqBotNet URL</strong>. For companion mode, set
+          <strong>Connect to Bot</strong> once to the Whisplay base URL, and the TFT/browser reuse that same target.
+        </p>
+        <p class="muted">
           <a href="/hdmi" style="color:#7fd4ff;text-decoration:none;font-weight:700">Open HDMI chat view</a>
         </p>
         <p class="muted">
@@ -55,6 +59,14 @@
           <label>
             Connect to Bot
             <input id="peerUrl" name="peerUrl" type="text" placeholder="http://10.160.0.136:17880" />
+          </label>
+          <label>
+            TFT display mode
+            <select id="tftDisplayMode" name="tftDisplayMode">
+              <option value="auto">Auto companion (Recommended)</option>
+              <option value="companion">Whisplay mirror</option>
+              <option value="local">Local GroqBotNet chat</option>
+            </select>
           </label>
           <label>
             Node handle
@@ -132,9 +144,93 @@
                   <option value="8">8 GB</option>
                 </select>
               </label>
+              <label style="display:flex;align-items:center;gap:10px;margin-top:24px">
+                <input id="roomMonitorAutoBrightness" name="roomMonitorAutoBrightness" type="checkbox" value="true" />
+                Auto brightness
+              </label>
             </div>
             <p class="muted">
-              Leave start and stop blank to run all day. Use Off to disable the room monitor. Oldest captures are deleted automatically to protect the selected free-space reserve.
+              Leave start and stop blank to run all day. Use Off to disable the room monitor. Auto brightness lifts dark captures automatically. Oldest captures are deleted automatically to protect the selected free-space reserve.
+            </p>
+          </section>
+          <section class="card stack">
+            <h3 style="margin:0">AI image archive</h3>
+            <div class="grid two">
+              <label style="display:flex;align-items:center;gap:10px;margin-top:24px">
+                <input id="aiImageSyncEnabled" name="aiImageSyncEnabled" type="checkbox" value="true" />
+                Auto import new AI images
+              </label>
+              <label>
+                AI image sync interval
+                <select id="aiImageSyncIntervalSec" name="aiImageSyncIntervalSec">
+                  <option value="0">Off</option>
+                  <option value="15">15 seconds</option>
+                  <option value="20">20 seconds</option>
+                  <option value="30">30 seconds</option>
+                  <option value="45">45 seconds</option>
+                  <option value="60">60 seconds</option>
+                  <option value="120">2 minutes</option>
+                  <option value="300">5 minutes</option>
+                </select>
+              </label>
+            </div>
+            <p class="muted">
+              Imported AI images are copied from Whisplay into a pinned local archive and are never auto-deleted. If storage drops below the free-space reserve, new imports stop instead of deleting archived AI art.
+            </p>
+          </section>
+          <section class="card stack">
+            <h3 style="margin:0">Companion display</h3>
+            <div class="grid two">
+              <label>
+                Screensaver timeout
+                <select id="companionIdleTimeoutSec" name="companionIdleTimeoutSec">
+                  <option value="5">5 seconds</option>
+                  <option value="10">10 seconds</option>
+                  <option value="15">15 seconds</option>
+                  <option value="20">20 seconds</option>
+                  <option value="30">30 seconds</option>
+                  <option value="45">45 seconds</option>
+                  <option value="60">60 seconds</option>
+                  <option value="120">2 minutes</option>
+                </select>
+              </label>
+              <label>
+                Screensaver mode
+                <select id="companionIdleMode" name="companionIdleMode">
+                  <option value="slideshow">AI slideshow</option>
+                  <option value="matrix">Matrix screensaver</option>
+                </select>
+              </label>
+              <label>
+                Chat text color
+                <select id="companionTextColor" name="companionTextColor">
+                  <option value="multicolor">Multicolor</option>
+                  <option value="white">White</option>
+                  <option value="green">Green</option>
+                  <option value="cyan">Cyan</option>
+                  <option value="yellow">Yellow</option>
+                </select>
+              </label>
+              <label>
+                Top OLED idle mode
+                <select id="companionOledIdleMode" name="companionOledIdleMode">
+                  <option value="rain">Matrix rain</option>
+                  <option value="header">Keep header info</option>
+                </select>
+              </label>
+              <label>
+                Scroll speed
+                <select id="companionScrollSpeedSec" name="companionScrollSpeedSec">
+                  <option value="0.12">Extreme</option>
+                  <option value="0.18">Very fast</option>
+                  <option value="0.25">Fast (Recommended)</option>
+                  <option value="0.35">Normal</option>
+                  <option value="0.5">Slow</option>
+                </select>
+              </label>
+            </div>
+            <p class="muted">
+              These settings control the bottom TFT companion behavior during normal chat and when it falls back to the idle screensaver mode.
             </p>
           </section>
           <div class="actions">
@@ -201,6 +297,26 @@
           </div>
           <div class="actions">
             <a class="secondary room-monitor-link" href="/room-monitor">Open room monitor gallery</a>
+          </div>
+        </section>
+        <section class="card stack">
+          <div class="row">
+            <h2>AI image archive</h2>
+            <div class="actions">
+              <button id="aiImportAllBtn" type="button" class="secondary">Import all new</button>
+              <button id="aiRefreshBtn" type="button" class="secondary">Refresh remote list</button>
+            </div>
+          </div>
+          <div id="aiImageStatus" class="muted">AI archive is idle.</div>
+          <div class="grid two">
+            <div class="stack">
+              <h3 style="margin:0">Local archive</h3>
+              <div id="aiImageRecent" class="list"></div>
+            </div>
+            <div class="stack">
+              <h3 style="margin:0">Remote Whisplay AI images</h3>
+              <div id="aiRemoteList" class="list"></div>
+            </div>
           </div>
         </section>
       </section>

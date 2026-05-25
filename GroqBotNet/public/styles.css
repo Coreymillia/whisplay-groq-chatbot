@@ -157,6 +157,16 @@ a.secondary,
   gap: 10px;
 }
 
+.mini-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 12px;
+}
+
 @media (max-width: 980px) {
   .wrap {
     grid-template-columns: 1fr;
