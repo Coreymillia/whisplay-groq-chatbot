@@ -133,7 +133,7 @@ Official Google docs clearly show **free vs paid tiers**, billing tiers, and mod
 ## Current Gemini photo workflow status
 
 - **Working now:** capture a photo, say or type an edit request, and Gemini will edit the current photo using the latest shown image as context
-- **Working now:** an optional browser-side **confirm mode** can stage Gemini photo edits and wait for **confirm / add / start over / cancel**
+- **Working now:** an optional browser-side **confirm mode** can stage Gemini photo edits and wait for **confirm** or **confirmed**, plus **add / start over / cancel**
 - **Working now:** an optional browser-side **experimental personality prompt helper** can rewrite rough photo-edit requests into one short image prompt using the active chatbot personality/model before Gemini runs the edit
 - **Working now:** that prompt helper can either feed the normal edit flow directly or pair with **confirm mode**, so the helper-generated prompt can be reviewed with **confirm / add / start over / cancel** before Gemini edits the image
 - **Working now:** the prompt helper has its own **Prompt Helper Token Limit** setting in the browser, so keeping helper rewrites short does not change the normal chat model limits

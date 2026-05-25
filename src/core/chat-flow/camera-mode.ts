@@ -1,11 +1,10 @@
 import { display, getCurrentStatus } from "../../device/display";
 
-const CAMERA_LONG_PRESS_MS = 2000;
-const CAMERA_EXIT_AFTER_CAPTURE_MS = 2000;
+const CAMERA_TALK_HOLD_MS = 800;
 
 let cameraModePressAt = 0;
 let cameraModeLongPressTimer: NodeJS.Timeout | null = null;
-let cameraModeExitAfterCaptureTimer: NodeJS.Timeout | null = null;
+let cameraModeLongPressTriggered = false;
 let onCameraModeExitCallback: () => void = () => {};
 
 function exitCameraMode(): void {
@@ -22,15 +21,12 @@ function clearCameraModeTimers(): void {
     clearTimeout(cameraModeLongPressTimer);
     cameraModeLongPressTimer = null;
   }
-  if (cameraModeExitAfterCaptureTimer) {
-    clearTimeout(cameraModeExitAfterCaptureTimer);
-    cameraModeExitAfterCaptureTimer = null;
-  }
 }
 
 export function resetCameraModeControl(): void {
   clearCameraModeTimers();
   cameraModePressAt = 0;
+  cameraModeLongPressTriggered = false;
 }
 
 export function onCameraModeExit(callback: (() => void) | null): void {
@@ -45,14 +41,21 @@ export function enterCameraMode(captureImgPath: string): void {
   });
 }
 
-export function handleCameraModePress(): void {
+export function exitCameraModeNow(): void {
+  exitCameraMode();
+}
+
+export function handleCameraModePress(onTalkHold?: () => void): void {
   cameraModePressAt = Date.now();
+  cameraModeLongPressTriggered = false;
   if (cameraModeLongPressTimer) {
     clearTimeout(cameraModeLongPressTimer);
   }
   cameraModeLongPressTimer = setTimeout(() => {
-    exitCameraMode();
-  }, CAMERA_LONG_PRESS_MS);
+    cameraModeLongPressTimer = null;
+    cameraModeLongPressTriggered = true;
+    onTalkHold?.();
+  }, CAMERA_TALK_HOLD_MS);
 }
 
 export function handleCameraModeRelease(): void {
@@ -68,19 +71,18 @@ export function handleCameraModeRelease(): void {
     cameraModeLongPressTimer = null;
   }
 
-  if (cameraModePressAt > 0 && duration <= CAMERA_LONG_PRESS_MS) {
+  if (cameraModeLongPressTriggered) {
+    cameraModePressAt = 0;
+    cameraModeLongPressTriggered = false;
+    return;
+  }
+
+  if (cameraModePressAt > 0 && duration <= CAMERA_TALK_HOLD_MS) {
     display({
       camera_capture: true,
       text: "[camera]Capturing image...\nStand still.",
       RGB: "#ff2a2a",
     });
-    if (cameraModeExitAfterCaptureTimer) {
-      clearTimeout(cameraModeExitAfterCaptureTimer);
-    }
-    cameraModeExitAfterCaptureTimer = setTimeout(() => {
-      exitCameraMode();
-      cameraModeExitAfterCaptureTimer = null;
-    }, CAMERA_EXIT_AFTER_CAPTURE_MS);
   }
 
   cameraModePressAt = 0;

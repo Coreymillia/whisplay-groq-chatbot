@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Pi3Groq HDMI Mirror</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body class="hdmi-body">
+  <main class="hdmi-shell">
+    <header class="hdmi-header">
+      <div class="eyebrow">Pi3Groq HDMI</div>
+      <div id="hdmiStatus" class="hdmi-status">Waiting for Whisplay...</div>
+      <div id="hdmiMeta" class="muted">No companion connection yet.</div>
+    </header>
+    <section class="hdmi-content">
+      <div class="hdmi-copy">
+        <div id="hdmiEmoji" class="hdmi-emoji">🙂</div>
+        <pre id="hdmiText" class="hdmi-text">Start the local Pi3Groq app and save the Whisplay URL to begin.</pre>
+      </div>
+      <div class="hdmi-image-wrap">
+        <img id="hdmiImage" alt="Current Whisplay image" class="hdmi-image" hidden />
+        <div id="hdmiImageEmpty" class="muted">No active Whisplay image.</div>
+      </div>
+    </section>
+  </main>
+
+  <script src="/static/hdmi.js"></script>
+</body>
+</html>

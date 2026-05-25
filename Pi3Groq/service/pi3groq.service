@@ -1,0 +1,17 @@
+[Unit]
+Description=Pi3Groq keyboard companion
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=coreymillia
+WorkingDirectory=/home/coreymillia/WhisplayGroqHat/Pi3Groq
+Environment=PI3GROQ_HOST=0.0.0.0
+Environment=PI3GROQ_PORT=18600
+ExecStart=/usr/bin/python3 /home/coreymillia/WhisplayGroqHat/Pi3Groq/app.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

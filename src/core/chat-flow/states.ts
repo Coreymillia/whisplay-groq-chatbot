@@ -83,6 +83,7 @@ import {
   saveRuntimeSettings,
   VOLUME_LEVEL_OPTIONS,
 } from "../../config/runtime-settings";
+import type { GroqHeaderBadgeView } from "../../device/display";
 import {
   SETTINGS_OPEN_GRACE_MS,
   SETTINGS_SELECT_HOLD_MS,
@@ -375,6 +376,13 @@ interface PendingImageEditConfirmation {
 let pendingImageEditConfirmation: PendingImageEditConfirmation | null = null;
 let cameraCaptureCueTimer: NodeJS.Timeout | null = null;
 let cameraCaptureCueResetTimer: NodeJS.Timeout | null = null;
+const HEADER_BADGE_VIEW_CYCLE: GroqHeaderBadgeView[] = [
+  "default",
+  "time",
+  "rpd-model",
+  "personality",
+  "requests-total",
+];
 
 function clearPendingImageEditConfirmation(): void {
   pendingImageEditConfirmation = null;
@@ -411,7 +419,7 @@ function parseImageEditConfirmCommand(prompt: string): {
   if (!trimmed) {
     return null;
   }
-  if (/^\s*confirm\s*[.!?]*$/i.test(trimmed)) {
+  if (/^\s*confirm(?:ed)?\s*[.!?]*$/i.test(trimmed)) {
     return { type: "confirm" };
   }
   if (/^\s*confirm\s+prompt\s*[.!?]*$/i.test(trimmed)) {
@@ -442,7 +450,7 @@ function formatPendingImageEditPrompt(prompt: string): string {
 function buildImageEditConfirmMessage(prompt: string): string {
   return (
     `[confirm]Pending edit:\n${formatPendingImageEditPrompt(prompt)}\n\n` +
-    "Say confirm, add..., start over..., or cancel."
+    "Say confirm or confirmed, add..., start over..., or cancel."
   );
 }
 
@@ -538,6 +546,20 @@ function showCameraCapturedCue(
     cameraCaptureCueResetTimer = null;
     display({ RGB: "#000055" });
   }, resetDelayMs);
+}
+
+function getNextGroqHeaderBadgeView(currentView?: string): GroqHeaderBadgeView {
+  const currentIndex = HEADER_BADGE_VIEW_CYCLE.indexOf(
+    (currentView as GroqHeaderBadgeView) || "default",
+  );
+  if (currentIndex === -1) {
+    return HEADER_BADGE_VIEW_CYCLE[0];
+  }
+  return HEADER_BADGE_VIEW_CYCLE[(currentIndex + 1) % HEADER_BADGE_VIEW_CYCLE.length];
+}
+
+function getCameraCapturePath(): string {
+  return `${cameraDir}/capture-${moment().format("YYYYMMDD-HHmmss-SSS")}.jpg`;
 }
 
 function shouldRouteToVision(prompt: string): boolean {
@@ -1024,18 +1046,23 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
     const currentStatus = getCurrentStatus();
     const preserveLastReply =
       currentStatus.status === "last reply" && Boolean(currentStatus.text);
-    onButtonDoubleClick(() => {
-      if (ctx.enableCamera) {
-        ctx.openCameraPreview();
-      }
-    });
+    onButtonDoubleClick(noop);
     onButtonPressed(() => {
       resetCameraModeControl();
       // Stop any playing music when waking up
       stopMusicPlayback();
       ctx.transitionTo("listening");
     });
-    onButtonReleased(noop);
+    onButtonReleased(() => {
+      if (ctx.currentFlowName !== "sleep") {
+        return;
+      }
+      display({
+        groq_header_badge_view: getNextGroqHeaderBadgeView(
+          getCurrentStatus().groq_header_badge_view,
+        ),
+      });
+    });
     onCameraModeExit(null);
     onTextInput((text: string) => {
       if (ctx.currentFlowName !== "sleep") return;
@@ -1055,17 +1082,27 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
         ? {}
         : currentStatus.text.endsWith("Listening...") || !currentStatus.text
         ? {
-          text: `Long press to talk${ctx.enableCamera ? ",\ndouble press for camera" : ""
-            }.`,
+          text: "Hold to talk.",
         }
         : {}),
     });
   },
   camera: (ctx: ChatFlowContext) => {
-    let latestCapturePath = "";
     onButtonDoubleClick(null);
     onButtonPressed(() => {
-      handleCameraModePress();
+      handleCameraModePress(() => {
+        if (ctx.currentFlowName !== "camera") {
+          return;
+        }
+        resetCameraModeControl();
+        display({
+          camera_mode: false,
+          image: "",
+          image_icon_visible: false,
+        });
+        stopMusicPlayback();
+        ctx.transitionTo("listening");
+      });
     });
     onButtonReleased(() => {
       handleCameraModeRelease();
@@ -1080,19 +1117,16 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
       setPendingCapturedImgForChat(captureImagePath);
       clearLatestVisionAnalysis();
       clearPendingImageEditConfirmation();
-      latestCapturePath = captureImagePath;
       showCameraCapturedCue();
       display({
         image: captureImagePath,
         image_icon_visible: false,
+        capture_image_path: getCameraCapturePath(),
       });
     });
     onCameraModeExit(() => {
       if (ctx.currentFlowName === "camera") {
-        if (latestCapturePath) {
-          ctx.transitionTo("image");
-          return;
-        }
+        display({ image: "", image_icon_visible: false });
         ctx.transitionTo("sleep");
       }
     });

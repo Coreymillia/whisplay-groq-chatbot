@@ -12,9 +12,17 @@ import { formatGroqHeaderBadgeText } from "../status/groq-header-badge";
 import { WebDisplayServer } from "./web-display";
 import { webAudioBridge } from "./web-audio-bridge";
 import { setVolumeByLevel } from "../utils/volume";
+import { getCurrentPersonalityPresetLabel } from "../config/personality-presets";
 import dotEnv from "dotenv";
 
 dotEnv.config();
+
+export type GroqHeaderBadgeView =
+  | "default"
+  | "time"
+  | "rpd-model"
+  | "personality"
+  | "requests-total";
 
 export interface Status {
   status: string;
@@ -46,6 +54,7 @@ export interface Status {
   llm_model: string;
   groq_header_badge_mode: string;
   groq_header_badge_text: string;
+  groq_header_badge_view: GroqHeaderBadgeView;
   vpn_connected: boolean;
   rag_icon_visible: boolean;
   image_icon_visible: boolean;
@@ -92,6 +101,7 @@ function getInitialStatus(): Status {
       settings.groqHeaderBadgeMode,
       0,
     ),
+    groq_header_badge_view: "default",
     vpn_connected: false,
     rag_icon_visible: false,
     image_icon_visible: false,
@@ -138,6 +148,33 @@ export class WhisplayDisplay {
   private audioLevelSampleProcess: ChildProcess | null = null;
   private audioLevelSamplePending = false;
   private audioLevelMonitorFailed = false;
+
+  private formatGroqHeaderBadgeText(
+    llmModel: string,
+    badgeMode: GroqHeaderBadgeMode,
+    requestsToday: number,
+    badgeView: GroqHeaderBadgeView,
+  ): string {
+    if (badgeView === "time") {
+      return getCurrentTimeTag().slice(11, 16);
+    }
+    if (badgeView === "rpd-model") {
+      const rpdText = formatGroqHeaderBadgeText(llmModel, "rpd-remaining", requestsToday);
+      const modelText = formatGroqHeaderBadgeText(llmModel, "model", requestsToday);
+      return `${rpdText}/${modelText}`;
+    }
+    if (badgeView === "personality") {
+      const settings = getRuntimeSettings();
+      return getCurrentPersonalityPresetLabel(
+        settings.personalityPrompt,
+        settings.savedPersonalityPresets,
+      );
+    }
+    if (badgeView === "requests-total") {
+      return `${Math.max(0, Math.round(requestsToday))}`;
+    }
+    return formatGroqHeaderBadgeText(llmModel, badgeMode, requestsToday);
+  }
 
   constructor() {
     this.deviceEnabled = parseBoolEnv("WHISPLAY_DEVICE_ENABLED", true);
@@ -512,6 +549,7 @@ export class WhisplayDisplay {
       gemini_low_tier_image_balance_text,
       llm_model,
       groq_header_badge_mode,
+      groq_header_badge_view,
       vpn_connected,
       rag_icon_visible,
       image_icon_visible,
@@ -527,10 +565,11 @@ export class WhisplayDisplay {
       ...this.currentStatus,
       ...normalizedStatus,
     };
-    const groqHeaderBadgeText = formatGroqHeaderBadgeText(
+    const groqHeaderBadgeText = this.formatGroqHeaderBadgeText(
       llm_model,
       groq_header_badge_mode as GroqHeaderBadgeMode,
       groq_requests_today,
+      groq_header_badge_view,
     );
 
     const changedValues = Object.entries(normalizedStatus).filter(
@@ -567,6 +606,7 @@ export class WhisplayDisplay {
     this.currentStatus.llm_model = llm_model;
     this.currentStatus.groq_header_badge_mode = groq_header_badge_mode;
     this.currentStatus.groq_header_badge_text = groqHeaderBadgeText;
+    this.currentStatus.groq_header_badge_view = groq_header_badge_view;
     this.currentStatus.vpn_connected = vpn_connected;
     this.currentStatus.rag_icon_visible = rag_icon_visible;
     this.currentStatus.image_icon_visible = image_icon_visible;

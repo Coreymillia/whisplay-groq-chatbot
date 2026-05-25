@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Pi3Groq Companion</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <main class="shell">
+    <header class="hero">
+      <div>
+        <div class="eyebrow">Pi3Groq</div>
+        <h1>Whisplay Keyboard Companion</h1>
+        <p class="lede">Type to Whisplay from a local Pi browser UI, while keeping Whisplay as the chatbot brain.</p>
+      </div>
+      <div class="hero-actions">
+        <a id="openWhisplayBtn" class="button secondary" href="#" target="_blank" rel="noopener">Open Whisplay UI</a>
+        <a class="button secondary" href="/hdmi" target="_blank" rel="noopener">Open Local HDMI</a>
+      </div>
+    </header>
+
+    <section class="panel settings-panel">
+      <div class="panel-title">Companion Settings</div>
+      <form id="settingsForm" class="settings-grid">
+        <label class="field">
+          <span>Mode</span>
+          <select id="modeSelect">
+            <option value="companion">Companion</option>
+            <option value="standalone" disabled>Standalone (Later)</option>
+          </select>
+        </label>
+        <label class="field field-wide">
+          <span>Whisplay Base URL</span>
+          <input id="companionBaseUrlInput" type="text" placeholder="http://10.160.0.136:17880" autocomplete="off" />
+        </label>
+        <label class="field">
+          <span>Poll Interval</span>
+          <select id="pollIntervalSelect">
+            <option value="1000">1 second</option>
+            <option value="1500">1.5 seconds</option>
+            <option value="2000">2 seconds</option>
+            <option value="3000">3 seconds</option>
+            <option value="5000">5 seconds</option>
+          </select>
+        </label>
+        <div class="field field-actions">
+          <button class="button" id="saveSettingsBtn" type="submit">Save Companion</button>
+        </div>
+      </form>
+      <div class="status-row">
+        <span id="settingsStatus" class="muted">Save the Whisplay URL first, then start chatting here.</span>
+      </div>
+    </section>
+
+    <section class="workspace">
+      <section class="panel chat-panel">
+        <div class="panel-header">
+          <div>
+            <div class="panel-title">Keyboard Chat</div>
+            <div id="companionStatus" class="muted">Waiting for companion state...</div>
+          </div>
+          <div class="counter-strip">
+            <span id="llmModelBadge" class="badge">No model</span>
+            <span id="groqRequestsBadge" class="badge secondary">RPD --</span>
+            <span id="geminiBalanceBadge" class="badge secondary">$ --</span>
+          </div>
+        </div>
+
+        <div id="conversationLog" class="conversation-log"></div>
+
+        <form id="chatForm" class="composer">
+          <textarea id="chatInput" rows="3" placeholder="Type a normal message or a photo-edit request like: edit photo with a neon glow and dramatic storm lighting"></textarea>
+          <div class="composer-actions">
+            <span class="muted">Photo editing rides the normal Whisplay text path.</span>
+            <button class="button" id="sendBtn" type="submit">Send</button>
+          </div>
+        </form>
+      </section>
+
+      <aside class="panel preview-panel">
+        <div class="panel-title">Remote Whisplay State</div>
+        <div class="preview-stack">
+          <div class="preview-box">
+            <div class="field-label">Status</div>
+            <div id="remoteStatusText" class="large-status">--</div>
+          </div>
+          <div class="preview-box">
+            <div class="field-label">Emoji</div>
+            <div id="remoteEmojiText" class="emoji-text">🙂</div>
+          </div>
+          <div class="preview-box">
+            <div class="field-label">Latest Reply Snapshot</div>
+            <pre id="remoteReplyText" class="reply-preview">Waiting for Whisplay...</pre>
+          </div>
+          <div class="preview-box">
+            <div class="field-label">Current Image</div>
+            <img id="remoteImage" alt="Current Whisplay image" class="remote-image" hidden />
+            <div id="remoteImageEmpty" class="muted">No active image from Whisplay.</div>
+          </div>
+        </div>
+      </aside>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

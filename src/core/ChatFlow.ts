@@ -32,7 +32,7 @@ import {
   buildSettingsMenuItems,
   renderSettingsMenu as renderSettingsMenuText,
 } from "./chat-flow/settings-menu";
-import { enterCameraMode } from "./chat-flow/camera-mode";
+import { enterCameraMode, exitCameraModeNow } from "./chat-flow/camera-mode";
 
 dotEnv.config();
 
@@ -123,7 +123,7 @@ class ChatFlow implements ChatFlowContext {
     }
 
     this.transitionTo("sleep");
-    onCameraPreviewRequested(() => this.openCameraPreview());
+    onCameraPreviewRequested(() => this.toggleCameraPreview());
 
     const wakeEnabled = (process.env.WAKE_WORD_ENABLED || "").toLowerCase();
     if (wakeEnabled === "true") {
@@ -433,7 +433,7 @@ class ChatFlow implements ChatFlowContext {
     this.ignoreNextSettingsRelease = false;
 
     const captureImgPath = `${cameraDir}/capture-${moment().format(
-      "YYYYMMDD-HHmmss",
+      "YYYYMMDD-HHmmss-SSS",
     )}.jpg`;
     enterCameraMode(captureImgPath);
     this.transitionTo("camera");
@@ -442,6 +442,23 @@ class ChatFlow implements ChatFlowContext {
       ok: true,
       message: "Opening live preview.",
     };
+  };
+
+  toggleCameraPreview = (): { ok: boolean; message: string } => {
+    if (!this.enableCamera) {
+      return {
+        ok: false,
+        message: "Camera preview is not available.",
+      };
+    }
+    if (this.currentFlowName === "camera") {
+      exitCameraModeNow();
+      return {
+        ok: true,
+        message: "Closing live preview.",
+      };
+    }
+    return this.openCameraPreview();
   };
 
   consumeSettingsReleaseGuard = (): boolean => {
