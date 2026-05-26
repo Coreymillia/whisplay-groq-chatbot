@@ -35,6 +35,7 @@ import {
   clearInteractiveImage,
   clearPendingCapturedImgForChat,
   getInteractiveImage,
+  getPreferredContextImage,
   getLatestCapturedImg,
   hasInteractiveImage,
   listCapturedImgs,
@@ -362,6 +363,7 @@ const previousSongIntentPatterns = [
 ];
 
 const PHOTO_BROWSER_EXIT_HOLD_MS = 1800;
+const IMAGE_MODE_TALK_HOLD_MS = 800;
 const VOICE_HELP_EXIT_HOLD_MS = 1800;
 const VOICE_COMMAND_HELP_PAGES = buildVoiceCommandHelpPages();
 const TEXT_AUTO_REPLAY_PAUSE_MS = 900;
@@ -596,7 +598,7 @@ function shouldRouteToImageGeneration(prompt: string): boolean {
 
 function shouldUseImageContextForGeneration(prompt: string): boolean {
   const trimmed = prompt.trim();
-  if (!trimmed || !getLatestShowedImage()) {
+  if (!trimmed || !getPreferredContextImage()) {
     return false;
   }
   return imageGenerationContextPattern.test(trimmed);
@@ -788,6 +790,29 @@ function getAvailableManualGalleryEntries(): Array<{
       flow: "photo_browser",
     },
   ];
+}
+
+function getNextCameraRollImage(currentImagePath?: string): {
+  imagePath: string;
+  index: number;
+  total: number;
+} | null {
+  const photos = listCapturedImgs();
+  if (!photos.length) {
+    return null;
+  }
+  const normalizedCurrent = currentImagePath ? path.resolve(currentImagePath) : "";
+  const currentIndex = normalizedCurrent
+    ? photos.findIndex((entry) => path.resolve(entry) === normalizedCurrent)
+    : -1;
+  const nextIndex = currentIndex >= 0
+    ? (currentIndex + 1) % photos.length
+    : 0;
+  return {
+    imagePath: photos[nextIndex] || "",
+    index: nextIndex,
+    total: photos.length,
+  };
 }
 
 function shouldShutdown(prompt: string): boolean {
@@ -1114,15 +1139,21 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
       }
       setLatestCapturedImg(captureImagePath);
       activateInteractiveImage(captureImagePath, "manual-capture");
+      queueDisplayImage(captureImagePath);
       setPendingCapturedImgForChat(captureImagePath);
       clearLatestVisionAnalysis();
       clearPendingImageEditConfirmation();
       showCameraCapturedCue();
+      resetCameraModeControl();
       display({
+        status: "photo ready",
+        camera_mode: false,
         image: captureImagePath,
         image_icon_visible: false,
-        capture_image_path: getCameraCapturePath(),
+        text: "[camera]Photo captured. Ready to edit.",
+        text_input_enabled: true,
       });
+      ctx.transitionTo("image");
     });
     onCameraModeExit(() => {
       if (ctx.currentFlowName === "camera") {
@@ -2295,7 +2326,7 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
     }
     const imageEffectCommand = parseImageEffectCommand(ctx.asrText);
     if (imageEffectCommand) {
-      const currentImagePath = getLatestShowedImage();
+      const currentImagePath = getPreferredContextImage();
       if (!currentImagePath) {
         finishDirectMessage("Show or capture a photo first.");
         return;
@@ -2344,7 +2375,7 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
         ) {
           const withImageContext = shouldUseImageContextForGeneration(ctx.asrText);
           if (shouldUseImagePromptHelper(withImageContext)) {
-            const currentImagePath = getLatestShowedImage();
+            const currentImagePath = getPreferredContextImage();
             if (currentImagePath) {
               display({
                 status: "photo edit",
@@ -2383,7 +2414,7 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
             }
           }
           if (shouldUseImageEditConfirmMode() && withImageContext) {
-            const currentImagePath = getLatestShowedImage();
+            const currentImagePath = getPreferredContextImage();
             if (currentImagePath) {
               setPendingImageEditConfirmation(ctx.asrText, currentImagePath);
               transitionToPromptStage(
@@ -2587,11 +2618,62 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
       display({ status: "recognizing", text, text_input_enabled: true });
       ctx.transitionTo("answer");
     });
+    let talkHoldTimer: NodeJS.Timeout | null = null;
+    let talkHoldTriggered = false;
     onButtonPressed(() => {
-      display({ image: "" });
-      ctx.transitionTo("listening");
+      talkHoldTriggered = false;
+      if (talkHoldTimer) {
+        clearTimeout(talkHoldTimer);
+      }
+      talkHoldTimer = setTimeout(() => {
+        talkHoldTimer = null;
+        talkHoldTriggered = true;
+        display({ image: "" });
+        ctx.transitionTo("listening");
+      }, IMAGE_MODE_TALK_HOLD_MS);
     });
-    onButtonReleased(noop);
+    onButtonReleased(() => {
+      if (talkHoldTimer) {
+        clearTimeout(talkHoldTimer);
+        talkHoldTimer = null;
+      }
+      if (talkHoldTriggered) {
+        talkHoldTriggered = false;
+        return;
+      }
+      const currentStatus = getCurrentStatus();
+      const currentImagePath = currentStatus.image || getLatestShowedImage();
+      const isPhotoCycleMode =
+        currentStatus.status === "photo ready" ||
+        currentStatus.status === "photo edit" ||
+        (currentImagePath
+          ? path.resolve(currentImagePath).startsWith(`${path.resolve(cameraDir)}${path.sep}`)
+          : false);
+      if (!isPhotoCycleMode) {
+        display({ image: "" });
+        ctx.transitionTo("listening");
+        return;
+      }
+      const nextPhoto = getNextCameraRollImage(currentImagePath);
+      if (!nextPhoto) {
+        display({
+          text: "[gallery]No saved photos.",
+          text_input_enabled: true,
+        });
+        return;
+      }
+      activateInteractiveImage(nextPhoto.imagePath, "manual-selection");
+      queueDisplayImage(nextPhoto.imagePath);
+      clearPendingImageEditConfirmation();
+      clearLatestVisionAnalysis();
+      display({
+        status: "photo ready",
+        image: nextPhoto.imagePath,
+        image_icon_visible: false,
+        text: `[gallery]Photo ${nextPhoto.index + 1}/${nextPhoto.total} ready to edit.`,
+        text_input_enabled: true,
+      });
+    });
   },
   external_answer: (ctx: ChatFlowContext) => {
     if (!ctx.pendingExternalReply && !ctx.pendingExternalImageUrl) {

@@ -234,6 +234,7 @@ export class WhisplayDisplay {
           });
         },
         onCameraPreviewRequested: () => this.handleCameraPreviewRequest(),
+        onScreensaverShuffle: () => this.shuffleScreensaver(),
       });
       this.webDisplay.updateStatus(this.currentStatus);
     }
@@ -700,6 +701,30 @@ export class WhisplayDisplay {
   stopWebDisplay(): void {
     this.webDisplay?.close();
     this.webDisplay = null;
+  }
+
+  shuffleScreensaver(): { ok: boolean; message: string } {
+    const mode = this.currentStatus.screensaver_mode;
+    if (
+      mode !== "ai-gallery" &&
+      mode !== "camera-roll" &&
+      mode !== "random-shift"
+    ) {
+      return {
+        ok: false,
+        message: "Shuffle works with AI Screensaver, Camera Roll, or Random Shift.",
+      };
+    }
+    void this.sendToDisplay(JSON.stringify({ screensaver_shuffle: true }));
+    return {
+      ok: true,
+      message:
+        mode === "ai-gallery"
+          ? "Shuffled the AI HAT screensaver."
+          : mode === "camera-roll"
+            ? "Shuffled the camera roll HAT screensaver."
+            : "Shuffled the random HAT screensaver.",
+    };
   }
 
   recordConversationTurn(role: "user" | "bot", text: string): void {

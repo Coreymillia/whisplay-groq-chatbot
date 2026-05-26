@@ -30,6 +30,7 @@ import {
   listGeneratedImgs,
   listGeneratedImgDays,
   listGeneratedImgsForDay,
+  getPreferredContextImage,
   getLatestShowedImage,
   queueDisplayImage,
   setLatestCapturedImg,
@@ -161,6 +162,7 @@ interface WebDisplayOptions {
   onSettingsSaved?: (settings: RuntimeSettings) => void;
   onImageUploaded?: (imagePath: string) => void;
   onCameraPreviewRequested?: () => { ok: boolean; message: string };
+  onScreensaverShuffle?: () => { ok: boolean; message: string };
 }
 
 function normalizeBodyKey(key: string): string {
@@ -251,6 +253,7 @@ export class WebDisplayServer implements WebAudioBridgeServer {
   private onSettingsSaved: (settings: RuntimeSettings) => void;
   private onImageUploaded: (imagePath: string) => void;
   private onCameraPreviewRequested: () => { ok: boolean; message: string };
+  private onScreensaverShuffle: () => { ok: boolean; message: string };
   private botNet = getBotNetManager();
 
   constructor(options: WebDisplayOptions) {
@@ -267,6 +270,12 @@ export class WebDisplayServer implements WebAudioBridgeServer {
       (() => ({
         ok: false,
         message: "Camera preview is not available.",
+      }));
+    this.onScreensaverShuffle =
+      options.onScreensaverShuffle ||
+      (() => ({
+        ok: false,
+        message: "HAT screensaver shuffle is not available.",
       }));
     this.app = new Koa();
     this.router = new Router();
@@ -975,7 +984,7 @@ export class WebDisplayServer implements WebAudioBridgeServer {
 
     this.router.get("/api/vision/image", (ctx) => {
       ctx.set("Cache-Control", "no-store");
-      const latestImagePath = getLatestShowedImage();
+      const latestImagePath = getPreferredContextImage();
       if (!latestImagePath) {
         ctx.status = 404;
         ctx.body = "No image";
@@ -993,7 +1002,7 @@ export class WebDisplayServer implements WebAudioBridgeServer {
 
     this.router.get("/api/vision/image/companion", async (ctx) => {
       ctx.set("Cache-Control", "no-store");
-      const latestImagePath = getLatestShowedImage();
+      const latestImagePath = getPreferredContextImage();
       if (!latestImagePath) {
         ctx.status = 404;
         ctx.body = "No image";
@@ -1136,6 +1145,7 @@ export class WebDisplayServer implements WebAudioBridgeServer {
         return {
           fileName,
           imageUrl: `/api/generated-images/image/${encodeURIComponent(fileName)}`,
+          companionImageUrl: `/api/generated-images/companion/${encodeURIComponent(fileName)}`,
           updatedAt: stats.mtimeMs,
           sizeBytes: stats.size,
         };
@@ -1588,6 +1598,33 @@ export class WebDisplayServer implements WebAudioBridgeServer {
       }
       ctx.type = getImageMimeType(photoPath);
       ctx.body = fs.createReadStream(photoPath);
+    });
+
+    this.router.get("/api/generated-images/companion/:fileName", async (ctx) => {
+      ctx.set("Cache-Control", "no-store");
+      const fileName = decodeURIComponent(String(ctx.params.fileName || ""));
+      const photoPath = getGeneratedImgPath(fileName);
+      if (!photoPath) {
+        ctx.status = 404;
+        ctx.body = "Generated image not found";
+        return;
+      }
+      const safePath = this.resolveSafeImagePath(photoPath);
+      if (!safePath || !fs.existsSync(safePath)) {
+        ctx.status = 404;
+        ctx.body = "Generated image not found";
+        return;
+      }
+
+      const width = Math.max(32, Math.min(640, parseInt(String(ctx.query.width || "304"), 10) || 304));
+      const height = Math.max(32, Math.min(480, parseInt(String(ctx.query.height || "128"), 10) || 128));
+      try {
+        ctx.type = "image/jpeg";
+        ctx.body = await this.renderCompanionImageBuffer(safePath, width, height);
+      } catch (error) {
+        ctx.status = 500;
+        ctx.body = error instanceof Error ? error.message : "Failed to render AI companion image.";
+      }
     });
 
     this.router.delete("/api/photos", (ctx) => {
@@ -2262,6 +2299,14 @@ export class WebDisplayServer implements WebAudioBridgeServer {
         screenBlankTimeoutOptions: SCREEN_BLANK_TIMEOUT_OPTIONS,
         roomMonitorIntervalOptions: ROOM_MONITOR_INTERVAL_OPTIONS,
       };
+    });
+
+    this.router.post("/api/screensaver/shuffle", (ctx) => {
+      const result = this.onScreensaverShuffle();
+      ctx.status = result.ok ? 200 : 400;
+      ctx.body = result.ok
+        ? { ok: true, message: result.message }
+        : { ok: false, error: result.message };
     });
 
     this.router.post("/api/settings/personality-save", (ctx) => {

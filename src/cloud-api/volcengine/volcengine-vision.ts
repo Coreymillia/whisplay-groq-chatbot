@@ -1,6 +1,6 @@
 import { LLMTool, ToolReturnTag } from "../../type";
 import dotenv from "dotenv";
-import { getLatestShowedImage } from "../../utils/image";
+import { getPreferredContextImage } from "../../utils/image";
 import { get } from "lodash";
 import { readFileSync } from "fs";
 import { volcengineVisionModel, doubaoAccessToken } from "./volcengine";
@@ -33,7 +33,7 @@ export const addVolcengineVisionTool = (visionTools: LLMTool[]) => {
     },
     func: async (params) => {
       const { prompt } = params;
-      let imgPath = getLatestShowedImage();
+      let imgPath = getPreferredContextImage();
       if (!imgPath) {
         return `${ToolReturnTag.Error} No image is found.`;
       }

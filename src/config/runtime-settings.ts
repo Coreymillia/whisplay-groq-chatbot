@@ -49,6 +49,8 @@ export type GeminiImageModel =
   | "gemini-3-pro-image-preview";
 export type ScreensaverMode =
   | "off"
+  | "ai-gallery"
+  | "camera-roll"
   | "matrix"
   | "matrix-binary"
   | "matrix-blue"
@@ -265,6 +267,8 @@ export const GEMINI_IMAGE_MODEL_OPTIONS: Array<{
 export { GEMINI_IMAGE_PRESET_OPTIONS };
 export const SCREENSAVER_MODES: ScreensaverMode[] = [
   "off",
+  "ai-gallery",
+  "camera-roll",
   "matrix",
   "matrix-binary",
   "matrix-blue",
@@ -315,6 +319,8 @@ const VALID_HEADER_MODES = new Set<HeaderMode>([
 ]);
 const VALID_SCREENSAVER_MODES = new Set<ScreensaverMode>([
   "off",
+  "ai-gallery",
+  "camera-roll",
   "matrix",
   "matrix-binary",
   "matrix-blue",
@@ -1074,6 +1080,10 @@ export function getCameraRotationLabel(value: number): string {
 
 export function getScreensaverModeLabel(value: string): string {
   switch (value) {
+    case "ai-gallery":
+      return "AI Screensaver";
+    case "camera-roll":
+      return "Camera Roll";
     case "random-shift":
       return "Random Shift";
     case "bouncing-balls":

@@ -1,5 +1,5 @@
 import { LLMTool, ToolReturnTag } from "../../type";
-import { getLatestShowedImage } from "../../utils/image";
+import { getPreferredContextImage } from "../../utils/image";
 import { get } from "lodash";
 import { readFileSync } from "fs";
 import { openai, openaiVisionModel } from "../../cloud-api/openai/openai";
@@ -29,7 +29,7 @@ export const addOpenaiVisionTool = (visionTools: LLMTool[]) => {
     },
     func: async (params) => {
       const { prompt } = params;
-      let imgPath = getLatestShowedImage();
+      let imgPath = getPreferredContextImage();
       if (!imgPath) {
         return `${ToolReturnTag.Error} No image is found.`;
       }

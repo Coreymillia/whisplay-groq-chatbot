@@ -719,6 +719,8 @@
                 <label class="field-label" for="screensaverModeSelect">HAT Screensaver</label>
                 <select class="settings-select" id="screensaverModeSelect">
                   <option value="off">Off</option>
+                  <option value="ai-gallery">AI Screensaver</option>
+                  <option value="camera-roll">Camera Roll</option>
                   <option value="matrix">Matrix</option>
                   <option value="matrix-binary">Matrix Binary</option>
                   <option value="matrix-blue">Blue Matrix</option>
@@ -730,6 +732,14 @@
                   <option value="kaleidoscope">Kaleidoscope</option>
                   <option value="tetris-rain">Tetris Rain</option>
                 </select>
+                <div class="settings-actions" style="margin-top:10px;">
+                  <button class="button secondary compact" id="screensaverShuffleBtn" type="button">
+                    Shuffle Now
+                  </button>
+                </div>
+                <div class="field-hint">
+                  AI Screensaver uses generated and edited images. Camera Roll uses local camera captures. Shuffle jumps to another image immediately.
+                </div>
               </div>
 
               <div class="settings-field">

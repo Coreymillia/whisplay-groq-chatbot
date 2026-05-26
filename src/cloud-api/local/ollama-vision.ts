@@ -1,7 +1,7 @@
 import { VisionServer, LLMTool, ToolReturnTag } from "../../type";
 import axios from "axios";
 import dotenv from "dotenv";
-import { getLatestShowedImage, showLatestCapturedImg } from "../../utils/image";
+import { getPreferredContextImage } from "../../utils/image";
 import { get } from "lodash";
 import { readFileSync } from "fs";
 import { defaultPortMap } from "./common";
@@ -32,7 +32,7 @@ export const addOllamaVisionTool = (visionTools: LLMTool[]) => {
     },
     func: async (params) => {
       const { prompt } = params;
-      let imgPath = getLatestShowedImage();
+      let imgPath = getPreferredContextImage();
       if (!imgPath) {
         return `${ToolReturnTag.Error} No image is found.`;
       }

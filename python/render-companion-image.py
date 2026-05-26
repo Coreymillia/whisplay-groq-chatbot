@@ -3,21 +3,28 @@ import argparse
 import sys
 from io import BytesIO
 
-from PIL import Image
+from PIL import Image, ImageOps
 
 
 def render_companion_image(input_path: str, width: int, height: int, quality: int) -> bytes:
     with Image.open(input_path) as source:
         source = source.convert("RGBA")
-        source.thumbnail((width, height), Image.LANCZOS)
-
-        canvas = Image.new("RGBA", (width, height), (0, 0, 0, 255))
-        offset_x = (width - source.width) // 2
-        offset_y = (height - source.height) // 2
-        canvas.alpha_composite(source, (offset_x, offset_y))
+        canvas = ImageOps.fit(
+            source,
+            (width, height),
+            method=Image.LANCZOS,
+            centering=(0.5, 0.5),
+        )
 
         output = BytesIO()
-        canvas.convert("RGB").save(output, format="JPEG", quality=quality, optimize=True)
+        canvas.convert("RGB").save(
+            output,
+            format="JPEG",
+            quality=quality,
+            optimize=False,
+            progressive=False,
+            subsampling=2,
+        )
         return output.getvalue()
 
 

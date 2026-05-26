@@ -79,11 +79,11 @@ Official Google docs clearly show **free vs paid tiers**, billing tiers, and mod
 - **Spoken replies / TTS:** confirmed working with `espeak-ng`
 - **Spoken photo capture:** working
 - **Captured still image on HAT display:** working
-- **Companion CYD touchscreen client:** working as a polished multi-mode touch companion with chat, capture, gallery, and settings screens
+- **Companion CYD touchscreen client:** working as a polished multi-mode touch companion with chat, capture, gallery, settings, and a full-screen AI slideshow fed by Whisplay-generated images
 - **Companion Cardputer client:** working as an early rough-start build, with text chat confirmed and more settings/UI work planned
 - **Groqputer standalone Cardputer firmware:** standalone Groq Cardputer firmware now running in this repo, with a full-screen incoming/outgoing reader, battery in the header, direct Groq chat/Whisper, saved custom personalities from the AP or Cardputer, optional 16x2 I2C LCD output, on-device bot settings, and early same-LAN Whisplay relay testing
 - **Core2Groq unified M5Core2 firmware:** early dual-mode Core2 build now running in this repo, combining the existing OTR radio project with a new Groq bot mode, touch-first controls, and a path toward future BotNet connectivity
-- **Core1Display wireless external display:** working as a lightweight M5Stack Core / Core1 display mirror for both Groqputer and Whisplay over the local network with polling, auto-follow mode, button-driven reader UI, and idle screensaver support
+- **Core1Display wireless external display:** working as a lightweight M5Stack Core / Core1 display mirror for both Groqputer and Whisplay over the local network with polling, auto-follow mode, button-driven reader UI, idle screensaver support, and a working AI Show mode with optional SD storage plus internal-flash fallback
 - **Standalone GroqBotNet Pi Zero node:** working as a separate same-network experiment with browser chat plus Mini PiTFT output
 - **Raspberry Pi 3 GroqBotNetHub host:** tested, validated, and confirmed working as a LAN-hosted relay hub for online BotNet connectivity and peer relay support
 - **Web simulator/debug UI:** still available at `http://<host-or-pi-ip>:17880`
@@ -109,7 +109,8 @@ Official Google docs clearly show **free vs paid tiers**, billing tiers, and mod
 - **Local photo effects:** apply deterministic voice-triggered filters such as **retro**, **comic**, **sketch**, **pixelate**, **spooky**, **dreamy**, **warm**, **cyberpunk**, **glitch**, and more to the currently shown image
 - **Preset personalities:** Neutral, Friendly, Cranky, Roast Bot, Sleepy Pi, Affirmation, Philosopher, Mythic Oracle, Joke Bot, Tutor, Detective, and Zen
 - **Saved personality favorites:** the browser UI can save custom named personalities, and those saved favorites also show up in the HAT preset flow
-- **HAT visuals:** switchable header effects plus full-screen screensavers such as Matrix, Retro Geometry, Plasma, Neon Rain, and new VU-style mic meters
+- **HAT visuals:** switchable header effects plus full-screen screensavers such as Matrix, Retro Geometry, Plasma, Neon Rain, new VU-style mic meters, and browser-selectable image-based idle modes for **AI Screensaver** and **Camera Roll**
+- **Browser HAT screensaver controls:** the browser Settings panel now includes **AI Screensaver**, **Camera Roll**, and a **Shuffle Now** action so the physical HAT can jump to another idle image without waiting for the next timeout
 - **Optional PiSugar battery button support:** if a PiSugar service is present, the app can auto-wire **short press** to capture a photo from the selected camera source and **long press** to request a safe Pi shutdown without forcing battery cut-off, without affecting installs that do not use PiSugar
 - **Separate HAT idle controls:** the browser UI now splits **screensaver delay** from a separate **screen blank timeout**, so the device can stay on while the backlight turns off later for power saving
 - **Room monitor gallery:** the browser UI can now auto-capture from the selected camera source on a fixed interval and keep a separate room-monitor gallery trimmed dynamically to preserve at least **8 GB** of free SD-card space by deleting the oldest captures first
@@ -415,7 +416,8 @@ This repo now includes a polished companion firmware project under `CompanionCYD
 - mode switching is touch-based instead of relying on a bottom row of action buttons
 - the settings screen now exposes the highest-value non-typing chatbot controls plus CYD-local **chat text size** and **chat color** options, including a **multi-color per-line** mode
 - Wi-Fi credentials and Pi host settings are handled from the CYD's own captive portal
-- capture/gallery browsing currently follows the newest **24** images exposed by the Pi companion API and caches the selected preview on demand
+- capture/gallery browsing now follows a much larger generated-image list from the Pi companion API instead of the old **24-image** cap
+- the CYD AI slideshow now works with Whisplay-generated images, renders full-screen, and can use SD-backed caching with safer fallback behavior while still pulling fresh companion renders from the Pi
 - both **normal** and **inverted** display variants are included
 
 ![Early Whisplay CYD companion build](images/IMG_20260504_155914704_HDR.jpg)

@@ -38,6 +38,18 @@ const setLatestShowedImage = (imagePath: string) => {
   latestShowedImg = imagePath ? path.resolve(imagePath) : "";
 };
 
+const isTrackedImagePath = (imagePath: string): boolean => {
+  if (!imagePath) {
+    return false;
+  }
+  const resolved = path.resolve(imagePath);
+  const roots = [path.resolve(cameraDir), path.resolve(imageDir)];
+  return (
+    fs.existsSync(resolved) &&
+    roots.some((root) => resolved === root || resolved.startsWith(`${root}${path.sep}`))
+  );
+};
+
 export const activateInteractiveImage = (
   imagePath: string,
   source: InteractiveImageSource,
@@ -54,11 +66,7 @@ export const clearInteractiveImage = () => {
 };
 
 export const hasInteractiveImage = (): boolean => {
-  if (!interactiveImagePath || !latestShowedImg) {
-    return false;
-  }
-  const normalizedShown = path.resolve(latestShowedImg);
-  return normalizedShown === interactiveImagePath && fs.existsSync(interactiveImagePath);
+  return isTrackedImagePath(interactiveImagePath);
 };
 
 export const getInteractiveImage = (): string => {
@@ -341,6 +349,21 @@ export const queueDisplayImage = (imagePath: string) => {
 
 export const getLatestShowedImage = () => {
   return latestShowedImg;
+};
+
+export const getPreferredContextImage = (): string => {
+  const candidates = [
+    getInteractiveImage(),
+    latestShowedImg,
+    getLatestCapturedImg(),
+    getLatestGenImg(),
+  ];
+  for (const candidate of candidates) {
+    if (isTrackedImagePath(candidate)) {
+      return path.resolve(candidate);
+    }
+  }
+  return "";
 };
 
 export const getImageMimeType = (imagePath: string): string => {

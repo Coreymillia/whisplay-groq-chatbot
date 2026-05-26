@@ -13,6 +13,7 @@ It now supports both:
 - polls one or two chat backends
 - can follow **the last backend that changed** in **Auto** mode
 - displays the latest user prompt and bot reply locally on the Core screen
+- mirrors the latest Whisplay shown image when Whisplay is the active backend
 - keeps a simple button-driven reader UI
 - includes a lightweight idle screensaver system with Matrix, Ripple, and Entropy modes
 
@@ -84,6 +85,7 @@ Whisplay should be reachable on the same LAN and provide:
 - current status text
 - current emoji/status marker
 - current reply/state text suitable for a live companion view
+- `/api/vision/image/companion?width=...&height=...` for a fitted latest-image JPEG preview
 
 ## Notes
 

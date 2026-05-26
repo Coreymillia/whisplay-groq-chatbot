@@ -82,6 +82,7 @@ const weatherLongitudeInput = document.getElementById("weatherLongitudeInput");
 const headerModeSelect = document.getElementById("headerModeSelect");
 const groqHeaderBadgeModeSelect = document.getElementById("groqHeaderBadgeModeSelect");
 const screensaverModeSelect = document.getElementById("screensaverModeSelect");
+const screensaverShuffleBtn = document.getElementById("screensaverShuffleBtn");
 const idleTimeoutSelect = document.getElementById("idleTimeoutSelect");
 const screenBlankTimeoutSelect = document.getElementById("screenBlankTimeoutSelect");
 const roomMonitorIntervalSelect = document.getElementById("roomMonitorIntervalSelect");
@@ -2508,6 +2509,29 @@ async function saveSettings({ clearGroqApiKey = false } = {}) {
   }
 }
 
+async function shuffleScreensaver() {
+  try {
+    setSettingsStatus("Shuffling HAT screensaver...");
+    const response = await fetch("/api/screensaver/shuffle", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || payload.ok === false) {
+      throw new Error(payload.error || payload.message || `HTTP ${response.status}`);
+    }
+    setSettingsStatus(payload.message || "HAT screensaver shuffled.");
+  } catch (error) {
+    console.error("Failed to shuffle HAT screensaver:", error);
+    setSettingsStatus(
+      error instanceof Error ? error.message : "Failed to shuffle HAT screensaver.",
+      true,
+    );
+  }
+}
+
 async function savePersonalityPreset() {
   if (!settingsLoaded) {
     setSettingsStatus("Settings are still loading.", true);
@@ -2695,6 +2719,12 @@ window.addEventListener("pointerup", (event) => {
 if (saveSettingsBtn) {
   saveSettingsBtn.addEventListener("click", () => {
     saveSettings();
+  });
+}
+
+if (screensaverShuffleBtn) {
+  screensaverShuffleBtn.addEventListener("click", () => {
+    shuffleScreensaver();
   });
 }
 

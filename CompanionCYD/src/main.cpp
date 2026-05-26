@@ -3,6 +3,7 @@
 #include <SPI.h>
 #include <FS.h>
 #include <SPIFFS.h>
+#include <SD.h>
 #include <Arduino_GFX_Library.h>
 #include <JPEGDEC.h>
 #include <XPT2046_Touchscreen.h>
@@ -24,6 +25,12 @@ Arduino_GFX *gfx = new Arduino_ILI9341(bus, GFX_NOT_DEFINED, 1);
 
 SPIClass touchSPI(VSPI);
 XPT2046_Touchscreen ts(XPT2046_CS, XPT2046_IRQ);
+SPIClass sdSPI(HSPI);
+
+#define SD_CS 5
+#define SD_SCK 18
+#define SD_MOSI 23
+#define SD_MISO 19
 
 static const uint16_t COLOR_BG = RGB565_BLACK;
 static const uint16_t COLOR_PANEL = 0x0841;
@@ -51,15 +58,27 @@ static constexpr unsigned long TOUCH_DEBOUNCE_MS = 220;
 static constexpr unsigned long STATE_POLL_MS = 900;
 static constexpr unsigned long SETTINGS_POLL_MS = 6000;
 static constexpr unsigned long PHOTOS_POLL_MS = 12000;
+static constexpr unsigned long AI_PHOTOS_POLL_MS = 45000;
+static constexpr unsigned long AI_SLIDE_ADVANCE_MS = 30000;
+static constexpr unsigned long AI_CHAT_PEEK_MS = 15000;
 static constexpr unsigned long PHOTO_REFRESH_BOOST_MS = 8000;
 static constexpr unsigned long PHOTO_REFRESH_BOOST_POLL_MS = 1500;
 static constexpr unsigned long BOOT_PORTAL_HOLD_MS = 3000;
 static constexpr size_t MAX_LOG_ENTRIES = 32;
 static constexpr size_t MAX_RENDER_LINES = 96;
 static constexpr char PREVIEW_CACHE_PATH[] = "/preview.jpg";
+static constexpr char AI_SLIDESHOW_DIR[] = "/whisplay-ai";
+static constexpr char AI_SPIFFS_CACHE_PREFIX[] = "/ai-slide-";
+static constexpr char AI_SLIDE_DRAW_CACHE_PATH[] = "/ai-slide-current-v2.jpg";
+static constexpr char AI_CACHE_VERSION[] = "v2";
+static constexpr int AI_SLIDE_RENDER_WIDTH = 320;
+static constexpr int AI_SLIDE_RENDER_HEIGHT = 240;
+static constexpr size_t MAX_AI_REMOTE_IMAGES = 96;
+static constexpr size_t MAX_AI_FALLBACK_IMAGES = 24;
 
 enum class UiMode : uint8_t {
-  Chat = 0,
+  AiSlideshow = 0,
+  Chat,
   Capture,
   Gallery,
   Settings,
@@ -104,9 +123,10 @@ struct TouchButton {
 };
 
 static const TouchButton buttonModePrev = { "<", 4, 24, 24, 20, COLOR_SETTINGS };
-static const TouchButton buttonNewChat = { "NEW CHAT", 34, 24, 94, 20, COLOR_ACTION_ALT };
-static const TouchButton buttonRepeat = { "REPEAT", 132, 24, 82, 20, COLOR_ACTION };
-static const TouchButton buttonModeNext = { ">", 218, 24, 24, 20, COLOR_SETTINGS };
+static const TouchButton buttonAiShow = { "AI SHOW", 32, 24, 64, 20, COLOR_CAPTURE };
+static const TouchButton buttonNewChat = { "NEW", 100, 24, 48, 20, COLOR_ACTION_ALT };
+static const TouchButton buttonRepeat = { "REPEAT", 152, 24, 60, 20, COLOR_ACTION };
+static const TouchButton buttonModeNext = { ">", 216, 24, 24, 20, COLOR_SETTINGS };
 static const TouchButton buttonSetup = { "SETUP", 246, 24, 70, 20, 0x5008 };
 static const TouchButton buttonCaptureAction = { "CAPTURE", 92, 188, 136, 28, COLOR_CAPTURE };
 static const TouchButton buttonGalleryPrev = { "PREV", 18, 188, 84, 28, COLOR_ACTION };
@@ -188,26 +208,35 @@ static const char *CHAT_COLOR_LABELS[] = {
 static CompanionState companionState;
 static CompanionSettings companionSettings;
 static CompanionPhotoLibrary photoLibrary;
+static CompanionPhotoLibrary aiPhotoLibrary;
 static JPEGDEC previewJpeg;
 static String toastMessage;
 static String lastLoggedBotText;
 static String previewFileName;
 static String previewError;
+static String aiSlideFileName;
+static String aiSlideError;
 static String conversationLog[MAX_LOG_ENTRIES];
 static size_t conversationLogCount = 0;
 static bool renderDirty = true;
 static bool touchWasDown = false;
 static bool previewReady = false;
+static bool sdReady = false;
 static unsigned long lastTouchMs = 0;
 static unsigned long lastStatePollMs = 0;
 static unsigned long lastSettingsPollMs = 0;
 static unsigned long lastPhotoPollMs = 0;
+static unsigned long lastAiPhotoPollMs = 0;
+static unsigned long lastAiSlideAdvanceMs = 0;
 static unsigned long lastBootHoldStartMs = 0;
 static unsigned long toastUntilMs = 0;
 static unsigned long lastSuccessfulPollMs = 0;
 static unsigned long photoRefreshBoostUntilMs = 0;
-static UiMode uiMode = UiMode::Chat;
+static unsigned long autoChatUntilMs = 0;
+static bool autoChatActive = false;
+static UiMode uiMode = UiMode::AiSlideshow;
 static size_t galleryIndex = 0;
+static size_t aiSlideIndex = 0;
 static size_t selectedSettingsIndex = 0;
 
 static void mapTouch(uint16_t rawX, uint16_t rawY, int &screenX, int &screenY) {
@@ -219,13 +248,16 @@ static void mapTouch(uint16_t rawX, uint16_t rawY, int &screenX, int &screenY) {
 
 static const char *uiModeLabel(UiMode mode) {
   switch (mode) {
+    case UiMode::AiSlideshow:
+      return "AI SHOW";
+    case UiMode::Chat:
+      return "CHAT";
     case UiMode::Capture:
       return "CAPTURE";
     case UiMode::Gallery:
       return "GALLERY";
     case UiMode::Settings:
       return "SETTINGS";
-    case UiMode::Chat:
     default:
       return "CHAT";
   }
@@ -599,12 +631,26 @@ static const CompanionPhoto *selectedPhoto() {
   return &photoLibrary.photos[0];
 }
 
+static const CompanionPhoto *selectedAiPhoto() {
+  if (aiPhotoLibrary.count == 0) {
+    return nullptr;
+  }
+  if (aiSlideIndex >= aiPhotoLibrary.count) {
+    aiSlideIndex = 0;
+  }
+  return &aiPhotoLibrary.photos[aiSlideIndex];
+}
+
 static bool photoLibrariesEqual(const CompanionPhotoLibrary &a, const CompanionPhotoLibrary &b) {
   if (a.count != b.count) {
     return false;
   }
   for (size_t i = 0; i < a.count; i++) {
-    if (a.photos[i].fileName != b.photos[i].fileName || a.photos[i].imageUrl != b.photos[i].imageUrl) {
+    if (
+      a.photos[i].fileName != b.photos[i].fileName ||
+      a.photos[i].imageUrl != b.photos[i].imageUrl ||
+      a.photos[i].companionImageUrl != b.photos[i].companionImageUrl
+    ) {
       return false;
     }
   }
@@ -624,16 +670,210 @@ static void clearPreviewCache() {
   SPIFFS.remove(PREVIEW_CACHE_PATH);
 }
 
+static void clearAiSlideCacheState() {
+  aiSlideFileName = "";
+  aiSlideError = "";
+}
+
+static bool ensureSdCardReady() {
+  if (sdReady) {
+    return true;
+  }
+  sdSPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
+  sdReady = SD.begin(SD_CS, sdSPI);
+  if (sdReady) {
+    SD.mkdir(AI_SLIDESHOW_DIR);
+  }
+  return sdReady;
+}
+
+static String aiCacheKeyForFileName(const String &fileName) {
+  String safe = fileName;
+  int dot = safe.lastIndexOf('.');
+  if (dot > 0) {
+    safe = safe.substring(0, dot);
+  }
+  safe.replace("/", "-");
+  safe.replace("\\", "-");
+  safe.replace(" ", "-");
+  for (size_t i = 0; i < safe.length(); i++) {
+    char c = safe.charAt(i);
+    bool ok =
+      (c >= 'a' && c <= 'z') ||
+      (c >= 'A' && c <= 'Z') ||
+      (c >= '0' && c <= '9') ||
+      c == '-' || c == '_';
+    if (!ok) {
+      safe.setCharAt(i, '-');
+    }
+  }
+  while (safe.indexOf("--") >= 0) {
+    safe.replace("--", "-");
+  }
+  if (!safe.length()) {
+    safe = "ai-image";
+  }
+  safe += "-";
+  safe += AI_CACHE_VERSION;
+  return safe;
+}
+
+static String aiCachePathForFileName(const String &fileName, bool useSdCache) {
+  const String safe = aiCacheKeyForFileName(fileName);
+  if (useSdCache) {
+    return String(AI_SLIDESHOW_DIR) + "/" + safe + ".jpg";
+  }
+  return String(AI_SPIFFS_CACHE_PREFIX) + safe + ".jpg";
+}
+
+static String aiCacheLeafName(const String &path) {
+  int slash = path.lastIndexOf('/');
+  return slash >= 0 ? path.substring(slash + 1) : path;
+}
+
+static size_t aiFetchLimit() {
+  return ensureSdCardReady() ? MAX_AI_REMOTE_IMAGES : MAX_AI_FALLBACK_IMAGES;
+}
+
+static bool aiCacheExists(const String &localPath, bool useSdCache) {
+  return useSdCache ? SD.exists(localPath) : SPIFFS.exists(localPath);
+}
+
+static bool aiDownloadToCache(const String &remotePath, const String &localPath, bool useSdCache) {
+  return useSdCache
+    ? apiDownloadFile(remotePath, SD, localPath.c_str())
+    : apiDownloadFile(remotePath, SPIFFS, localPath.c_str());
+}
+
+static bool copySdFileToSpiffs(const String &sourcePath, const char *targetPath) {
+  File source = SD.open(sourcePath, "r");
+  if (!source) {
+    return false;
+  }
+  SPIFFS.remove(targetPath);
+  File target = SPIFFS.open(targetPath, "w");
+  if (!target) {
+    source.close();
+    return false;
+  }
+
+  uint8_t buffer[1024];
+  while (true) {
+    size_t readLen = source.read(buffer, sizeof(buffer));
+    if (readLen == 0) {
+      break;
+    }
+    if (target.write(buffer, readLen) != readLen) {
+      target.close();
+      source.close();
+      SPIFFS.remove(targetPath);
+      return false;
+    }
+  }
+
+  target.close();
+  source.close();
+  return true;
+}
+
+static bool copySpiffsFileToSd(const char *sourcePath, const String &targetPath) {
+  File source = SPIFFS.open(sourcePath, "r");
+  if (!source) {
+    return false;
+  }
+  SD.remove(targetPath);
+  File target = SD.open(targetPath, "w");
+  if (!target) {
+    source.close();
+    return false;
+  }
+
+  uint8_t buffer[1024];
+  while (true) {
+    size_t readLen = source.read(buffer, sizeof(buffer));
+    if (readLen == 0) {
+      break;
+    }
+    if (target.write(buffer, readLen) != readLen) {
+      target.close();
+      source.close();
+      SD.remove(targetPath);
+      return false;
+    }
+  }
+
+  target.close();
+  source.close();
+  return true;
+}
+
+static String aiRemotePathForPhoto(const CompanionPhoto &photo) {
+  if (photo.companionImageUrl.length()) {
+    return photo.companionImageUrl +
+      "?width=" + String(AI_SLIDE_RENDER_WIDTH) +
+      "&height=" + String(AI_SLIDE_RENDER_HEIGHT);
+  }
+  return photo.imageUrl;
+}
+
+static bool fileLooksLikeJpeg(fs::FS &fileSystem, const char *path) {
+  File file = fileSystem.open(path, "r");
+  if (!file) {
+    return false;
+  }
+  size_t size = file.size();
+  if (size < 4) {
+    file.close();
+    return false;
+  }
+
+  uint8_t start[2] = {0, 0};
+  uint8_t end[2] = {0, 0};
+  bool ok = file.read(start, sizeof(start)) == static_cast<int>(sizeof(start));
+  if (ok) {
+    ok = file.seek(size - 2);
+  }
+  if (ok) {
+    ok = file.read(end, sizeof(end)) == static_cast<int>(sizeof(end));
+  }
+  file.close();
+  return ok && start[0] == 0xFF && start[1] == 0xD8 && end[0] == 0xFF && end[1] == 0xD9;
+}
+
+static String fileSizeLabel(fs::FS &fileSystem, const char *path) {
+  File file = fileSystem.open(path, "r");
+  if (!file) {
+    return "0b";
+  }
+  const size_t size = file.size();
+  file.close();
+  return String(size) + "b";
+}
+
+static bool aiLibraryContainsFile(const String &fileName) {
+  for (size_t i = 0; i < aiPhotoLibrary.count; i++) {
+    if (aiPhotoLibrary.photos[i].fileName == fileName) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static File previewJpegFile;
+
 static int32_t previewFileRead(JPEGFILE *handle, uint8_t *buffer, int32_t length) {
-  return static_cast<File *>(handle->fHandle)->read(buffer, length);
+  (void)handle;
+  return static_cast<int32_t>(previewJpegFile.read(buffer, length));
 }
 
 static int32_t previewFileSeek(JPEGFILE *handle, int32_t position) {
-  return static_cast<File *>(handle->fHandle)->seek(position);
+  (void)handle;
+  return previewJpegFile.seek(position) ? position : 0;
 }
 
 static void previewFileClose(void *handle) {
-  static_cast<File *>(handle)->close();
+  (void)handle;
+  previewJpegFile.close();
 }
 
 static int jpegDrawCallback(JPEGDRAW *draw) {
@@ -664,23 +904,37 @@ static int jpegScaleOptionForBounds(int width, int height, int maxW, int maxH, i
   return option;
 }
 
-static bool drawPreviewImage(int x, int y, int w, int h) {
-  File previewFile = SPIFFS.open(PREVIEW_CACHE_PATH, "r");
-  if (!previewFile) {
+static bool drawJpegFromFs(
+  fs::FS &fileSystem,
+  const char *localPath,
+  int x,
+  int y,
+  int w,
+  int h,
+  String *errorOut = nullptr
+) {
+  previewJpegFile = fileSystem.open(localPath, "r");
+  if (!previewJpegFile) {
+    if (errorOut) {
+      *errorOut = "Open fail";
+    }
     return false;
   }
 
   int openResult = previewJpeg.open(
-    static_cast<void *>(&previewFile),
-    previewFile.size(),
+    static_cast<void *>(&previewJpegFile),
+    previewJpegFile.size(),
     previewFileClose,
     previewFileRead,
     previewFileSeek,
     jpegDrawCallback
   );
-  if (openResult != JPEG_SUCCESS) {
-    previewFile.close();
-    previewError = "Preview open failed.";
+  if (!openResult) {
+    const int jpegError = previewJpeg.getLastError();
+    previewJpegFile.close();
+    if (errorOut) {
+      *errorOut = "JPEG open " + String(jpegError);
+    }
     return false;
   }
 
@@ -698,8 +952,20 @@ static bool drawPreviewImage(int x, int y, int w, int h) {
 
   int drawX = x + max(0, (w - scaledW) / 2);
   int drawY = y + max(0, (h - scaledH) / 2);
-  bool ok = previewJpeg.decode(drawX, drawY, decodeOption) == JPEG_SUCCESS;
+  int decodeResult = previewJpeg.decode(drawX, drawY, decodeOption);
+  bool ok = decodeResult != 0;
   previewJpeg.close();
+  if (!ok && errorOut) {
+    *errorOut = "JPEG decode " + String(previewJpeg.getLastError());
+  }
+  return ok;
+}
+
+static bool drawPreviewImage(int x, int y, int w, int h) {
+  bool ok = drawJpegFromFs(SPIFFS, PREVIEW_CACHE_PATH, x, y, w, h);
+  if (!ok && !previewError.length()) {
+    previewError = "Preview open failed.";
+  }
   return ok;
 }
 
@@ -731,6 +997,182 @@ static bool ensurePreviewForSelection() {
   return ok;
 }
 
+static void pruneAiSlideshowCache(bool useSdCache) {
+  File dir = useSdCache ? SD.open(AI_SLIDESHOW_DIR) : SPIFFS.open("/");
+  if (!dir || !dir.isDirectory()) {
+    if (dir) {
+      dir.close();
+    }
+    return;
+  }
+  while (true) {
+    File entry = dir.openNextFile();
+    if (!entry) {
+      break;
+    }
+    String entryName = String(entry.name());
+    entry.close();
+    int slash = entryName.lastIndexOf('/');
+    if (slash >= 0) {
+      entryName = entryName.substring(slash + 1);
+    }
+    if (!useSdCache && entryName == aiCacheLeafName(AI_SLIDE_DRAW_CACHE_PATH)) {
+      continue;
+    }
+    if (!useSdCache && !entryName.startsWith(aiCacheLeafName(AI_SPIFFS_CACHE_PREFIX))) {
+      continue;
+    }
+    bool keep = false;
+    for (size_t i = 0; i < aiPhotoLibrary.count; i++) {
+      String expected = aiCacheLeafName(aiCachePathForFileName(aiPhotoLibrary.photos[i].fileName, useSdCache));
+      if (entryName == expected) {
+        keep = true;
+        break;
+      }
+    }
+    if (!keep) {
+      const String stalePath = useSdCache
+        ? String(AI_SLIDESHOW_DIR) + "/" + entryName
+        : String("/") + entryName;
+      if (useSdCache) {
+        SD.remove(stalePath);
+      } else {
+        SPIFFS.remove(stalePath);
+      }
+    }
+  }
+  dir.close();
+}
+
+static bool syncAiSlideshowCache() {
+  const bool useSdCache = ensureSdCardReady();
+  bool anyReady = false;
+  for (size_t i = 0; i < aiPhotoLibrary.count; i++) {
+    const CompanionPhoto &photo = aiPhotoLibrary.photos[i];
+    String localPath = aiCachePathForFileName(photo.fileName, useSdCache);
+    if (aiCacheExists(localPath, useSdCache)) {
+      anyReady = true;
+      continue;
+    }
+    String remotePath = photo.companionImageUrl.length() ? photo.companionImageUrl : photo.imageUrl;
+    if (!remotePath.length()) {
+      continue;
+    }
+    if (aiDownloadToCache(remotePath, localPath, useSdCache)) {
+      anyReady = true;
+    }
+  }
+  pruneAiSlideshowCache(useSdCache);
+  return anyReady;
+}
+
+static bool ensureCurrentAiSlideCached(const CompanionPhoto &photo) {
+  const bool useSdCache = ensureSdCardReady();
+  const String remotePath = aiRemotePathForPhoto(photo);
+  if (!remotePath.length()) {
+    aiSlideError = "AI image URL missing.";
+    return false;
+  }
+
+  if (useSdCache) {
+    const String archivePath = aiCachePathForFileName(photo.fileName, true);
+    if (SD.exists(archivePath) && fileLooksLikeJpeg(SD, archivePath.c_str())) {
+      if (copySdFileToSpiffs(archivePath, AI_SLIDE_DRAW_CACHE_PATH) && fileLooksLikeJpeg(SPIFFS, AI_SLIDE_DRAW_CACHE_PATH)) {
+        return true;
+      }
+      aiSlideError = "SD copy fail";
+      SPIFFS.remove(AI_SLIDE_DRAW_CACHE_PATH);
+    } else if (SD.exists(archivePath)) {
+      aiSlideError = "SD bad jpg " + fileSizeLabel(SD, archivePath.c_str());
+      SD.remove(archivePath);
+    }
+
+    String downloadError;
+    if (
+      apiDownloadFile(remotePath, SPIFFS, AI_SLIDE_DRAW_CACHE_PATH, &downloadError) &&
+      fileLooksLikeJpeg(SPIFFS, AI_SLIDE_DRAW_CACHE_PATH)
+    ) {
+      if (copySpiffsFileToSd(AI_SLIDE_DRAW_CACHE_PATH, archivePath) && fileLooksLikeJpeg(SD, archivePath.c_str())) {
+        return true;
+      }
+      return true;
+    }
+    if (SPIFFS.exists(AI_SLIDE_DRAW_CACHE_PATH) && !fileLooksLikeJpeg(SPIFFS, AI_SLIDE_DRAW_CACHE_PATH)) {
+      aiSlideError = "Tmp bad dl " + fileSizeLabel(SPIFFS, AI_SLIDE_DRAW_CACHE_PATH);
+    } else if (SPIFFS.exists(AI_SLIDE_DRAW_CACHE_PATH)) {
+      aiSlideError = "Tmp dl bad " + fileSizeLabel(SPIFFS, AI_SLIDE_DRAW_CACHE_PATH);
+    } else {
+      aiSlideError = downloadError.length() ? "Tmp " + downloadError : "Tmp dl fail";
+    }
+    SPIFFS.remove(AI_SLIDE_DRAW_CACHE_PATH);
+    return false;
+  }
+
+  const String localPath = aiCachePathForFileName(photo.fileName, false);
+  if (SPIFFS.exists(localPath) && fileLooksLikeJpeg(SPIFFS, localPath.c_str())) {
+    return true;
+  } else if (SPIFFS.exists(localPath)) {
+    aiSlideError = "Local bad jpg " + fileSizeLabel(SPIFFS, localPath.c_str());
+    SPIFFS.remove(localPath);
+  }
+  String downloadError;
+  if (
+    apiDownloadFile(remotePath, SPIFFS, localPath.c_str(), &downloadError) &&
+    fileLooksLikeJpeg(SPIFFS, localPath.c_str())
+  ) {
+    return true;
+  }
+  if (SPIFFS.exists(localPath) && !fileLooksLikeJpeg(SPIFFS, localPath.c_str())) {
+    aiSlideError = "Local bad dl " + fileSizeLabel(SPIFFS, localPath.c_str());
+  } else if (SPIFFS.exists(localPath)) {
+    aiSlideError = "Local dl bad " + fileSizeLabel(SPIFFS, localPath.c_str());
+  } else {
+    aiSlideError = downloadError.length() ? "Local " + downloadError : "Local dl fail";
+  }
+  SPIFFS.remove(localPath);
+  return false;
+}
+
+static bool ensureAiSlideReady() {
+  const CompanionPhoto *photo = selectedAiPhoto();
+  if (!photo) {
+    clearAiSlideCacheState();
+    aiSlideError = "No AI images yet.";
+    return false;
+  }
+  const bool useSdCache = ensureSdCardReady();
+  if (aiSlideFileName == photo->fileName) {
+    if (
+      (useSdCache && SPIFFS.exists(AI_SLIDE_DRAW_CACHE_PATH)) ||
+      (!useSdCache && SPIFFS.exists(aiCachePathForFileName(photo->fileName, false)))
+    ) {
+      aiSlideError = "";
+      return true;
+    }
+  }
+  if (!ensureCurrentAiSlideCached(*photo)) {
+    aiSlideFileName = photo->fileName;
+    return false;
+  }
+  aiSlideFileName = photo->fileName;
+  aiSlideError = "";
+  return true;
+}
+
+static void advanceAiSlide(bool force = false) {
+  if (aiPhotoLibrary.count == 0) {
+    return;
+  }
+  unsigned long now = millis();
+  if (!force && now - lastAiSlideAdvanceMs < AI_SLIDE_ADVANCE_MS) {
+    return;
+  }
+  lastAiSlideAdvanceMs = now;
+  aiSlideIndex = (aiSlideIndex + 1) % aiPhotoLibrary.count;
+  clearAiSlideCacheState();
+  renderDirty = true;
+}
+
 static void openSetupPortal() {
   gfx->fillScreen(COLOR_BG);
   gfx->setTextColor(COLOR_WARN, COLOR_BG);
@@ -746,6 +1188,8 @@ static void setUiMode(UiMode nextMode) {
     return;
   }
   uiMode = nextMode;
+  autoChatActive = false;
+  autoChatUntilMs = 0;
   if (uiMode == UiMode::Capture) {
     galleryIndex = 0;
   }
@@ -785,12 +1229,22 @@ static bool fetchStateIfDue() {
     nextState.ragIconVisible != companionState.ragIconVisible ||
     nextState.imageIconVisible != companionState.imageIconVisible;
 
-  if (nextState.text != companionState.text && nextState.text.length()) {
+  bool freshText = nextState.text.length() && nextState.text != companionState.text;
+  if (freshText) {
     syncIncomingLogText(nextState.text);
   }
 
   companionState = nextState;
   lastSuccessfulPollMs = now;
+  bool activeChat = companionState.status.length() &&
+    companionState.status != "idle" &&
+    companionState.status != "last reply";
+  if ((activeChat || freshText) && uiMode == UiMode::AiSlideshow) {
+    uiMode = UiMode::Chat;
+    autoChatActive = true;
+    autoChatUntilMs = now + AI_CHAT_PEEK_MS;
+    renderDirty = true;
+  }
   if (changed) {
     renderDirty = true;
   }
@@ -878,6 +1332,35 @@ static bool fetchPhotosIfDue(bool force = false) {
   }
 
   if (changed) {
+    renderDirty = true;
+  }
+  return true;
+}
+
+static bool fetchAiPhotosIfDue(bool force = false) {
+  if (!ccEnsureWifiConnected()) {
+    return false;
+  }
+  unsigned long now = millis();
+  if (!force && now - lastAiPhotoPollMs < AI_PHOTOS_POLL_MS) {
+    return false;
+  }
+  lastAiPhotoPollMs = now;
+
+  CompanionPhotoLibrary nextPhotos;
+  if (!apiFetchGeneratedImages(nextPhotos, aiFetchLimit())) {
+    return false;
+  }
+
+  bool changed = !photoLibrariesEqual(aiPhotoLibrary, nextPhotos);
+  aiPhotoLibrary = nextPhotos;
+  if (aiSlideIndex >= aiPhotoLibrary.count) {
+    aiSlideIndex = 0;
+  }
+  if (changed) {
+    clearAiSlideCacheState();
+    pruneAiSlideshowCache(true);
+    pruneAiSlideshowCache(false);
     renderDirty = true;
   }
   return true;
@@ -1282,6 +1765,7 @@ static void drawHeader() {
 
   gfx->fillCircle(234, 10, 4, WiFi.status() == WL_CONNECTED ? COLOR_ACCENT : COLOR_ERROR);
   drawButton(buttonModePrev);
+  drawButton(buttonAiShow);
   drawButton(buttonNewChat);
   drawButton(buttonRepeat);
   drawButton(buttonModeNext);
@@ -1355,6 +1839,41 @@ static void renderChatMode() {
     drawFooter("WiFi reconnecting...");
   } else {
     drawFooter(String("Status: ") + (companionState.status.length() ? companionState.status : "Waiting"));
+  }
+}
+
+static void renderAiSlideshowMode() {
+  const CompanionPhoto *photo = selectedAiPhoto();
+  if (photo && ensureAiSlideReady()) {
+    const bool useSdCache = ensureSdCardReady();
+    String cachePath = useSdCache ? String(AI_SLIDE_DRAW_CACHE_PATH) : aiCachePathForFileName(photo->fileName, false);
+    String drawError;
+    bool drawOk = drawJpegFromFs(SPIFFS, cachePath.c_str(), 0, 0, 320, 240, &drawError);
+    if (!drawOk) {
+      SPIFFS.remove(cachePath);
+      if (ensureCurrentAiSlideCached(*photo)) {
+        drawError = "";
+        drawOk = drawJpegFromFs(SPIFFS, cachePath.c_str(), 0, 0, 320, 240, &drawError);
+      }
+    }
+    if (!drawOk) {
+      gfx->fillScreen(COLOR_BG);
+      aiSlideError = (useSdCache ? "Tmp " : "Local ") + (drawError.length() ? drawError : String("draw fail"));
+      drawPreviewStatusText(0, 0, 320, 240, trimTail(photo->fileName, 32), aiSlideError);
+    }
+  } else if (photo) {
+    gfx->fillScreen(COLOR_BG);
+    drawPreviewStatusText(0, 0, 320, 240, trimTail(photo->fileName, 32), aiSlideError.length() ? aiSlideError : "Waiting for AI cache.");
+  } else {
+    gfx->fillScreen(COLOR_BG);
+    drawPreviewStatusText(
+      0,
+      0,
+      320,
+      240,
+      "No AI images yet.",
+      sdReady ? "Polling the Pi for generated images." : "Using local 24-image fallback cache."
+    );
   }
 }
 
@@ -1441,9 +1960,17 @@ static void renderSettingsMode() {
 
 static void renderUi() {
   gfx->fillScreen(COLOR_BG);
-  drawHeader();
+  if (uiMode != UiMode::AiSlideshow) {
+    drawHeader();
+  }
 
   switch (uiMode) {
+    case UiMode::AiSlideshow:
+      renderAiSlideshowMode();
+      break;
+    case UiMode::Chat:
+      renderChatMode();
+      break;
     case UiMode::Capture:
       renderCaptureMode();
       break;
@@ -1453,7 +1980,6 @@ static void renderUi() {
     case UiMode::Settings:
       renderSettingsMode();
       break;
-    case UiMode::Chat:
     default:
       renderChatMode();
       break;
@@ -1532,6 +2058,18 @@ static void handleTouch() {
     openSetupPortal();
     return;
   }
+  if (pointInButton(x, y, buttonAiShow)) {
+    if (uiMode == UiMode::AiSlideshow) {
+      lastAiPhotoPollMs = 0;
+      clearAiSlideCacheState();
+      bool ok = fetchAiPhotosIfDue(true);
+      setToast(ok ? "AI slideshow refreshed." : "AI refresh failed.");
+      renderDirty = true;
+    } else {
+      setUiMode(UiMode::AiSlideshow);
+    }
+    return;
+  }
   if (pointInButton(x, y, buttonModePrev)) {
     stepUiMode(-1);
     return;
@@ -1585,6 +2123,7 @@ void setup() {
   ts.setRotation(1);
 
   SPIFFS.begin(true);
+  ensureSdCardReady();
 
   bool forcePortal = digitalRead(BOOT_BTN) == LOW;
   ccConnect(forcePortal);
@@ -1593,6 +2132,7 @@ void setup() {
   fetchStateIfDue();
   fetchSettingsIfDue();
   fetchPhotosIfDue(true);
+  fetchAiPhotosIfDue(true);
   renderUi();
 }
 
@@ -1601,9 +2141,21 @@ void loop() {
   fetchStateIfDue();
   fetchSettingsIfDue();
   fetchPhotosIfDue();
+  fetchAiPhotosIfDue();
 
   if (uiMode == UiMode::Capture || uiMode == UiMode::Gallery) {
     ensurePreviewForSelection();
+  }
+  if (uiMode == UiMode::AiSlideshow) {
+    ensureAiSlideReady();
+    advanceAiSlide();
+  } else if (
+    autoChatActive &&
+    uiMode == UiMode::Chat &&
+    millis() > autoChatUntilMs &&
+    (companionState.status == "idle" || companionState.status == "last reply")
+  ) {
+    setUiMode(UiMode::AiSlideshow);
   }
 
   handleTouch();

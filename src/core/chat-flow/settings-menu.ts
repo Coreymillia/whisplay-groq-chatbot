@@ -98,6 +98,10 @@ function getCompactHeaderLabel(value: string): string {
 
 function getCompactScreensaverLabel(value: string): string {
   switch (value) {
+    case "ai-gallery":
+      return "AI";
+    case "camera-roll":
+      return "CamRoll";
     case "random-shift":
       return "Random";
     case "bouncing-balls":

@@ -1,7 +1,7 @@
 import { LLMTool, ToolReturnTag } from "../../type";
 import {
   getImageMimeType,
-  getLatestShowedImage,
+  getPreferredContextImage,
   setLatestGenImg,
 } from "../../utils/image";
 import { GenerateContentResponse, GoogleGenAI } from "@google/genai";
@@ -103,7 +103,7 @@ export const addGeminiGenerationTool = (imageGenerationTools: LLMTool[]) => {
       );
       let imageContext = undefined;
       if (withImageContext) {
-        const latestImgPath = getLatestShowedImage();
+        const latestImgPath = getPreferredContextImage();
         if (latestImgPath) {
           const base64ImageFile = readFileSync(latestImgPath, {
             encoding: "base64",

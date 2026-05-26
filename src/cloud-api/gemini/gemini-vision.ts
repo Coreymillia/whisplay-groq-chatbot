@@ -1,7 +1,7 @@
 import { GoogleGenAI } from "@google/genai";
 import { LLMTool, ToolReturnTag } from "../../type";
 import dotenv from "dotenv";
-import { getLatestShowedImage, getImageMimeType } from "../../utils/image";
+import { getPreferredContextImage, getImageMimeType } from "../../utils/image";
 import { readFileSync } from "fs";
 import { getRuntimeSettings } from "../../config/runtime-settings";
 
@@ -45,7 +45,7 @@ export const addGeminiVisionTool = (visionTools: LLMTool[]) => {
       if (!gemini) {
         return `${ToolReturnTag.Error} Gemini vision is not configured yet.`;
       }
-      const imgPath = getLatestShowedImage();
+      const imgPath = getPreferredContextImage();
       if (!imgPath) {
         return `${ToolReturnTag.Error} No image is found.`;
       }

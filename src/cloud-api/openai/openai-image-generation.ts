@@ -1,7 +1,7 @@
 import { LLMTool, ToolReturnTag } from "../../type";
 import {
   getImageMimeType,
-  getLatestShowedImage,
+  getPreferredContextImage,
   setLatestGenImg,
 } from "../../utils/image";
 import path from "path";
@@ -79,7 +79,7 @@ export const addOpenaiGenerationTool = (imageGenerationTools: LLMTool[]) => {
       } else {
         let imageUrl = undefined;
         if (withImageContext) {
-          const latestImgPath = getLatestShowedImage();
+          const latestImgPath = getPreferredContextImage();
           if (latestImgPath) {
             const base64ImageFile = readFileSync(latestImgPath, {
               encoding: "base64",

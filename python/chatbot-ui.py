@@ -34,6 +34,8 @@ battery_font_size=13
 IDLE_RENDER_INTERVAL = 0.5
 IDLE_COMPATIBLE_STATUSES = {"idle", "last reply"}
 RANDOM_SCREENSAVER_INTERVAL_SEC = 120
+IMAGE_SCREENSAVER_INTERVAL_SEC = 25
+IMAGE_SCREENSAVER_REFRESH_SEC = 8
 RANDOM_SCREENSAVER_MODES = (
     "matrix",
     "matrix-binary",
@@ -45,6 +47,15 @@ RANDOM_SCREENSAVER_MODES = (
     "kaleidoscope",
     "tetris-rain",
 )
+IMAGE_SCREENSAVER_EXTENSIONS = (".png", ".jpg", ".jpeg", ".webp", ".bmp")
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+REPO_ROOT = os.path.dirname(SCRIPT_DIR)
+AI_SCREENSAVER_DIR = os.path.join(REPO_ROOT, "data", "images")
+CAMERA_ROLL_SCREENSAVER_DIR = os.path.join(REPO_ROOT, "data", "camera")
+IMAGE_SCREENSAVER_DIRS = {
+    "ai-gallery": AI_SCREENSAVER_DIR,
+    "camera-roll": CAMERA_ROLL_SCREENSAVER_DIR,
+}
 
 # Global variables
 current_status = "Hello"
@@ -249,6 +260,13 @@ class RenderThread(threading.Thread):
         self.tetris_spawn_timer = 0
         self.random_screensaver_mode = random.choice(RANDOM_SCREENSAVER_MODES)
         self.random_screensaver_started_at = time.time()
+        self.image_screensaver_mode = None
+        self.image_screensaver_files = []
+        self.image_screensaver_last_refresh = 0.0
+        self.image_screensaver_index = 0
+        self.image_screensaver_started_at = 0.0
+        self.image_screensaver_cached_path = ""
+        self.image_screensaver_cached_image = None
 
     def refresh_fonts(self, force=False):
         global current_hat_font_family, current_hat_font_size
@@ -281,6 +299,115 @@ class RenderThread(threading.Thread):
         TextUtils.clean_line_image_cache()
         self.loaded_hat_font_family = next_family
         self.loaded_hat_font_size = next_size
+
+    def prepare_fullscreen_image(self, image):
+        img_w, img_h = image.size
+        screen_ratio = self.whisplay.LCD_WIDTH / self.whisplay.LCD_HEIGHT
+        img_ratio = img_w / img_h
+        if img_ratio > screen_ratio:
+            new_w = int(img_h * screen_ratio)
+            left = (img_w - new_w) // 2
+            image = image.crop((left, 0, left + new_w, img_h))
+        else:
+            new_h = int(img_w / screen_ratio)
+            top = (img_h - new_h) // 2
+            image = image.crop((0, top, img_w, top + new_h))
+        return image.resize((self.whisplay.LCD_WIDTH, self.whisplay.LCD_HEIGHT), Image.LANCZOS)
+
+    def list_screensaver_images(self, mode):
+        folder = IMAGE_SCREENSAVER_DIRS.get(mode, "")
+        if not folder or not os.path.isdir(folder):
+            return []
+        entries = []
+        for name in os.listdir(folder):
+            file_path = os.path.join(folder, name)
+            if not os.path.isfile(file_path):
+                continue
+            if not name.lower().endswith(IMAGE_SCREENSAVER_EXTENSIONS):
+                continue
+            try:
+                modified_at = os.path.getmtime(file_path)
+            except OSError:
+                continue
+            entries.append((modified_at, file_path))
+        entries.sort(key=lambda item: item[0], reverse=True)
+        return [item[1] for item in entries]
+
+    def refresh_image_screensaver_files(self, mode, force=False):
+        now = time.time()
+        if (
+            not force
+            and self.image_screensaver_mode == mode
+            and (now - self.image_screensaver_last_refresh) < IMAGE_SCREENSAVER_REFRESH_SEC
+        ):
+            return self.image_screensaver_files
+        files = self.list_screensaver_images(mode)
+        if mode != self.image_screensaver_mode or files != self.image_screensaver_files:
+            self.image_screensaver_cached_path = ""
+            self.image_screensaver_cached_image = None
+            self.image_screensaver_index = 0
+            self.image_screensaver_started_at = 0.0
+        self.image_screensaver_mode = mode
+        self.image_screensaver_files = files
+        self.image_screensaver_last_refresh = now
+        return files
+
+    def get_active_image_screensaver_path(self, mode, force_shuffle=False):
+        files = self.refresh_image_screensaver_files(mode, force=force_shuffle)
+        if not files:
+            self.image_screensaver_cached_path = ""
+            self.image_screensaver_cached_image = None
+            return ""
+        now = time.time()
+        if self.image_screensaver_started_at <= 0.0:
+            self.image_screensaver_index = 0
+            self.image_screensaver_started_at = now
+        elif force_shuffle:
+            if len(files) > 1:
+                choices = [index for index in range(len(files)) if index != self.image_screensaver_index]
+                self.image_screensaver_index = random.choice(choices or [self.image_screensaver_index])
+            self.image_screensaver_started_at = now
+        elif (now - self.image_screensaver_started_at) >= IMAGE_SCREENSAVER_INTERVAL_SEC:
+            self.image_screensaver_index = (self.image_screensaver_index + 1) % len(files)
+            self.image_screensaver_started_at = now
+        self.image_screensaver_index = max(0, min(self.image_screensaver_index, len(files) - 1))
+        return files[self.image_screensaver_index]
+
+    def draw_image_screensaver(self, image, draw, mode):
+        image_path = self.get_active_image_screensaver_path(mode)
+        if not image_path:
+            message = "No AI images yet." if mode == "ai-gallery" else "No camera photos yet."
+            text_bbox = self.status_font.getbbox(message)
+            text_w = text_bbox[2] - text_bbox[0]
+            text_h = text_bbox[3] - text_bbox[1]
+            draw.text(
+                ((self.whisplay.LCD_WIDTH - text_w) // 2, (self.whisplay.LCD_HEIGHT - text_h) // 2),
+                message,
+                font=self.status_font,
+                fill=(220, 220, 220, 255),
+            )
+            return
+        if image_path != self.image_screensaver_cached_path or self.image_screensaver_cached_image is None:
+            try:
+                loaded = Image.open(image_path).convert("RGBA")
+                self.image_screensaver_cached_image = self.prepare_fullscreen_image(loaded)
+                self.image_screensaver_cached_path = image_path
+            except Exception as exc:
+                print(f"[Screensaver] Failed to load {image_path}: {exc}")
+                self.image_screensaver_cached_image = None
+                self.image_screensaver_cached_path = ""
+        if self.image_screensaver_cached_image is not None:
+            image.alpha_composite(self.image_screensaver_cached_image)
+
+    def shuffle_screensaver(self):
+        active_mode = self.resolve_active_screensaver_mode()
+        if active_mode == "random-shift":
+            choices = [mode for mode in RANDOM_SCREENSAVER_MODES if mode != self.random_screensaver_mode]
+            self.random_screensaver_mode = random.choice(choices or list(RANDOM_SCREENSAVER_MODES))
+            self.random_screensaver_started_at = time.time()
+        elif active_mode in IMAGE_SCREENSAVER_DIRS:
+            self.get_active_image_screensaver_path(active_mode, force_shuffle=True)
+        self.request_render()
 
     def render_init_screen(self):
         # Display logo on startup
@@ -328,21 +455,7 @@ class RenderThread(threading.Thread):
             elif os.path.exists(current_image_path):
                 try:
                     image = Image.open(current_image_path).convert("RGBA") # 1024x1024
-                    # crop center and resize to fit screen ratio
-                    img_w, img_h = image.size
-                    screen_ratio = self.whisplay.LCD_WIDTH / self.whisplay.LCD_HEIGHT
-                    img_ratio = img_w / img_h
-                    if img_ratio > screen_ratio:
-                        # crop width
-                        new_w = int(img_h * screen_ratio)
-                        left = (img_w - new_w) // 2
-                        image = image.crop((left, 0, left + new_w, img_h))
-                    else:
-                        # crop height
-                        new_h = int(img_w / screen_ratio)
-                        top = (img_h - new_h) // 2
-                        image = image.crop((0, top, img_w, top + new_h))
-                    image = image.resize((self.whisplay.LCD_WIDTH, self.whisplay.LCD_HEIGHT), Image.LANCZOS)
+                    image = self.prepare_fullscreen_image(image)
                     current_image = image
                     rgb565_data = ImageUtils.image_to_rgb565(image, self.whisplay.LCD_WIDTH, self.whisplay.LCD_HEIGHT)
                     self.whisplay.draw_image(0, 0, self.whisplay.LCD_WIDTH, self.whisplay.LCD_HEIGHT, rgb565_data)
@@ -1147,6 +1260,8 @@ class RenderThread(threading.Thread):
         elif mode == "neon-rain":
             streams = self.header_neon_streams if header else self.neon_streams
             self.draw_neon_streams(image, streams, y_offset, height)
+        elif not header and mode in IMAGE_SCREENSAVER_DIRS:
+            self.draw_image_screensaver(image, draw, mode)
         elif not header and mode == "bouncing-balls":
             self.draw_bouncing_balls(draw, width, height, y_offset)
         elif not header and mode == "kaleidoscope":
@@ -1418,6 +1533,7 @@ def update_display_data(status=None, emoji=None, text=None,
                    hat_text_color=None):
     global current_status, current_emoji, current_text, current_battery_level
     global current_battery_color, current_scroll_top, current_scroll_speed, current_image_path
+    global current_image
     global current_scroll_speed_factor, current_hat_scroll_speed_level, current_hat_font_size
     global current_hat_font_family
     global current_scroll_sync_char_end, current_scroll_sync_duration_ms
@@ -1576,7 +1692,11 @@ def update_display_data(status=None, emoji=None, text=None,
     current_text = next_text if text is not None else current_text
     current_battery_level = battery_level if battery_level is not None else current_battery_level
     current_battery_color = battery_color if battery_color is not None else current_battery_color
-    current_image_path = image_path if image_path is not None else current_image_path
+    if image_path is not None:
+        next_image_path = image_path
+        if next_image_path != current_image_path:
+            current_image = None
+        current_image_path = next_image_path
     if music_progress is not None:
         current_music_progress = music_progress if music_progress >= 0 else None
     if music_duration_ms is not None:
@@ -1698,6 +1818,7 @@ def handle_client(client_socket, addr, whisplay):
                     screen_blank_timeout_sec = content.get("screen_blank_timeout_sec", None)
                     hat_text_color = content.get("hat_text_color", None)
                     capture_image_path = content.get("capture_image_path", None)
+                    screensaver_shuffle = content.get("screensaver_shuffle", None)
                     trigger_camera_capture = content.get("camera_capture", None)
                     # boolean to enable camera mode
                     set_camera_mode = content.get("camera_mode", None)
@@ -1738,6 +1859,9 @@ def handle_client(client_socket, addr, whisplay):
                             camera_thread.capture()
                             notification = {"event": "camera_capture"}
                             send_to_all_clients(notification)
+
+                    if screensaver_shuffle and render_thread is not None:
+                        render_thread.shuffle_screensaver()
 
                     if (text is not None) or (status is not None) or (emoji is not None) or \
                        (battery_level is not None) or (battery_color is not None) or \

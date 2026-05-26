@@ -8,7 +8,7 @@
 #include "Portal.h"
 
 static constexpr size_t COMPANION_MAX_PRESETS = 16;
-static constexpr size_t COMPANION_MAX_PHOTOS = 24;
+static constexpr size_t COMPANION_MAX_PHOTOS = 96;
 
 struct CompanionState {
   bool ready = false;
@@ -49,6 +49,7 @@ struct CompanionSettings {
 struct CompanionPhoto {
   String fileName;
   String imageUrl;
+  String companionImageUrl;
   uint32_t sizeBytes = 0;
 };
 
@@ -226,6 +227,7 @@ static bool apiFetchPhotos(CompanionPhotoLibrary &library, size_t maxPhotos = CO
     CompanionPhoto &photo = library.photos[library.count++];
     photo.fileName = String(photoObject["fileName"] | "");
     photo.imageUrl = String(photoObject["imageUrl"] | "");
+    photo.companionImageUrl = String(photoObject["companionImageUrl"] | "");
     photo.sizeBytes = photoObject["sizeBytes"] | 0;
   }
 
@@ -234,9 +236,64 @@ static bool apiFetchPhotos(CompanionPhotoLibrary &library, size_t maxPhotos = CO
   return true;
 }
 
-static bool apiDownloadFile(const String &requestPath, fs::FS &fileSystem, const char *localPath) {
+static bool apiFetchGeneratedImages(CompanionPhotoLibrary &library, size_t maxPhotos = COMPANION_MAX_PHOTOS) {
+  char url[192];
+  if (!apiBuildUrl(url, sizeof(url), "/api/generated-images")) {
+    return false;
+  }
+  HTTPClient http;
+  http.begin(url);
+  http.setTimeout(5000);
+  int code = http.GET();
+  if (code != 200) {
+    http.end();
+    return false;
+  }
+  String body = http.getString();
+  http.end();
+
+  JsonDocument doc;
+  if (deserializeJson(doc, body)) {
+    return false;
+  }
+
+  JsonArray photosArray = doc["photos"].as<JsonArray>();
+  if (photosArray.isNull()) {
+    return false;
+  }
+
+  library.count = 0;
+  for (JsonVariant photoVariant : photosArray) {
+    if (library.count >= maxPhotos || library.count >= COMPANION_MAX_PHOTOS) {
+      break;
+    }
+    JsonObject photoObject = photoVariant.as<JsonObject>();
+    if (photoObject.isNull()) {
+      continue;
+    }
+    CompanionPhoto &photo = library.photos[library.count++];
+    photo.fileName = String(photoObject["fileName"] | "");
+    photo.imageUrl = String(photoObject["imageUrl"] | "");
+    photo.companionImageUrl = String(photoObject["companionImageUrl"] | "");
+    photo.sizeBytes = photoObject["sizeBytes"] | 0;
+  }
+
+  library.loaded = true;
+  library.lastUpdateMs = millis();
+  return true;
+}
+
+static bool apiDownloadFile(
+  const String &requestPath,
+  fs::FS &fileSystem,
+  const char *localPath,
+  String *errorOut = nullptr
+) {
   char url[256];
   if (!apiBuildUrl(url, sizeof(url), requestPath)) {
+    if (errorOut) {
+      *errorOut = "url build";
+    }
     return false;
   }
 
@@ -245,6 +302,9 @@ static bool apiDownloadFile(const String &requestPath, fs::FS &fileSystem, const
   http.setTimeout(15000);
   int code = http.GET();
   if (code != 200) {
+    if (errorOut) {
+      *errorOut = "http " + String(code);
+    }
     http.end();
     return false;
   }
@@ -252,14 +312,36 @@ static bool apiDownloadFile(const String &requestPath, fs::FS &fileSystem, const
   fileSystem.remove(localPath);
   File file = fileSystem.open(localPath, "w");
   if (!file) {
+    if (errorOut) {
+      *errorOut = "open write";
+    }
     http.end();
     return false;
   }
 
+  int expectedSize = http.getSize();
   int written = http.writeToStream(&file);
   file.close();
   http.end();
-  return written >= 0;
+  size_t finalSize = 0;
+  File verifyFile = fileSystem.open(localPath, "r");
+  if (verifyFile) {
+    finalSize = verifyFile.size();
+    verifyFile.close();
+  }
+  bool ok = written >= 0 && finalSize > 0;
+  if (expectedSize >= 0) {
+    ok = ok && written == expectedSize && static_cast<int>(finalSize) == expectedSize;
+  }
+  if (!ok) {
+    if (errorOut) {
+      *errorOut = "write " + String(written) + "/" + String(expectedSize) + "/" + String(finalSize);
+    }
+    fileSystem.remove(localPath);
+  } else if (errorOut) {
+    *errorOut = "";
+  }
+  return ok;
 }
 
 static const char *apiNextVoiceMode(const String &currentMode) {

@@ -1,6 +1,6 @@
 import { LLMTool, ToolReturnTag } from "../../type";
 import {
-  getLatestShowedImage,
+  getPreferredContextImage,
   setLatestGenImg,
 } from "../../utils/image";
 import { imageDir } from "../../utils/dir";
@@ -53,7 +53,7 @@ export const addLlm8850lcmGenerationTool = (
 
       // img2img: attach the latest showed image as base64 input
       if (withImageContext) {
-        const latestImgPath = getLatestShowedImage();
+        const latestImgPath = getPreferredContextImage();
         if (latestImgPath) {
           const base64Image = readFileSync(latestImgPath, {
             encoding: "base64",
