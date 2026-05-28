@@ -8,11 +8,14 @@
 
 #include <Arduino.h>
 #include <M5Core2.h>
+#include <SD.h>
 #include <WiFiMulti.h>
 #include <Audio.h>
+#include <HTTPClient.h>
 #include <Preferences.h>
 #include <ArduinoJson.h>
 #include <driver/i2s.h>
+#include <vector>
 
 #include "GroqApi.h"
 #include "Core2Lcd.h"
@@ -59,10 +62,10 @@ static constexpr uint32_t BOT_SAMPLE_RATE = 44100;
 static constexpr int BOT_REPLY_X = 10;
 static constexpr int BOT_REPLY_Y = 30;
 static constexpr int BOT_REPLY_W = 300;
-static constexpr int BOT_REPLY_H = 144;
-static constexpr int BOT_STATUS_Y = 178;
-static constexpr int BOT_ACTION_Y = 192;
-static constexpr int BOT_ACTION_H = 20;
+static constexpr int BOT_REPLY_H = 132;
+static constexpr int BOT_STATUS_Y = 166;
+static constexpr int BOT_ACTION_Y = 178;
+static constexpr int BOT_ACTION_H = 30;
 static constexpr int BOT_ACTION_W = 96;
 static constexpr int BOT_ACTION_GAP = 6;
 static constexpr int BOT_ACTION_SETUP_X = 10;
@@ -73,10 +76,24 @@ static constexpr int BOT_VIEW_TOGGLE_Y = 3;
 static constexpr int BOT_VIEW_TOGGLE_W = 44;
 static constexpr int BOT_VIEW_TOGGLE_H = 18;
 static constexpr int BOT_FOOTER_LABEL_Y = 222;
+static constexpr int BOT_SETTINGS_TILE_COLS = 3;
+static constexpr int BOT_SETTINGS_TILE_ROWS = 3;
+static constexpr int BOT_SETTINGS_TILE_W = 96;
+static constexpr int BOT_SETTINGS_TILE_H = 58;
+static constexpr int BOT_SETTINGS_TILE_GAP = 8;
+static constexpr int BOT_SETTINGS_GRID_X = 8;
+static constexpr int BOT_SETTINGS_GRID_Y = 34;
+static constexpr int AI_IMAGE_Y = 0;
+static constexpr int AI_IMAGE_H = SCREEN_H;
+static constexpr unsigned long AI_LIST_REFRESH_MS = 30000;
+static constexpr unsigned long AI_SLIDE_INTERVAL_MS = 18000;
+static constexpr size_t AI_MAX_IMAGE_BYTES = 512 * 1024;
+static constexpr char AI_CACHE_DIR[] = "/ai-cache";
 
 enum class AppMode : uint8_t {
     Bot,
     Radio,
+    AiScreensaver,
 };
 
 enum class BotRecordingMode : uint8_t {
@@ -204,6 +221,20 @@ int botReplyScrollOffset = 0;
 unsigned long botAutoScrollPauseUntilMs = 0;
 unsigned long botLastAutoScrollMs = 0;
 BotReplyView botReplyView = BotReplyView::Assistant;
+bool aiDrawNeeded = true;
+bool aiImageReady = false;
+bool aiSdChecked = false;
+bool aiSdReady = false;
+int aiSlideIndex = -1;
+unsigned long aiLastListRefreshMs = 0;
+unsigned long aiLastSlideMs = 0;
+String aiStatus = "Waiting for AI images...";
+String aiCurrentFileName;
+String aiCurrentSlidePath;
+String aiLastError;
+std::vector<String> aiRemotePhotoFiles;
+uint8_t *aiImageBuffer = nullptr;
+size_t aiImageBufferLength = 0;
 
 static void markBotDirty(uint8_t regions) {
     botDirtyRegions |= regions;
@@ -213,6 +244,84 @@ static void markBotDirty(uint8_t regions) {
 static String clampText(const String &value, size_t maxChars = BOT_MAX_VISIBLE_CHARS) {
     if (value.length() <= maxChars) return value;
     return value.substring(value.length() - maxChars);
+}
+
+static String urlEncode(const String &value) {
+    String encoded;
+    encoded.reserve(value.length() * 3);
+    for (size_t i = 0; i < value.length(); i++) {
+        const unsigned char c = static_cast<unsigned char>(value.charAt(i));
+        const bool safe =
+            (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+            c == '-' || c == '_' || c == '.' || c == '~';
+        if (safe) {
+            encoded += static_cast<char>(c);
+        } else {
+            char chunk[4];
+            snprintf(chunk, sizeof(chunk), "%%%02X", c);
+            encoded += chunk;
+        }
+    }
+    return encoded;
+}
+
+static void aiClearImageBuffer() {
+    if (aiImageBuffer) {
+        free(aiImageBuffer);
+        aiImageBuffer = nullptr;
+    }
+    aiImageBufferLength = 0;
+}
+
+static void aiClearCurrentSlide() {
+    aiClearImageBuffer();
+    aiCurrentSlidePath = "";
+    aiImageReady = false;
+}
+
+static String aiSanitizeCacheName(const String &fileName) {
+    String sanitized;
+    sanitized.reserve(fileName.length() + 8);
+    for (size_t i = 0; i < fileName.length(); i++) {
+        const char c = fileName.charAt(i);
+        const bool safe =
+            (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+            c == '-' || c == '_' || c == '.';
+        sanitized += safe ? c : '_';
+    }
+    if (!sanitized.length()) {
+        sanitized = "slide.jpg";
+    } else if (!sanitized.endsWith(".jpg") && !sanitized.endsWith(".jpeg")) {
+        sanitized += ".jpg";
+    }
+    if (sanitized.length() > 60) {
+        sanitized = sanitized.substring(0, 60);
+    }
+    return sanitized;
+}
+
+static String aiCachePathForFile(const String &fileName) {
+    return String(AI_CACHE_DIR) + "/" + aiSanitizeCacheName(fileName);
+}
+
+static bool aiEnsureSdCache() {
+    if (aiSdChecked) {
+        return aiSdReady;
+    }
+    aiSdChecked = true;
+    Serial.println("[AI] checking SD cache...");
+    aiSdReady = SD.begin();
+    if (!aiSdReady || SD.cardType() == CARD_NONE) {
+        aiSdReady = false;
+        Serial.println("[AI] SD cache unavailable");
+        return false;
+    }
+    if (!SD.exists(AI_CACHE_DIR)) {
+        SD.mkdir(AI_CACHE_DIR);
+    }
+    aiSdReady = SD.exists(AI_CACHE_DIR);
+    Serial.println(aiSdReady ? "[AI] SD cache ready" : "[AI] SD cache directory unavailable");
+    return aiSdReady;
 }
 
 static void fillWrappedLines(const String &sourceText, String *lines, int &lineCount,
@@ -316,8 +425,343 @@ static void setupRadioUi();
 static void drawRadioDynamic();
 static void drawSettings();
 static void drawBotUi();
+static void drawAiUi();
+static void enterAiMode(bool redraw = true);
+static void enterBotMode(bool redraw = true);
+static void enterRadioMode(bool redraw = true);
 
 static void resetBotAutoScroll(unsigned long pauseMs = 1600);
+
+static AppMode appModeForBootMode(RdBootMode bootMode) {
+    switch (bootMode) {
+        case RdBootMode::Radio:
+            return AppMode::Radio;
+        case RdBootMode::AiScreensaver:
+            return AppMode::AiScreensaver;
+        case RdBootMode::Bot:
+        default:
+            return AppMode::Bot;
+    }
+}
+
+static bool bootModeIsConfigured(RdBootMode bootMode) {
+    switch (bootMode) {
+        case RdBootMode::AiScreensaver:
+            return rdHasAiScreensaverReady();
+        case RdBootMode::Radio:
+            return true;
+        case RdBootMode::Bot:
+        default:
+            return rdHasBotSettingsReady();
+    }
+}
+
+static String bootModeMissingMessage(RdBootMode bootMode) {
+    switch (bootMode) {
+        case RdBootMode::AiScreensaver:
+            return "Add Whisplay URL in setup.";
+        case RdBootMode::Bot:
+            return "Add Groq key in setup.";
+        case RdBootMode::Radio:
+        default:
+            return "Finish setup first.";
+    }
+}
+
+static bool aiFetchRemotePhotoList(String &errorOut) {
+    errorOut = "";
+    aiRemotePhotoFiles.clear();
+    if (!rdHasAiScreensaverReady()) {
+        errorOut = "Add Whisplay URL in setup.";
+        Serial.println("[AI] no Whisplay URL configured");
+        return false;
+    }
+
+    HTTPClient http;
+    const String requestUrl = rdNormalizeBaseUrl(String(rd_whisplay_url)) + "/api/generated-images";
+    Serial.println(String("[AI] fetching list: ") + requestUrl);
+    http.begin(requestUrl);
+    http.setTimeout(7000);
+    const int code = http.GET();
+    if (code != 200) {
+        errorOut = code > 0 ? "HTTP " + String(code) : "List request failed.";
+        Serial.println(String("[AI] list fetch failed: ") + errorOut);
+        http.end();
+        return false;
+    }
+
+    const String body = http.getString();
+    http.end();
+
+    JsonDocument doc;
+    if (deserializeJson(doc, body)) {
+        errorOut = "Image list parse failed.";
+        return false;
+    }
+
+    JsonArray photos = doc["photos"].as<JsonArray>();
+    if (photos.isNull()) {
+        errorOut = "No image list found.";
+        return false;
+    }
+
+    aiRemotePhotoFiles.reserve(photos.size());
+    for (JsonVariant photoVariant : photos) {
+        JsonObject photoObject = photoVariant.as<JsonObject>();
+        const String fileName = String(photoObject["fileName"] | "");
+        if (!fileName.length()) {
+            continue;
+        }
+        aiRemotePhotoFiles.push_back(fileName);
+    }
+
+    aiLastListRefreshMs = millis();
+    if (aiRemotePhotoFiles.empty()) {
+        errorOut = "No AI images yet.";
+        Serial.println("[AI] remote list empty");
+        return false;
+    }
+    Serial.println(String("[AI] loaded remote photo count: ") + aiRemotePhotoFiles.size());
+    return true;
+}
+
+static bool aiSetCurrentSlideFromMemory(const String &fileName, uint8_t *buffer, size_t length) {
+    aiClearCurrentSlide();
+    aiImageBuffer = buffer;
+    aiImageBufferLength = length;
+    aiCurrentFileName = fileName;
+    aiLastSlideMs = millis();
+    aiStatus = "Showing AI gallery";
+    aiLastError = "";
+    aiImageReady = true;
+    aiDrawNeeded = true;
+    Serial.println(String("[AI] slide ready from RAM: ") + aiCurrentFileName);
+    return true;
+}
+
+static bool aiSetCurrentSlideFromSd(const String &fileName, const String &cachePath) {
+    aiClearCurrentSlide();
+    aiCurrentSlidePath = cachePath;
+    aiCurrentFileName = fileName;
+    aiLastSlideMs = millis();
+    aiStatus = "Showing AI gallery";
+    aiLastError = "";
+    aiImageReady = true;
+    aiDrawNeeded = true;
+    Serial.println(String("[AI] slide ready from SD: ") + aiCurrentFileName);
+    return true;
+}
+
+static bool aiDownloadSlideToMemory(const String &fileName, const String &requestUrl,
+                                    String &errorOut) {
+    HTTPClient http;
+    http.begin(requestUrl);
+    http.setTimeout(15000);
+    const int code = http.GET();
+    if (code != 200) {
+        errorOut = code > 0 ? "HTTP " + String(code) : "Image download failed.";
+        Serial.println(String("[AI] RAM slide download failed: ") + errorOut);
+        http.end();
+        return false;
+    }
+
+    WiFiClient *stream = http.getStreamPtr();
+    const int contentLength = http.getSize();
+    size_t capacity = contentLength > 0 ? static_cast<size_t>(contentLength) : 32768;
+    if (capacity > AI_MAX_IMAGE_BYTES) {
+        http.end();
+        errorOut = "Image too large.";
+        Serial.println("[AI] image too large for RAM buffer");
+        return false;
+    }
+
+    uint8_t *buffer = static_cast<uint8_t *>(malloc(capacity));
+    if (!buffer) {
+        http.end();
+        errorOut = "Image alloc failed.";
+        Serial.println("[AI] image alloc failed");
+        return false;
+    }
+
+    size_t totalRead = 0;
+    unsigned long lastDataMs = millis();
+    while (http.connected() &&
+           (contentLength < 0 || static_cast<int>(totalRead) < contentLength || stream->available())) {
+        size_t available = stream->available();
+        if (available == 0) {
+            if (millis() - lastDataMs > 2000) {
+                break;
+            }
+            delay(1);
+            continue;
+        }
+
+        lastDataMs = millis();
+        if (totalRead + available > capacity) {
+            size_t nextCapacity = capacity;
+            while (totalRead + available > nextCapacity) {
+                nextCapacity *= 2;
+            }
+            if (nextCapacity > AI_MAX_IMAGE_BYTES) {
+                free(buffer);
+                http.end();
+                errorOut = "Image exceeded buffer cap.";
+                Serial.println("[AI] image exceeded RAM buffer cap");
+                return false;
+            }
+            uint8_t *grown = static_cast<uint8_t *>(realloc(buffer, nextCapacity));
+            if (!grown) {
+                free(buffer);
+                http.end();
+                errorOut = "Image realloc failed.";
+                Serial.println("[AI] image realloc failed");
+                return false;
+            }
+            buffer = grown;
+            capacity = nextCapacity;
+        }
+
+        const size_t remainingHint =
+            contentLength > 0 ? static_cast<size_t>(contentLength - static_cast<int>(totalRead))
+                              : available;
+        const size_t chunkSize = min(available, remainingHint);
+        const int bytesRead = stream->readBytes(buffer + totalRead, chunkSize);
+        if (bytesRead <= 0) {
+            break;
+        }
+        totalRead += static_cast<size_t>(bytesRead);
+    }
+
+    http.end();
+    const bool ok = totalRead > 0 &&
+                    (contentLength < 0 || totalRead == static_cast<size_t>(contentLength));
+    if (!ok) {
+        free(buffer);
+        errorOut = "Image buffer read failed.";
+        Serial.println(String("[AI] image buffer read failed, bytes=") + totalRead +
+                       " expected=" + contentLength);
+        return false;
+    }
+
+    return aiSetCurrentSlideFromMemory(fileName, buffer, totalRead);
+}
+
+static bool aiDownloadSlide(size_t index, String &errorOut) {
+    errorOut = "";
+    if (index >= aiRemotePhotoFiles.size()) {
+        errorOut = "Slide index out of range.";
+        return false;
+    }
+
+    const String fileName = aiRemotePhotoFiles[index];
+    const String requestUrl =
+        rdNormalizeBaseUrl(String(rd_whisplay_url)) + "/api/generated-images/companion/" +
+        urlEncode(fileName) + "?width=" + String(SCREEN_W) + "&height=" + String(AI_IMAGE_H);
+    Serial.println(String("[AI] downloading slide ") + fileName + " from " + requestUrl);
+    if (aiEnsureSdCache()) {
+        const String cachePath = aiCachePathForFile(fileName);
+        if (SD.exists(cachePath)) {
+            aiSlideIndex = static_cast<int>(index);
+            return aiSetCurrentSlideFromSd(fileName, cachePath);
+        }
+
+        HTTPClient http;
+        http.begin(requestUrl);
+        http.setTimeout(15000);
+        const int code = http.GET();
+        if (code == 200) {
+            SD.remove(cachePath);
+            File file = SD.open(cachePath, FILE_WRITE);
+            if (file) {
+                const int expectedSize = http.getSize();
+                const int written = http.writeToStream(&file);
+                file.close();
+                http.end();
+
+                size_t finalSize = 0;
+                File verify = SD.open(cachePath, FILE_READ);
+                if (verify) {
+                    finalSize = verify.size();
+                    verify.close();
+                }
+                const bool ok = written >= 0 && finalSize > 0 &&
+                                (expectedSize < 0 ||
+                                 (written == expectedSize &&
+                                  static_cast<int>(finalSize) == expectedSize));
+                if (ok) {
+                    aiSlideIndex = static_cast<int>(index);
+                    return aiSetCurrentSlideFromSd(fileName, cachePath);
+                }
+                SD.remove(cachePath);
+                Serial.println(String("[AI] SD cache write failed for ") + fileName);
+            } else {
+                http.end();
+                Serial.println(String("[AI] SD open failed for ") + cachePath);
+            }
+        } else {
+            errorOut = code > 0 ? "HTTP " + String(code) : "Image download failed.";
+            Serial.println(String("[AI] SD slide download failed: ") + errorOut);
+            http.end();
+        }
+        Serial.println("[AI] falling back to RAM for this slide");
+    }
+
+    const bool loaded = aiDownloadSlideToMemory(fileName, requestUrl, errorOut);
+    if (loaded) {
+        aiSlideIndex = static_cast<int>(index);
+    }
+    return loaded;
+}
+
+static bool aiShowNextSlide(bool forceListRefresh = false) {
+    Serial.println(String("[AI] show next slide, force refresh=") + (forceListRefresh ? "yes" : "no"));
+    if (WiFi.status() != WL_CONNECTED) {
+        aiImageReady = false;
+        aiStatus = "Waiting for WiFi...";
+        aiLastError = "WiFi is not connected.";
+        aiDrawNeeded = true;
+        Serial.println("[AI] WiFi not connected");
+        return false;
+    }
+
+    String error;
+    if (forceListRefresh || aiRemotePhotoFiles.empty() ||
+        millis() - aiLastListRefreshMs >= AI_LIST_REFRESH_MS) {
+        if (!aiFetchRemotePhotoList(error)) {
+            aiImageReady = false;
+            aiStatus = error.length() ? error : "No AI images yet.";
+            aiLastError = aiStatus;
+            aiDrawNeeded = true;
+            Serial.println(String("[AI] refresh failed: ") + aiStatus);
+            return false;
+        }
+    }
+
+    if (aiRemotePhotoFiles.empty()) {
+        aiImageReady = false;
+        aiStatus = "No AI images yet.";
+        aiLastError = aiStatus;
+        aiDrawNeeded = true;
+        return false;
+    }
+
+    size_t nextIndex = !aiRemotePhotoFiles.empty()
+                           ? static_cast<size_t>((aiSlideIndex + 1) % aiRemotePhotoFiles.size())
+                           : 0;
+    for (size_t attempt = 0; attempt < aiRemotePhotoFiles.size(); attempt++) {
+        if (aiDownloadSlide(nextIndex, error)) {
+            return true;
+        }
+        nextIndex = (nextIndex + 1) % aiRemotePhotoFiles.size();
+    }
+
+    aiImageReady = false;
+    aiStatus = error.length() ? error : "Slide download failed.";
+    aiLastError = aiStatus;
+    aiDrawNeeded = true;
+    Serial.println(String("[AI] failed to load any slide: ") + aiStatus);
+    return false;
+}
 
 static unsigned long lastStationChange = 0;
 static void changeStation(int newChosen) {
@@ -405,7 +849,7 @@ static void openSetupPortal() {
     ESP.restart();
 }
 
-static void enterBotMode(bool redraw = true) {
+static void enterBotMode(bool redraw) {
     stopRadioPlayback();
     inSettings = false;
     activeMode = AppMode::Bot;
@@ -418,13 +862,27 @@ static void enterBotMode(bool redraw = true) {
     }
 }
 
-static void enterRadioMode(bool redraw = true) {
+static void enterRadioMode(bool redraw) {
     activeMode = AppMode::Radio;
     inSettings = false;
     startRadioPlayback();
     setupRadioUi();
     canDraw = true;
     if (redraw) drawRadioDynamic();
+}
+
+static void enterAiMode(bool redraw) {
+    stopRadioPlayback();
+    inSettings = false;
+    activeMode = AppMode::AiScreensaver;
+    aiDrawNeeded = true;
+    aiStatus = rdHasAiScreensaverReady() ? "Loading AI gallery..." : "Add Whisplay URL in setup.";
+    aiLastError = rdHasAiScreensaverReady() ? "" : "Whisplay URL is not configured.";
+    Serial.println(String("[AI] enter mode, url=") + rd_whisplay_url);
+    if (redraw) {
+        aiShowNextSlide(true);
+        drawAiUi();
+    }
 }
 
 static void clearBotChat() {
@@ -580,6 +1038,89 @@ static void pollBotReplyAutoScroll() {
     }
 }
 
+static void drawBotSettingsTile(int index, const String &label, const String &value,
+                                uint16_t accent = TFT_CYAN) {
+    const int col = index % BOT_SETTINGS_TILE_COLS;
+    const int row = index / BOT_SETTINGS_TILE_COLS;
+    const int x = BOT_SETTINGS_GRID_X + col * (BOT_SETTINGS_TILE_W + BOT_SETTINGS_TILE_GAP);
+    const int y = BOT_SETTINGS_GRID_Y + row * (BOT_SETTINGS_TILE_H + BOT_SETTINGS_TILE_GAP);
+    M5.Lcd.fillRoundRect(x, y, BOT_SETTINGS_TILE_W, BOT_SETTINGS_TILE_H, 8, 0x1082);
+    M5.Lcd.drawRoundRect(x, y, BOT_SETTINGS_TILE_W, BOT_SETTINGS_TILE_H, 8, accent);
+    M5.Lcd.setTextColor(accent, 0x1082);
+    M5.Lcd.setTextFont(2);
+    M5.Lcd.drawCentreString(label, x + BOT_SETTINGS_TILE_W / 2, y + 10, 2);
+    M5.Lcd.setTextColor(TFT_WHITE, 0x1082);
+    M5.Lcd.setTextFont(1);
+    M5.Lcd.drawCentreString(clampText(value, 18), x + BOT_SETTINGS_TILE_W / 2, y + 34, 1);
+}
+
+static void drawBotSettingsScreen() {
+    M5.Lcd.fillRect(0, 24, SCREEN_W, SCREEN_H - 24, TFT_BLACK);
+    drawBotSettingsTile(0, "SETUP", "AP portal");
+    drawBotSettingsTile(1, "PERSONA", rdCurrentPersonalityLabel(), TFT_GREEN);
+    drawBotSettingsTile(2, "MODEL", String(rd_groq_model), SW_AMBER);
+    drawBotSettingsTile(3, "SCROLL", rdCurrentScrollSpeedLabel(), TFT_CYAN);
+    drawBotSettingsTile(4, "BOOT", rdCurrentBootModeLabel(), TFT_ORANGE);
+    drawBotSettingsTile(5, "LAUNCH", rdCurrentBootModeLabel(), TFT_GREEN);
+    drawBotSettingsTile(6, "AI SHOW", rdHasAiScreensaverReady() ? "Launch now" : "Needs URL",
+                        rdHasAiScreensaverReady() ? TFT_CYAN : TFT_RED);
+    drawBotSettingsTile(7, "RADIO", "Launch now", TFT_ORANGE);
+    drawBotSettingsTile(8, "BACK", "Chat", TFT_WHITE);
+}
+
+static int botSettingsTileAtPoint(const TouchPoint_t &p) {
+    for (int index = 0; index < BOT_SETTINGS_TILE_COLS * BOT_SETTINGS_TILE_ROWS; index++) {
+        const int col = index % BOT_SETTINGS_TILE_COLS;
+        const int row = index / BOT_SETTINGS_TILE_COLS;
+        const int x = BOT_SETTINGS_GRID_X + col * (BOT_SETTINGS_TILE_W + BOT_SETTINGS_TILE_GAP);
+        const int y = BOT_SETTINGS_GRID_Y + row * (BOT_SETTINGS_TILE_H + BOT_SETTINGS_TILE_GAP);
+        if (botTouchInRect(p, x, y, BOT_SETTINGS_TILE_W, BOT_SETTINGS_TILE_H)) {
+            return index;
+        }
+    }
+    return -1;
+}
+
+static void cycleBotBootMode() {
+    RdBootMode nextMode = RdBootMode::Bot;
+    switch (rdGetBootMode()) {
+        case RdBootMode::Bot:
+            nextMode = RdBootMode::AiScreensaver;
+            break;
+        case RdBootMode::AiScreensaver:
+            nextMode = RdBootMode::Radio;
+            break;
+        case RdBootMode::Radio:
+        default:
+            nextMode = RdBootMode::Bot;
+            break;
+    }
+    rdSetBootMode(nextMode);
+    setBotStatus(String("Boot mode: ") + rdCurrentBootModeLabel());
+    markBotDirty(BOT_DIRTY_HEADER | BOT_DIRTY_REPLY | BOT_DIRTY_STATUS);
+}
+
+static void launchBotSelectedBootMode() {
+    const RdBootMode bootMode = rdGetBootMode();
+    if (!bootModeIsConfigured(bootMode)) {
+        setBotStatus(bootModeMissingMessage(bootMode));
+        markBotDirty(BOT_DIRTY_STATUS | BOT_DIRTY_REPLY);
+        return;
+    }
+    switch (appModeForBootMode(bootMode)) {
+        case AppMode::AiScreensaver:
+            enterAiMode();
+            break;
+        case AppMode::Radio:
+            enterRadioMode();
+            break;
+        case AppMode::Bot:
+        default:
+            enterBotMode();
+            break;
+    }
+}
+
 static void drawBotHeader() {
     M5.Lcd.fillRect(0, 0, SCREEN_W, 24, 0x18C3);
     M5.Lcd.setTextColor(TFT_CYAN, 0x18C3);
@@ -603,29 +1144,7 @@ static void drawBotReplyPanel() {
     M5.Lcd.drawRoundRect(BOT_REPLY_X, BOT_REPLY_Y, BOT_REPLY_W, BOT_REPLY_H, 6, TFT_GREEN);
 
     if (botScreen == BotScreen::Settings) {
-        M5.Lcd.setTextFont(2);
-        M5.Lcd.setTextColor(TFT_CYAN, 0x0841);
-        M5.Lcd.drawString("SETTINGS", BOT_REPLY_X + 8, BOT_REPLY_Y + 8, 2);
-
-        const int rowY[] = {50, 76, 102, 128, 154};
-        const char *labels[] = {"Setup", "Personality", "Model", "Scroll", "Back"};
-        String values[] = {
-            "Open AP setup",
-            rdCurrentPersonalityLabel(),
-            String(rd_groq_model),
-            rdCurrentScrollSpeedLabel(),
-            "Return to chat",
-        };
-        for (int i = 0; i < 5; i++) {
-            uint16_t bg = (i == 0) ? 0x2104 : 0x1082;
-            M5.Lcd.fillRoundRect(BOT_REPLY_X + 8, rowY[i], BOT_REPLY_W - 16, 22, 4, bg);
-            M5.Lcd.setTextColor(TFT_WHITE, bg);
-            M5.Lcd.setTextFont(2);
-            M5.Lcd.drawString(labels[i], BOT_REPLY_X + 14, rowY[i] + 4, 2);
-            M5.Lcd.setTextFont(1);
-            M5.Lcd.drawRightString(clampText(values[i], 20), BOT_REPLY_X + BOT_REPLY_W - 16,
-                                   rowY[i] + 8, 1);
-        }
+        drawBotSettingsScreen();
         return;
     }
 
@@ -662,6 +1181,9 @@ static void drawBotReplyPanel() {
 }
 
 static void drawBotStatusLine() {
+    if (botScreen == BotScreen::Settings) {
+        return;
+    }
     M5.Lcd.fillRect(0, BOT_STATUS_Y, SCREEN_W, 8, TFT_BLACK);
     M5.Lcd.setTextFont(1);
     M5.Lcd.setTextColor(SW_AMBER, TFT_BLACK);
@@ -675,6 +1197,9 @@ static void drawBotStatusLine() {
 }
 
 static void drawBotActionButtons() {
+    if (botScreen == BotScreen::Settings) {
+        return;
+    }
     M5.Lcd.fillRect(0, BOT_ACTION_Y, SCREEN_W, BOT_ACTION_H + 6, TFT_BLACK);
     const int actionXs[] = {BOT_ACTION_SETUP_X, BOT_ACTION_RADIO_X, BOT_ACTION_NEW_X};
     const char *actionLabels[] = {"SET", "RADIO", "NEW"};
@@ -684,11 +1209,14 @@ static void drawBotActionButtons() {
         M5.Lcd.setTextColor(TFT_CYAN, 0x1082);
         M5.Lcd.setTextFont(2);
         M5.Lcd.drawCentreString(actionLabels[i], actionXs[i] + BOT_ACTION_W / 2,
-                                BOT_ACTION_Y + 4, 2);
+                                BOT_ACTION_Y + 9, 2);
     }
 }
 
 static void drawBotFooterHints() {
+    if (botScreen == BotScreen::Settings) {
+        return;
+    }
     M5.Lcd.fillRect(0, BOT_FOOTER_LABEL_Y - 2, SCREEN_W, 12, TFT_BLACK);
     M5.Lcd.setTextFont(1);
     M5.Lcd.setTextColor(botRecording ? TFT_RED : TFT_CYAN, TFT_BLACK);
@@ -718,6 +1246,27 @@ static void drawBotUi() {
     }
     botDirtyRegions = BOT_DIRTY_NONE;
     botDrawNeeded = false;
+}
+
+static void drawAiUi() {
+    M5.Lcd.fillScreen(TFT_BLACK);
+    if (aiImageReady && aiCurrentSlidePath.length() && SD.exists(aiCurrentSlidePath)) {
+        M5.Lcd.drawJpgFile(SD, aiCurrentSlidePath.c_str(), 0, AI_IMAGE_Y, SCREEN_W, AI_IMAGE_H);
+    } else if (aiImageReady && aiImageBuffer && aiImageBufferLength > 0) {
+        M5.Lcd.drawJpg(aiImageBuffer, aiImageBufferLength, 0, AI_IMAGE_Y, SCREEN_W, AI_IMAGE_H);
+    } else {
+        M5.Lcd.fillRect(0, AI_IMAGE_Y, SCREEN_W, AI_IMAGE_H, TFT_BLACK);
+        M5.Lcd.setTextColor(TFT_CYAN, TFT_BLACK);
+        M5.Lcd.setTextFont(2);
+        M5.Lcd.drawCentreString("AI SCREENSAVER", SCREEN_W / 2, 86, 2);
+        M5.Lcd.setTextColor(TFT_WHITE, TFT_BLACK);
+        M5.Lcd.drawCentreString(clampText(aiStatus, 40), SCREEN_W / 2, 112, 2);
+        if (aiLastError.length()) {
+            M5.Lcd.setTextFont(1);
+            M5.Lcd.drawCentreString(clampText(aiLastError, 48), SCREEN_W / 2, 136, 1);
+        }
+    }
+    aiDrawNeeded = false;
 }
 
 static void setupRadioUi() {
@@ -1014,6 +1563,9 @@ static void pollBotRecording() {
 
 void setup() {
     M5.begin(true, true, true, false, kMBusModeOutput, true);
+    Serial.begin(115200);
+    delay(50);
+    Serial.println("[BOOT] Core2Groq starting");
     audio.setPinout(I2S_BCK, I2S_LRC, I2S_DOUT);
     audio.setVolume(volume * 2);
 
@@ -1030,6 +1582,13 @@ void setup() {
 
     rdLoadSettings();
     rdLoadChatHistory();
+    Serial.println(String("[BOOT] settings loaded: hasWifi=") + (rd_has_settings ? "yes" : "no") +
+                   " bootMode=" + rdCurrentBootModeLabel() +
+                   " hasGroqKey=" + (rdHasBotSettingsReady() ? "yes" : "no") +
+                   " hasUrl=" + (rdHasAiScreensaverReady() ? "yes" : "no"));
+    if (rdHasAiScreensaverReady()) {
+        Serial.println(String("[BOOT] Whisplay URL: ") + rd_whisplay_url);
+    }
 
     M5.Lcd.fillScreen(TFT_BLACK);
     M5.Lcd.setTextSize(2);
@@ -1041,7 +1600,8 @@ void setup() {
     M5.Lcd.setCursor(4, 40);
     M5.Lcd.print("Hold BtnA for setup...");
 
-    bool enterPortal = !rd_has_settings || (!rdBootsToRadio() && !rdHasBotSettingsReady());
+    bool enterPortal = !rd_has_settings || !bootModeIsConfigured(rdGetBootMode());
+    Serial.println(String("[BOOT] enterPortal=") + (enterPortal ? "yes" : "no"));
     unsigned long bootStart = millis();
     while (millis() - bootStart < 3000) {
         M5.update();
@@ -1053,6 +1613,7 @@ void setup() {
     }
 
     if (enterPortal) {
+        Serial.println("[BOOT] opening setup portal");
         rdInitPortal();
         while (!portalDone) {
             rdRunPortal();
@@ -1060,6 +1621,8 @@ void setup() {
         }
         rdClosePortal();
         rdLoadSettings();
+        Serial.println(String("[BOOT] portal done, bootMode=") + rdCurrentBootModeLabel() +
+                       " hasUrl=" + (rdHasAiScreensaverReady() ? "yes" : "no"));
     }
 
     M5.Lcd.fillScreen(TFT_BLACK);
@@ -1071,23 +1634,26 @@ void setup() {
     WiFi.mode(WIFI_STA);
     wifiMulti.addAP(rd_wifi_ssid, rd_wifi_pass);
     wifiMulti.run();
+    Serial.println(String("[BOOT] WiFi status after first run: ") + WiFi.status());
 
     M5.Lcd.setCursor(2, 50);
     M5.Lcd.setTextSize(1);
     M5.Lcd.setTextColor(TFT_WHITE);
-    M5.Lcd.println("Radio player ready.");
+    M5.Lcd.println("Core2Groq runtime ready.");
     delay(400);
 
     xTaskCreatePinnedToCore(audioTask, "audioT", 8192, nullptr, 2, &audioTaskHandle, 0);
 
-    activeMode = (rdBootsToRadio() || !rdHasBotSettingsReady()) ? AppMode::Radio : AppMode::Bot;
-    if (activeMode == AppMode::Radio) {
-        setupRadioUi();
-        startRadioPlayback();
-        canDraw = true;
-        drawRadioDynamic();
+    const AppMode bootMode = appModeForBootMode(rdGetBootMode());
+    Serial.println(String("[BOOT] launching mode: ") +
+                   (bootMode == AppMode::Bot ? "bot" :
+                    bootMode == AppMode::Radio ? "radio" : "ai"));
+    if (bootMode == AppMode::Radio) {
+        enterRadioMode();
+    } else if (bootMode == AppMode::AiScreensaver) {
+        enterAiMode();
     } else {
-        botDirtyRegions = BOT_DIRTY_ALL;
+        enterBotMode();
         drawBotUi();
     }
 
@@ -1170,6 +1736,38 @@ void loop() {
             if (botTouchInRect(p, BOT_VIEW_TOGGLE_X, BOT_VIEW_TOGGLE_Y, BOT_VIEW_TOGGLE_W,
                                BOT_VIEW_TOGGLE_H)) {
                 toggleBotReplyView();
+            } else if (botScreen == BotScreen::Settings) {
+                const int tileIndex = botSettingsTileAtPoint(p);
+                if (tileIndex == 0) {
+                    openSetupPortal();
+                } else if (tileIndex == 1) {
+                    cycleBotPersonality(1);
+                } else if (tileIndex == 2) {
+                    cycleBotModel(1);
+                } else if (tileIndex == 3) {
+                    cycleBotScrollSpeed();
+                } else if (tileIndex == 4) {
+                    cycleBotBootMode();
+                } else if (tileIndex == 5) {
+                    launchBotSelectedBootMode();
+                    botPrevTouch = touchNow;
+                    return;
+                } else if (tileIndex == 6) {
+                    if (!rdHasAiScreensaverReady()) {
+                        setBotStatus("Add Whisplay URL in setup.");
+                        markBotDirty(BOT_DIRTY_STATUS | BOT_DIRTY_REPLY);
+                    } else {
+                        enterAiMode();
+                        botPrevTouch = touchNow;
+                        return;
+                    }
+                } else if (tileIndex == 7) {
+                    enterRadioMode();
+                    botPrevTouch = touchNow;
+                    return;
+                } else if (tileIndex == 8) {
+                    toggleBotSettingsMenu();
+                }
             } else if (botTouchInRect(p, BOT_ACTION_SETUP_X, BOT_ACTION_Y, BOT_ACTION_W,
                                       BOT_ACTION_H)) {
                 toggleBotSettingsMenu();
@@ -1182,24 +1780,10 @@ void loop() {
                                       BOT_ACTION_H)) {
                 clearBotChat();
             } else if (botTouchInRect(p, BOT_REPLY_X, BOT_REPLY_Y, BOT_REPLY_W, BOT_REPLY_H)) {
-                if (botScreen == BotScreen::Settings) {
-                    if (botTouchInRect(p, BOT_REPLY_X + 8, 50, BOT_REPLY_W - 16, 22)) {
-                        openSetupPortal();
-                    } else if (botTouchInRect(p, BOT_REPLY_X + 8, 76, BOT_REPLY_W - 16, 22)) {
-                        cycleBotPersonality(1);
-                    } else if (botTouchInRect(p, BOT_REPLY_X + 8, 102, BOT_REPLY_W - 16, 22)) {
-                        cycleBotModel(1);
-                    } else if (botTouchInRect(p, BOT_REPLY_X + 8, 128, BOT_REPLY_W - 16, 22)) {
-                        cycleBotScrollSpeed();
-                    } else if (botTouchInRect(p, BOT_REPLY_X + 8, 154, BOT_REPLY_W - 16, 22)) {
-                        toggleBotSettingsMenu();
-                    }
+                if (p.x < BOT_REPLY_X + (BOT_REPLY_W / 2)) {
+                    scrollBotReply(-1);
                 } else {
-                    if (p.x < BOT_REPLY_X + (BOT_REPLY_W / 2)) {
-                        scrollBotReply(-1);
-                    } else {
-                        scrollBotReply(1);
-                    }
+                    scrollBotReply(1);
                 }
             }
         }
@@ -1219,6 +1803,57 @@ void loop() {
         if (botDrawNeeded) {
             lastDraw = millis();
             drawBotUi();
+        }
+
+        vTaskDelay(5);
+        return;
+    }
+
+    if (activeMode == AppMode::AiScreensaver) {
+        if (millis() - lastRSSI > 800) {
+            lastRSSI = millis();
+            connected = (WiFi.status() == WL_CONNECTED);
+            rssi = connected ? WiFi.RSSI() : -99;
+            measureBatt();
+        }
+
+        if (M5.BtnA.wasPressed()) {
+            haptic();
+            openSetupPortal();
+        }
+        if (M5.BtnB.wasPressed()) {
+            haptic();
+            aiShowNextSlide(true);
+        }
+        if (M5.BtnC.wasPressed()) {
+            haptic();
+        }
+
+        const bool touchNow = M5.Touch.ispressed();
+        const TouchPoint_t p = touchNow ? M5.Touch.getPressPoint() : TouchPoint_t();
+        const bool edgeTouch = touchNow && !botPrevTouch && (millis() - lastTouch > TOUCH_DEBOUNCE);
+        if (edgeTouch) {
+            lastTouch = millis();
+            haptic();
+            if (p.y >= TOUCH_FOOTER_Y && p.x < ZONE_W) {
+                openSetupPortal();
+            } else if (p.y >= TOUCH_FOOTER_Y && p.x < ZONE_W * 2) {
+                aiShowNextSlide(true);
+            }
+        }
+        botPrevTouch = touchNow;
+
+        if (millis() - aiLastSlideMs >= AI_SLIDE_INTERVAL_MS) {
+            aiShowNextSlide();
+        }
+
+        wifiMulti.run();
+        c2EnsureLcdInit();
+        c2SetLcdMessage(aiCurrentFileName.length() ? aiCurrentFileName : aiStatus);
+        c2UpdateLcd(false, false, 0, rd_record_seconds);
+        if (aiDrawNeeded) {
+            lastDraw = millis();
+            drawAiUi();
         }
 
         vTaskDelay(5);

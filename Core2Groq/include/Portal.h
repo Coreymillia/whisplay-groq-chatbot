@@ -14,6 +14,12 @@ static const uint8_t RD_MIN_RECORD_SECONDS = 2;
 static const uint8_t RD_MAX_RECORD_SECONDS = 15;
 static const uint16_t RD_DEFAULT_SCROLL_MS = 700;
 
+enum class RdBootMode : uint8_t {
+    Bot,
+    Radio,
+    AiScreensaver,
+};
+
 struct RdModelOption {
     const char *value;
     const char *label;
@@ -77,7 +83,8 @@ static char rd_wifi_pass[64] = "";
 static char rd_groq_api_key[128] = "";
 static char rd_groq_model[64] = "";
 static char rd_personality_prompt[512] = "";
-static bool rd_boot_mode_radio = false;
+static char rd_whisplay_url[160] = "";
+static RdBootMode rd_boot_mode = RdBootMode::Bot;
 static uint8_t rd_record_seconds = RD_DEFAULT_RECORD_SECONDS;
 static uint16_t rd_scroll_ms = RD_DEFAULT_SCROLL_MS;
 static bool rd_has_settings = false;
@@ -134,6 +141,58 @@ static uint16_t rdClampScrollMs(int value) {
     return best;
 }
 
+static String rdNormalizeBaseUrl(const String &value) {
+    String normalized = value;
+    normalized.trim();
+    if (!normalized.length()) {
+        return "";
+    }
+    if (!normalized.startsWith("http://") && !normalized.startsWith("https://")) {
+        normalized = "http://" + normalized;
+    }
+    while (normalized.endsWith("/")) {
+        normalized.remove(normalized.length() - 1);
+    }
+    return normalized;
+}
+
+static RdBootMode rdParseBootMode(const String &value) {
+    String normalized = value;
+    normalized.trim();
+    normalized.toLowerCase();
+    if (normalized == "radio") {
+        return RdBootMode::Radio;
+    }
+    if (normalized == "ai" || normalized == "ai-screensaver" || normalized == "screensaver") {
+        return RdBootMode::AiScreensaver;
+    }
+    return RdBootMode::Bot;
+}
+
+static const char *rdBootModeValue(RdBootMode mode) {
+    switch (mode) {
+        case RdBootMode::Radio:
+            return "radio";
+        case RdBootMode::AiScreensaver:
+            return "ai";
+        case RdBootMode::Bot:
+        default:
+            return "bot";
+    }
+}
+
+static String rdCurrentBootModeLabel() {
+    switch (rd_boot_mode) {
+        case RdBootMode::Radio:
+            return "Radio";
+        case RdBootMode::AiScreensaver:
+            return "AI Show";
+        case RdBootMode::Bot:
+        default:
+            return "Bot";
+    }
+}
+
 static size_t rdScrollSpeedOptionCount() {
     return sizeof(RD_SCROLL_SPEED_OPTIONS) / sizeof(RD_SCROLL_SPEED_OPTIONS[0]);
 }
@@ -161,8 +220,20 @@ static bool rdHasBotSettingsReady() {
     return rd_groq_api_key[0] != '\0';
 }
 
+static bool rdHasAiScreensaverReady() {
+    return rd_whisplay_url[0] != '\0';
+}
+
 static bool rdBootsToRadio() {
-    return rd_boot_mode_radio;
+    return rd_boot_mode == RdBootMode::Radio;
+}
+
+static bool rdBootsToAiScreensaver() {
+    return rd_boot_mode == RdBootMode::AiScreensaver;
+}
+
+static RdBootMode rdGetBootMode() {
+    return rd_boot_mode;
 }
 
 static String rdEscapeHtml(const String &value) {
@@ -183,7 +254,9 @@ static void rdLoadSettings() {
     String groqKey = prefs.getString("groqKey", "");
     String model = prefs.getString("model", RD_DEFAULT_MODEL);
     String personality = prefs.getString("personality", RD_DEFAULT_PERSONALITY);
-    rd_boot_mode_radio = prefs.getBool("bootRadio", false);
+    String whisplayUrl = prefs.getString("whisplayUrl", "");
+    String bootMode = prefs.getString("bootMode", "");
+    bool bootModeRadioLegacy = prefs.getBool("bootRadio", false);
     rd_record_seconds = rdClampRecordSeconds(
         static_cast<int>(prefs.getUChar("recordSec", RD_DEFAULT_RECORD_SECONDS)));
     rd_scroll_ms =
@@ -195,6 +268,10 @@ static void rdLoadSettings() {
     groqKey.toCharArray(rd_groq_api_key, sizeof(rd_groq_api_key));
     model.toCharArray(rd_groq_model, sizeof(rd_groq_model));
     personality.toCharArray(rd_personality_prompt, sizeof(rd_personality_prompt));
+    rdNormalizeBaseUrl(whisplayUrl).toCharArray(rd_whisplay_url, sizeof(rd_whisplay_url));
+    rd_boot_mode = bootMode.length()
+                       ? rdParseBootMode(bootMode)
+                       : (bootModeRadioLegacy ? RdBootMode::Radio : RdBootMode::Bot);
 
     if (rd_groq_model[0] == '\0') {
         strlcpy(rd_groq_model, RD_DEFAULT_MODEL, sizeof(rd_groq_model));
@@ -207,7 +284,8 @@ static void rdLoadSettings() {
 
 static void rdSaveSettings(const char *ssid, const char *pass, const char *groqKey,
                            const char *model, const char *personality,
-                           uint8_t recordSeconds, bool bootModeRadio, uint16_t scrollMs) {
+                           const char *whisplayUrl, uint8_t recordSeconds,
+                           RdBootMode bootMode, uint16_t scrollMs) {
     Preferences prefs;
     prefs.begin("core2groq", false);
     prefs.putString("ssid", ssid ? ssid : "");
@@ -216,7 +294,9 @@ static void rdSaveSettings(const char *ssid, const char *pass, const char *groqK
     prefs.putString("model", model && model[0] ? model : RD_DEFAULT_MODEL);
     prefs.putString("personality",
                     personality && personality[0] ? personality : RD_DEFAULT_PERSONALITY);
-    prefs.putBool("bootRadio", bootModeRadio);
+    prefs.putString("whisplayUrl", rdNormalizeBaseUrl(whisplayUrl ? whisplayUrl : ""));
+    prefs.putString("bootMode", rdBootModeValue(bootMode));
+    prefs.putBool("bootRadio", bootMode == RdBootMode::Radio);
     prefs.putUChar("recordSec", rdClampRecordSeconds(recordSeconds));
     prefs.putUShort("scrollMs", rdClampScrollMs(static_cast<int>(scrollMs)));
     prefs.end();
@@ -229,27 +309,37 @@ static void rdSaveSettings(const char *ssid, const char *pass, const char *groqK
     strlcpy(rd_personality_prompt,
             personality && personality[0] ? personality : RD_DEFAULT_PERSONALITY,
             sizeof(rd_personality_prompt));
+    rdNormalizeBaseUrl(whisplayUrl ? whisplayUrl : "")
+        .toCharArray(rd_whisplay_url, sizeof(rd_whisplay_url));
     rd_record_seconds = rdClampRecordSeconds(recordSeconds);
-    rd_boot_mode_radio = bootModeRadio;
+    rd_boot_mode = bootMode;
     rd_scroll_ms = rdClampScrollMs(static_cast<int>(scrollMs));
     rd_has_settings = rd_wifi_ssid[0] != '\0';
 }
 
 static void rdSetActiveModel(const char *model) {
     rdSaveSettings(rd_wifi_ssid, rd_wifi_pass, rd_groq_api_key,
-                   model && model[0] ? model : RD_DEFAULT_MODEL,
-                   rd_personality_prompt, rd_record_seconds, rd_boot_mode_radio, rd_scroll_ms);
+                    model && model[0] ? model : RD_DEFAULT_MODEL,
+                    rd_personality_prompt, rd_whisplay_url, rd_record_seconds, rd_boot_mode,
+                    rd_scroll_ms);
 }
 
 static void rdSetActivePersonalityPrompt(const char *prompt) {
     rdSaveSettings(rd_wifi_ssid, rd_wifi_pass, rd_groq_api_key, rd_groq_model,
-                   prompt && prompt[0] ? prompt : RD_DEFAULT_PERSONALITY,
-                   rd_record_seconds, rd_boot_mode_radio, rd_scroll_ms);
+                    prompt && prompt[0] ? prompt : RD_DEFAULT_PERSONALITY,
+                    rd_whisplay_url, rd_record_seconds, rd_boot_mode, rd_scroll_ms);
 }
 
 static void rdSetScrollSpeedMs(uint16_t scrollMs) {
     rdSaveSettings(rd_wifi_ssid, rd_wifi_pass, rd_groq_api_key, rd_groq_model,
-                   rd_personality_prompt, rd_record_seconds, rd_boot_mode_radio, scrollMs);
+                    rd_personality_prompt, rd_whisplay_url, rd_record_seconds, rd_boot_mode,
+                    scrollMs);
+}
+
+static void rdSetBootMode(RdBootMode bootMode) {
+    rdSaveSettings(rd_wifi_ssid, rd_wifi_pass, rd_groq_api_key, rd_groq_model,
+                   rd_personality_prompt, rd_whisplay_url, rd_record_seconds, bootMode,
+                   rd_scroll_ms);
 }
 
 static void rdShowPortalScreen() {
@@ -285,7 +375,7 @@ static void rdShowPortalScreen() {
     M5.Lcd.setTextColor(TFT_YELLOW);
     M5.Lcd.setTextSize(1);
     M5.Lcd.setCursor(4, 138);
-    M5.Lcd.print("3. Save WiFi, Groq key, and boot mode.");
+    M5.Lcd.print("3. Save WiFi, key/URL, and boot mode.");
 
     if (rd_has_settings) {
         M5.Lcd.setTextColor(TFT_CYAN);
@@ -313,7 +403,7 @@ static void rdHandleRoot() {
         ".hint{font-size:.92em;color:#91a9bd;}"
         "</style></head><body>"
         "<h1>Core2Groq Setup</h1>"
-        "<p class='hint'>WiFi is required for radio and bot mode. Groq key is required for bot mode.</p>"
+        "<p class='hint'>WiFi is required for every mode. Groq key is only required for bot mode. Whisplay URL is only required for AI Screensaver mode.</p>"
         "<form method='post' action='/save'>"
         "<label>WiFi Network (SSID)</label>"
         "<input type='text' name='ssid' maxlength='63' required value='";
@@ -330,6 +420,11 @@ static void rdHandleRoot() {
     html += rdEscapeHtml(String(rd_groq_api_key));
     html +=
         "' placeholder='Needed for bot mode'>"
+        "<label>Whisplay URL</label>"
+        "<input type='text' name='whisplayUrl' maxlength='159' value='";
+    html += rdEscapeHtml(String(rd_whisplay_url));
+    html +=
+        "' placeholder='http://10.160.0.136:17880'>"
         "<label>Chat Model</label>"
         "<select name='model'>";
 
@@ -375,9 +470,11 @@ static void rdHandleRoot() {
         "<label>Default Boot Mode</label>"
         "<select name='bootMode'>"
         "<option value='bot'";
-    if (!rd_boot_mode_radio) html += " selected";
-    html += ">Bot</option><option value='radio'";
-    if (rd_boot_mode_radio) html += " selected";
+    if (rd_boot_mode == RdBootMode::Bot) html += " selected";
+    html += ">Bot</option><option value='ai'";
+    if (rd_boot_mode == RdBootMode::AiScreensaver) html += " selected";
+    html += ">AI Screensaver</option><option value='radio'";
+    if (rd_boot_mode == RdBootMode::Radio) html += " selected";
     html +=
         ">Radio</option></select>"
         "<button type='submit'>Save &amp; Reboot</button>"
@@ -398,9 +495,10 @@ static void rdHandleSave() {
     String ssid = portalServer->arg("ssid");
     String pass = portalServer->arg("pass");
     String groqKey = portalServer->arg("groqKey");
+    String whisplayUrl = portalServer->arg("whisplayUrl");
     String model = portalServer->arg("model");
     String personality = portalServer->arg("personality");
-    bool bootModeRadio = portalServer->arg("bootMode") == "radio";
+    RdBootMode bootMode = rdParseBootMode(portalServer->arg("bootMode"));
     uint8_t recordSec = rdClampRecordSeconds(portalServer->arg("recordSec").toInt());
     uint16_t scrollMs = rdClampScrollMs(portalServer->arg("scrollMs").toInt());
 
@@ -413,7 +511,7 @@ static void rdHandleSave() {
     }
 
     rdSaveSettings(ssid.c_str(), pass.c_str(), groqKey.c_str(), model.c_str(),
-                   personality.c_str(), recordSec, bootModeRadio, scrollMs);
+                   personality.c_str(), whisplayUrl.c_str(), recordSec, bootMode, scrollMs);
 
     portalServer->send(
         200, "text/html",

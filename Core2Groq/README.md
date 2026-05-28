@@ -6,9 +6,10 @@ The main focus is the **touchscreen chatbot experience**:
 
 - direct **Groq chat**
 - direct **Groq Whisper** voice transcription
+- **Whisplay AI screensaver** mode that pulls generated images from a Whisplay URL
 - local **setup AP**
 - editable **personality prompt**
-- on-device **personality / model / scroll** controls
+- on-device **personality / model / scroll / boot mode** controls
 - optional **radio mode** as a side feature when you want it
 
 ---
@@ -22,11 +23,13 @@ The main focus is the **touchscreen chatbot experience**:
 ## What it does
 
 - boots into **Bot mode** by default when a Groq key is configured
+- can also boot directly into **AI Screensaver** mode or **Radio** mode
 - uses the Core2 touchscreen for day-to-day chat control
 - records voice from the device and sends it through Groq Whisper
 - shows the latest **bot** reply or **you** transcript on the main screen
 - keeps local settings in NVS so the setup only has to be done once
 - lets you open **Radio mode** when you want a simple side feature without replacing the bot
+- lets you save a **Whisplay URL** and use the Core2 as a dedicated AI slideshow screen
 
 ---
 
@@ -47,7 +50,8 @@ This merged image includes the bootloader, partitions, boot app, and the current
 5. Save:
    - 2.4 GHz Wi-Fi credentials
    - Groq API key
-   - default boot mode (**Bot** or **Radio**)
+   - optional Whisplay URL for AI screensaver mode
+   - default boot mode (**Bot**, **AI Screensaver**, or **Radio**)
 6. Reboot and start chatting.
 
 Settings are stored locally and survive power cycles.
@@ -66,9 +70,12 @@ Settings are stored locally and survive power cycles.
   - **Personality**
   - **Model**
   - **Auto-scroll speed**
+  - **Boot mode**
+  - **Launch selected boot mode**
 - on-screen **NEW** clears the current chat
 - on-screen **RADIO** switches into radio mode
 - long replies auto-scroll, and tapping the reply area can still manually bump the scroll position
+- the settings screen now uses large touch tiles instead of the earlier thin row targets
 
 ---
 
@@ -152,6 +159,21 @@ Do not ramble or over-explain simple checks.
 - **Personality**
 - **Model**
 - **Auto-scroll speed**
+- **Boot mode**
+- **Launch**
+- **AI Show**
+- **Radio**
+
+### AI Screensaver mode
+
+- uses the saved **Whisplay URL** only
+- polls only the Whisplay **generated image gallery**
+- does **not** mirror chat text or assistant status
+- caches slideshow images on the **SD card** when available so the Core2 can rotate through many stored slides
+- falls back to a single in-memory image if SD caching is unavailable
+- uses the display **fullscreen** with no on-screen controls layered over the image
+- bottom-left button/zone opens **setup**
+- bottom-middle button/zone advances to the **next** image
 
 ---
 
