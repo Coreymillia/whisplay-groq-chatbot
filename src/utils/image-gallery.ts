@@ -3,6 +3,7 @@ import path from "path";
 
 export const GALLERY_FREE_SPACE_RESERVE_BYTES = 8 * 1024 * 1024 * 1024;
 const GALLERY_DAY_KEY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+const GALLERY_HOUR_KEY_PATTERN = /^(?:[01]\d|2[0-3])$/;
 
 export interface GalleryImageEntry {
   fileName: string;
@@ -13,6 +14,15 @@ export interface GalleryImageEntry {
 
 export interface GalleryImageDay {
   dayKey: string;
+  label: string;
+  count: number;
+  updatedAt: number;
+  totalSizeBytes: number;
+  coverFileName: string;
+}
+
+export interface GalleryImageHour {
+  hourKey: string;
   label: string;
   count: number;
   updatedAt: number;
@@ -52,6 +62,21 @@ export function formatGalleryDayLabel(dayKey: string): string {
     day: "numeric",
     year: "numeric",
   });
+}
+
+export function formatGalleryHourKey(timestamp: number): string {
+  const date = new Date(timestamp);
+  return String(date.getHours()).padStart(2, "0");
+}
+
+export function formatGalleryHourLabel(hourKey: string): string {
+  if (!GALLERY_HOUR_KEY_PATTERN.test(hourKey.trim())) {
+    return hourKey;
+  }
+  const hour = parseInt(hourKey, 10);
+  const suffix = hour >= 12 ? "PM" : "AM";
+  const twelveHour = hour % 12 || 12;
+  return `${twelveHour}:00 ${suffix}`;
 }
 
 export function readGalleryImagesOldestFirst(dirPath: string): GalleryImageEntry[] {
@@ -118,6 +143,53 @@ export function listGalleryImagesForDay(
   }
   return listGalleryImages(dirPath).filter(
     (entry) => formatGalleryDayKey(entry.updatedAt) === normalizedDayKey,
+  );
+}
+
+export function listGalleryImageHours(
+  dirPath: string,
+  dayKey: string,
+): GalleryImageHour[] {
+  const normalizedDayKey = dayKey.trim();
+  if (!GALLERY_DAY_KEY_PATTERN.test(normalizedDayKey)) {
+    throw new Error("Invalid gallery day.");
+  }
+  const hourMap = new Map<string, GalleryImageHour>();
+  for (const entry of listGalleryImagesForDay(dirPath, normalizedDayKey)) {
+    const hourKey = formatGalleryHourKey(entry.updatedAt);
+    const existing = hourMap.get(hourKey);
+    if (existing) {
+      existing.count += 1;
+      existing.totalSizeBytes += entry.sizeBytes;
+      if (entry.updatedAt > existing.updatedAt) {
+        existing.updatedAt = entry.updatedAt;
+        existing.coverFileName = entry.fileName;
+      }
+      continue;
+    }
+    hourMap.set(hourKey, {
+      hourKey,
+      label: formatGalleryHourLabel(hourKey),
+      count: 1,
+      updatedAt: entry.updatedAt,
+      totalSizeBytes: entry.sizeBytes,
+      coverFileName: entry.fileName,
+    });
+  }
+  return [...hourMap.values()].sort((left, right) => right.updatedAt - left.updatedAt);
+}
+
+export function listGalleryImagesForDayHour(
+  dirPath: string,
+  dayKey: string,
+  hourKey: string,
+): GalleryImageEntry[] {
+  const normalizedHourKey = hourKey.trim();
+  if (!GALLERY_HOUR_KEY_PATTERN.test(normalizedHourKey)) {
+    throw new Error("Invalid gallery hour.");
+  }
+  return listGalleryImagesForDay(dirPath, dayKey).filter(
+    (entry) => formatGalleryHourKey(entry.updatedAt) === normalizedHourKey,
   );
 }
 

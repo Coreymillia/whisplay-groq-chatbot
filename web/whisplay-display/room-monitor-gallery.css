@@ -148,6 +148,35 @@ body {
   min-width: 0;
 }
 
+.gallery-folder-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.gallery-hour-item {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 10px;
+  background: var(--panel-soft);
+  cursor: pointer;
+  text-align: left;
+}
+
+.gallery-hour-item.active {
+  border-color: rgba(94, 173, 255, 0.5);
+  box-shadow: inset 0 0 0 1px rgba(94, 173, 255, 0.25);
+}
+
+.gallery-hour-item img {
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  object-fit: cover;
+  border-radius: 10px;
+  display: block;
+  margin-bottom: 8px;
+}
+
 .gallery-photo-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));

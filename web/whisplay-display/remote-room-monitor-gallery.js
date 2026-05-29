@@ -1,5 +1,7 @@
 const dayList = document.getElementById("galleryDayList");
 const dayTitle = document.getElementById("galleryDayTitle");
+const hourTitle = document.getElementById("galleryHourTitle");
+const hourList = document.getElementById("galleryHourList");
 const pageStatus = document.getElementById("galleryStatus");
 const pageMeta = document.getElementById("galleryMeta");
 const photoGrid = document.getElementById("galleryPhotoGrid");
@@ -19,8 +21,10 @@ const viewerPrevBtn = document.getElementById("galleryViewerPrevBtn");
 const viewerNextBtn = document.getElementById("galleryViewerNextBtn");
 
 let remoteDays = [];
+let remoteHours = [];
 let activeDayKey = "";
-let activeDayPhotos = [];
+let activeHourKey = "";
+let activeHourPhotos = [];
 let selectedFileNames = new Set();
 let viewerIndex = 0;
 let slideshowTimer = null;
@@ -52,6 +56,14 @@ function formatBytes(bytes) {
   return `${size >= 100 || unitIndex === 0 ? Math.round(size) : size.toFixed(1)} ${units[unitIndex]}`;
 }
 
+function getActiveDay() {
+  return remoteDays.find((day) => day.dayKey === activeDayKey) || null;
+}
+
+function getActiveHour() {
+  return remoteHours.find((hour) => hour.hourKey === activeHourKey) || null;
+}
+
 function stopSlideshow() {
   if (slideshowTimer) {
     window.clearInterval(slideshowTimer);
@@ -63,11 +75,11 @@ function stopSlideshow() {
 }
 
 function showViewerPhoto(index) {
-  if (!activeDayPhotos.length || !viewerImage || !viewerCaption || !viewer) {
+  if (!activeHourPhotos.length || !viewerImage || !viewerCaption || !viewer) {
     return;
   }
-  viewerIndex = (index + activeDayPhotos.length) % activeDayPhotos.length;
-  const photo = activeDayPhotos[viewerIndex];
+  viewerIndex = (index + activeHourPhotos.length) % activeHourPhotos.length;
+  const photo = activeHourPhotos[viewerIndex];
   viewerImage.src = `${photo.imageUrl}?ts=${photo.updatedAt}`;
   viewerImage.alt = photo.fileName;
   viewerCaption.textContent = `${photo.fileName} · ${new Date(photo.updatedAt).toLocaleString()} · ${formatBytes(photo.sizeBytes)}`;
@@ -100,7 +112,7 @@ function renderDayList() {
     item.type = "button";
     item.className = `gallery-day-item${day.dayKey === activeDayKey ? " active" : ""}`;
     item.addEventListener("click", () => {
-      void loadDayPhotos(day.dayKey);
+      void loadDayHours(day.dayKey);
     });
 
     const image = document.createElement("img");
@@ -122,6 +134,44 @@ function renderDayList() {
   });
 }
 
+function renderHourList() {
+  if (!hourList) return;
+  hourList.innerHTML = "";
+  if (!activeDayKey) {
+    hourList.innerHTML = '<div class="gallery-empty">Choose a day folder to view hour folders.</div>';
+    return;
+  }
+  if (!remoteHours.length) {
+    hourList.innerHTML = '<div class="gallery-empty">No hour folders found for this day.</div>';
+    return;
+  }
+  remoteHours.forEach((hour) => {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = `gallery-hour-item${hour.hourKey === activeHourKey ? " active" : ""}`;
+    item.addEventListener("click", () => {
+      void loadHourPhotos(activeDayKey, hour.hourKey);
+    });
+
+    const image = document.createElement("img");
+    image.src = `${hour.coverImageUrl}?ts=${hour.updatedAt}`;
+    image.alt = hour.label;
+
+    const name = document.createElement("div");
+    name.className = "gallery-day-name";
+    name.textContent = hour.label;
+
+    const meta = document.createElement("div");
+    meta.className = "gallery-day-meta";
+    meta.textContent = `${hour.count} photo${hour.count === 1 ? "" : "s"} · ${formatBytes(hour.totalSizeBytes)}`;
+
+    item.appendChild(image);
+    item.appendChild(name);
+    item.appendChild(meta);
+    hourList.appendChild(item);
+  });
+}
+
 function updateSelectionButtons() {
   const selectedCount = selectedFileNames.size;
   if (deleteSelectedBtn) {
@@ -130,7 +180,7 @@ function updateSelectionButtons() {
       selectedCount === 0 ? "Delete Selected Remote" : `Delete Selected Remote (${selectedCount})`;
   }
   if (deleteDayBtn) {
-    deleteDayBtn.disabled = activeDayPhotos.length === 0;
+    deleteDayBtn.disabled = !activeDayKey;
   }
   if (moveSelectedBtn) {
     moveSelectedBtn.disabled = selectedCount === 0;
@@ -141,25 +191,38 @@ function updateSelectionButtons() {
     clearSelectionBtn.disabled = selectedCount === 0;
   }
   if (selectAllBtn) {
-    selectAllBtn.disabled = activeDayPhotos.length === 0;
+    selectAllBtn.disabled = activeHourPhotos.length === 0;
   }
 }
 
 function renderPhotos() {
   if (!photoGrid) return;
   photoGrid.innerHTML = "";
+
+  const activeDay = getActiveDay();
+  const activeHour = getActiveHour();
   if (dayTitle) {
-    dayTitle.textContent = activeDayKey
-      ? remoteDays.find((day) => day.dayKey === activeDayKey)?.label || "Remote Room Monitor Day"
-      : "Remote Room Monitor Day";
+    dayTitle.textContent = activeDay?.label || "Remote Room Monitor Day";
   }
-  if (!activeDayPhotos.length) {
-    photoGrid.innerHTML = '<div class="gallery-empty">Select a day folder to browse its remote captures.</div>';
+  if (hourTitle) {
+    hourTitle.textContent = activeHour
+      ? `${activeHour.label} · ${activeHour.count} photo${activeHour.count === 1 ? "" : "s"}`
+      : activeDayKey
+        ? "Choose an hour folder to load photos."
+        : "Choose a day folder first.";
+  }
+
+  if (!activeHourPhotos.length) {
+    photoGrid.innerHTML = `<div class="gallery-empty">${
+      activeDayKey
+        ? "Choose an hour folder to browse its remote captures."
+        : "Select a day folder to browse remote captures."
+    }</div>`;
     updateSelectionButtons();
     return;
   }
 
-  activeDayPhotos.forEach((photo, index) => {
+  activeHourPhotos.forEach((photo, index) => {
     const card = document.createElement("div");
     card.className = "gallery-photo-card";
 
@@ -231,23 +294,58 @@ function renderPhotos() {
   updateSelectionButtons();
 }
 
-async function loadDayPhotos(dayKey) {
+async function loadHourPhotos(dayKey, hourKey) {
   activeDayKey = dayKey;
+  activeHourKey = hourKey;
   selectedFileNames.clear();
   renderDayList();
+  renderHourList();
   updateSelectionButtons();
-  setStatus("Loading remote day folder...");
-  const payload = await fetchJson(`/api/remote-room-monitor/gallery/day/${encodeURIComponent(dayKey)}?ts=${Date.now()}`, {
-    cache: "no-store",
-  });
-  latestStatus = payload.status || latestStatus;
-  activeDayPhotos = Array.isArray(payload.photos) ? payload.photos : [];
-  renderPhotos();
-  setStatus(
-    activeDayPhotos.length
-      ? `Loaded ${activeDayPhotos.length} remote photo${activeDayPhotos.length === 1 ? "" : "s"} for ${dayKey}.`
-      : `No remote photos found for ${dayKey}.`,
+  setStatus("Loading remote hour folder...");
+  const payload = await fetchJson(
+    `/api/remote-room-monitor/gallery/day/${encodeURIComponent(dayKey)}/hour/${encodeURIComponent(hourKey)}?ts=${Date.now()}`,
+    { cache: "no-store" },
   );
+  latestStatus = payload.status || latestStatus;
+  updateMeta(latestStatus);
+  activeHourPhotos = Array.isArray(payload.photos) ? payload.photos : [];
+  renderPhotos();
+  const hourLabel = getActiveHour()?.label || hourKey;
+  setStatus(
+    activeHourPhotos.length
+      ? `Loaded ${activeHourPhotos.length} remote photo${activeHourPhotos.length === 1 ? "" : "s"} for ${hourLabel}.`
+      : `No remote photos found for ${hourLabel}.`,
+  );
+}
+
+async function loadDayHours(dayKey) {
+  activeDayKey = dayKey;
+  activeHourKey = "";
+  remoteHours = [];
+  selectedFileNames.clear();
+  activeHourPhotos = [];
+  renderDayList();
+  renderHourList();
+  renderPhotos();
+  setStatus("Loading remote hour folders...");
+  const payload = await fetchJson(
+    `/api/remote-room-monitor/gallery/day/${encodeURIComponent(dayKey)}/hours?ts=${Date.now()}`,
+    { cache: "no-store" },
+  );
+  latestStatus = payload.status || latestStatus;
+  remoteHours = Array.isArray(payload.hours) ? payload.hours : [];
+  updateMeta(latestStatus);
+  renderHourList();
+  const nextHourKey = remoteHours.some((hour) => hour.hourKey === activeHourKey)
+    ? activeHourKey
+    : remoteHours[0]?.hourKey || "";
+  if (nextHourKey) {
+    await loadHourPhotos(dayKey, nextHourKey);
+    return;
+  }
+  activeHourKey = "";
+  renderPhotos();
+  setStatus("No hour folders found for that day.");
 }
 
 function updateMeta(status) {
@@ -260,6 +358,9 @@ function updateMeta(status) {
     peerLabel,
     `${latestStatus.totalCount || 0} capture${latestStatus.totalCount === 1 ? "" : "s"}`,
     `${latestStatus.dayCount || remoteDays.length} day folder${(latestStatus.dayCount || remoteDays.length) === 1 ? "" : "s"}`,
+    activeDayKey && remoteHours.length
+      ? `${remoteHours.length} hour folder${remoteHours.length === 1 ? "" : "s"} in ${getActiveDay()?.label || activeDayKey}`
+      : null,
     `${latestStatus.savedCount || 0} saved here`,
     latestStatus.freeSpaceBytes ? `Remote free ${formatBytes(latestStatus.freeSpaceBytes)}` : null,
     latestStatus.freeSpaceReserveBytes ? `Remote reserve ${formatBytes(latestStatus.freeSpaceReserveBytes)}` : null,
@@ -279,14 +380,20 @@ async function loadRemoteGallery() {
   updateMeta(payload.status || null);
   renderDayList();
   if (!activeDayKey && remoteDays.length) {
-    await loadDayPhotos(remoteDays[0].dayKey);
+    await loadDayHours(remoteDays[0].dayKey);
+    updateMeta(payload.status || null);
     return;
   }
   if (activeDayKey && remoteDays.some((day) => day.dayKey === activeDayKey)) {
-    await loadDayPhotos(activeDayKey);
+    await loadDayHours(activeDayKey);
+    updateMeta(payload.status || null);
     return;
   }
-  activeDayPhotos = [];
+  activeDayKey = "";
+  activeHourKey = "";
+  remoteHours = [];
+  activeHourPhotos = [];
+  renderHourList();
   renderPhotos();
   setStatus(remoteDays.length ? "Choose a remote day folder." : "No remote room monitor folders yet.");
 }
@@ -343,7 +450,7 @@ async function deleteCurrentDay() {
     setStatus("Choose a remote day folder first.", true);
     return;
   }
-  const activeDayLabel = remoteDays.find((day) => day.dayKey === activeDayKey)?.label || activeDayKey;
+  const activeDayLabel = getActiveDay()?.label || activeDayKey;
   if (!window.confirm(`Delete all remote room monitor photos from ${activeDayLabel}?`)) {
     return;
   }
@@ -353,6 +460,7 @@ async function deleteCurrentDay() {
   });
   selectedFileNames.clear();
   activeDayKey = "";
+  activeHourKey = "";
   updateMeta(payload.status || null);
   await loadRemoteGallery();
   setStatus(
@@ -363,7 +471,7 @@ async function deleteCurrentDay() {
 }
 
 selectAllBtn?.addEventListener("click", () => {
-  activeDayPhotos.forEach((photo) => selectedFileNames.add(photo.fileName));
+  activeHourPhotos.forEach((photo) => selectedFileNames.add(photo.fileName));
   renderPhotos();
 });
 

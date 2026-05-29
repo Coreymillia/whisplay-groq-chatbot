@@ -105,6 +105,8 @@ import {
   getSavedRoomMonitorCapturePath,
   importRemoteRoomMonitorCaptures,
   listRemoteRoomMonitorCaptureDays,
+  listRemoteRoomMonitorCaptureHours,
+  listRemoteRoomMonitorCapturesForHour,
   listRemoteRoomMonitorCapturesForDay,
   listRoomMonitorCaptureDays,
   listRoomMonitorCaptures,
@@ -1472,6 +1474,45 @@ export class WebDisplayServer implements WebAudioBridgeServer {
             error instanceof Error
               ? error.message
               : "Failed to load remote room monitor day gallery.",
+        };
+      }
+    });
+
+    this.router.get("/api/remote-room-monitor/gallery/day/:dayKey/hours", async (ctx) => {
+      ctx.set("Cache-Control", "no-store");
+      try {
+        const payload = await listRemoteRoomMonitorCaptureHours(
+          String(ctx.params.dayKey || ""),
+        );
+        ctx.body = payload;
+      } catch (error) {
+        ctx.status = 400;
+        ctx.body = {
+          ok: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Failed to load remote room monitor hour folders.",
+        };
+      }
+    });
+
+    this.router.get("/api/remote-room-monitor/gallery/day/:dayKey/hour/:hourKey", async (ctx) => {
+      ctx.set("Cache-Control", "no-store");
+      try {
+        const payload = await listRemoteRoomMonitorCapturesForHour(
+          String(ctx.params.dayKey || ""),
+          String(ctx.params.hourKey || ""),
+        );
+        ctx.body = payload;
+      } catch (error) {
+        ctx.status = 400;
+        ctx.body = {
+          ok: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Failed to load remote room monitor hour gallery.",
         };
       }
     });

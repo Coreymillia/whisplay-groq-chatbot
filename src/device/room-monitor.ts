@@ -9,6 +9,8 @@ import {
   deleteGalleryImagesForDay,
   ensureGalleryStorageReserve,
   type GalleryImageDay as RoomMonitorCaptureDay,
+  formatGalleryHourKey,
+  formatGalleryHourLabel,
   type GalleryImageEntry as RoomMonitorCapture,
   formatGalleryDayLabel,
   formatGalleryDayKey,
@@ -35,6 +37,15 @@ export interface RemoteRoomMonitorCapture {
 
 export interface RemoteRoomMonitorCaptureDay {
   dayKey: string;
+  label: string;
+  count: number;
+  updatedAt: number;
+  totalSizeBytes: number;
+  coverImageUrl: string;
+}
+
+export interface RemoteRoomMonitorCaptureHour {
+  hourKey: string;
   label: string;
   count: number;
   updatedAt: number;
@@ -157,6 +168,39 @@ function buildRemoteRoomMonitorDayGroups(
     });
   }
   return [...dayMap.values()].sort((left, right) => right.updatedAt - left.updatedAt);
+}
+
+function buildRemoteRoomMonitorHourGroups(
+  captures: RemoteRoomMonitorCapture[],
+  dayKey: string,
+): RemoteRoomMonitorCaptureHour[] {
+  const normalizedDayKey = dayKey.trim();
+  const hourMap = new Map<string, RemoteRoomMonitorCaptureHour>();
+  for (const capture of captures) {
+    if (formatGalleryDayKey(capture.updatedAt) !== normalizedDayKey) {
+      continue;
+    }
+    const hourKey = formatGalleryHourKey(capture.updatedAt);
+    const existing = hourMap.get(hourKey);
+    if (existing) {
+      existing.count += 1;
+      existing.totalSizeBytes += capture.sizeBytes;
+      if (capture.updatedAt > existing.updatedAt) {
+        existing.updatedAt = capture.updatedAt;
+        existing.coverImageUrl = capture.imageUrl;
+      }
+      continue;
+    }
+    hourMap.set(hourKey, {
+      hourKey,
+      label: formatGalleryHourLabel(hourKey),
+      count: 1,
+      updatedAt: capture.updatedAt,
+      totalSizeBytes: capture.sizeBytes,
+      coverImageUrl: capture.imageUrl,
+    });
+  }
+  return [...hourMap.values()].sort((left, right) => right.updatedAt - left.updatedAt);
 }
 
 async function fetchRemoteRoomMonitorPayload(): Promise<RemoteRoomMonitorSourcePayload> {
@@ -377,6 +421,55 @@ export async function listRemoteRoomMonitorCapturesForDay(
   const payload = await fetchRemoteRoomMonitorPayload();
   const photos = payload.captures
     .filter((capture) => formatGalleryDayKey(capture.capturedAt) === normalizedDayKey)
+    .map((capture) => ({
+      fileName: capture.fileName,
+      updatedAt: capture.capturedAt,
+      sizeBytes: capture.sizeBytes,
+      imageUrl: `/api/remote-room-monitor/photos/image/${encodeURIComponent(capture.fileName)}`,
+    }))
+    .sort((left, right) => right.updatedAt - left.updatedAt);
+  return {
+    photos,
+    status: payload.status,
+  };
+}
+
+export async function listRemoteRoomMonitorCaptureHours(
+  dayKey: string,
+): Promise<{
+  hours: RemoteRoomMonitorCaptureHour[];
+  status: RemoteRoomMonitorStatus;
+}> {
+  const normalizedDayKey = dayKey.trim();
+  const payload = await fetchRemoteRoomMonitorPayload();
+  const captures = payload.captures.map((capture) => ({
+    fileName: capture.fileName,
+    updatedAt: capture.capturedAt,
+    sizeBytes: capture.sizeBytes,
+    imageUrl: `/api/remote-room-monitor/photos/image/${encodeURIComponent(capture.fileName)}`,
+  }));
+  return {
+    hours: buildRemoteRoomMonitorHourGroups(captures, normalizedDayKey),
+    status: payload.status,
+  };
+}
+
+export async function listRemoteRoomMonitorCapturesForHour(
+  dayKey: string,
+  hourKey: string,
+): Promise<{
+  photos: RemoteRoomMonitorCapture[];
+  status: RemoteRoomMonitorStatus;
+}> {
+  const normalizedDayKey = dayKey.trim();
+  const normalizedHourKey = hourKey.trim();
+  const payload = await fetchRemoteRoomMonitorPayload();
+  const photos = payload.captures
+    .filter(
+      (capture) =>
+        formatGalleryDayKey(capture.capturedAt) === normalizedDayKey &&
+        formatGalleryHourKey(capture.capturedAt) === normalizedHourKey,
+    )
     .map((capture) => ({
       fileName: capture.fileName,
       updatedAt: capture.capturedAt,

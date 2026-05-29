@@ -6,6 +6,23 @@
 
 This project starts from the official PiSugar Whisplay chatbot, but is being tailored for a **Raspberry Pi Zero 2 W** with a **Groq-backed LLM path**, a cleaner bring-up flow for the PiSugar **Whisplay HAT**, working **Raspberry Pi Camera Module v2.1 & 3** support, and companion display paths such as the **CYD** for touch-based remote control.
 
+## Current GroqBotNet display stack
+
+<img src="images/IMG_20260529_155911483_HDR.jpg" alt="Whisplay with GroqBotNet top OLED, bottom SPI display, and external HalloWing companion" width="900" />
+
+The GroqBotNet side of this repo is now behaving more like a **three-screen companion stack** than a single accessory display:
+
+- **Top OLED:** compact status/header view for the GroqBotNet host
+- **Bottom SPI:** the main GroqBotNet reader / AI screensaver display
+- **External HalloWing:** a UART-fed companion display that mirrors Whisplay header data instead of running its own separate bot UI
+
+Current companion behavior:
+
+- the **external HalloWing** now mirrors Whisplay fields such as **header, time, status, RPD, model, meter, and vibe**
+- in companion mode it stays pinned to **Whisplay** data instead of falling back to the local standalone GroqBotNet personality
+- the official Arduino sketch for that display now lives in **`GroqBotNet/Hallowing/Hallowing2.ino`**
+- the **bottom SPI** GroqBotNet display keeps its AI screensaver path without the unwanted matrix fallback that was interrupting the companion setup
+
 ## Current project direction
 
 - **LLM:** Groq through the OpenAI-compatible client path
@@ -85,6 +102,7 @@ Official Google docs clearly show **free vs paid tiers**, billing tiers, and mod
 - **Core2Groq unified M5Core2 firmware:** early dual-mode Core2 build now running in this repo, combining the existing OTR radio project with a new Groq bot mode, touch-first controls, and a path toward future BotNet connectivity
 - **Core1Display wireless external display:** working as a lightweight M5Stack Core / Core1 display mirror for both Groqputer and Whisplay over the local network with polling, auto-follow mode, button-driven reader UI, idle screensaver support, and a working AI Show mode with optional SD storage plus internal-flash fallback
 - **Standalone GroqBotNet Pi Zero node:** working as a separate same-network experiment with browser chat plus Mini PiTFT output
+- **GroqBotNet external HalloWing companion:** working as a UART-fed mirror for Whisplay header/status data, with the official sketch now tracked in `GroqBotNet/Hallowing/Hallowing2.ino`
 - **Raspberry Pi 3 GroqBotNetHub host:** tested, validated, and confirmed working as a LAN-hosted relay hub for online BotNet connectivity and peer relay support
 - **Web simulator/debug UI:** still available at `http://<host-or-pi-ip>:17880`
 
@@ -130,6 +148,7 @@ Official Google docs clearly show **free vs paid tiers**, billing tiers, and mod
 - **ESP32 Agent workspace:** `/agent` now provides persistent sandbox projects, a file tree/editor, import/export bundles, savepoints, separate coding and error-fix personalities, Pi-side USB serial-port detection, an in-browser terminal, persistent per-project Agent chat, proposed file operations, and apply-to-sandbox with an automatic savepoint
 - **Safer ESP32 Agent presets:** the Agent now includes **minimal CYD Starter** presets alongside the full Companion CYD presets, plus bot-side guardrails that lock `platformio.ini` from agent edits and reject empty source-file writes
 - **Room monitor gallery split:** the browser now exposes a dedicated **Room Monitor Gallery** with daily folders plus a separate **Saved Gallery** that moves selected files instead of copying them and supports fullscreen slideshow viewing
+- **GroqBotNet three-screen companion stack:** the current GroqBotNet setup now spans a **top OLED**, **bottom SPI**, and **external HalloWing**, with the HalloWing mirroring Whisplay companion fields over UART while the bottom SPI keeps the AI screensaver / reader role
 
 ## Current Gemini photo workflow status
 

@@ -26,7 +26,7 @@
         </div>
       </div>
       <div class="gallery-toolbar">
-        <button class="gallery-button secondary" id="gallerySelectAllBtn" type="button">Select All on Day</button>
+        <button class="gallery-button secondary" id="gallerySelectAllBtn" type="button">Select All in Hour</button>
         <button class="gallery-button secondary" id="galleryClearSelectionBtn" type="button">Clear Selection</button>
         <button class="gallery-button secondary" id="galleryDeleteDayBtn" type="button">Delete Remote Day</button>
         <button class="gallery-button secondary" id="galleryDeleteSelectedBtn" type="button">Delete Selected Remote</button>
@@ -41,8 +41,12 @@
       <aside class="gallery-card gallery-sidebar" id="galleryDayList"></aside>
       <section class="gallery-card gallery-main">
         <div class="gallery-title-row">
-          <div class="gallery-title" id="galleryDayTitle">Remote Room Monitor Day</div>
+          <div>
+            <div class="gallery-title" id="galleryDayTitle">Remote Room Monitor Day</div>
+            <div class="gallery-meta" id="galleryHourTitle">Choose a day folder first.</div>
+          </div>
         </div>
+        <div class="gallery-folder-strip" id="galleryHourList"></div>
         <div class="gallery-photo-grid" id="galleryPhotoGrid"></div>
       </section>
     </section>

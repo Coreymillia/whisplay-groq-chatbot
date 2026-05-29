@@ -18,6 +18,8 @@ const ROOM_MONITOR_DIR = path.join(DATA_DIR, "room-monitor");
 const AI_IMAGE_IMPORT_DIR = path.join(DATA_DIR, "ai-imports");
 const AI_IMAGE_IMPORT_INDEX_PATH = path.join(AI_IMAGE_IMPORT_DIR, "index.json");
 const ROOM_MONITOR_AUTO_BRIGHTNESS_SCRIPT = path.join(ROOT_DIR, "display", "auto_brightness.py");
+const HALLOWING_UART_PATH = process.env.HALLOWING_UART_PATH || "/dev/serial0";
+const HALLOWING_UART_BAUD = Number.parseInt(process.env.HALLOWING_UART_BAUD || "115200", 10);
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
 fs.mkdirSync(ROOM_MONITOR_DIR, { recursive: true });
@@ -73,6 +75,8 @@ let aiImageSyncInProgress = false;
 let aiImageSyncLastError = "";
 let aiImageSyncLastSyncAt = 0;
 let companionPollTimer = null;
+let hallowingUartConfigured = false;
+let hallowingLastPayload = "";
 
 const DEFAULT_AI_IMAGE_ARCHIVE = {
   latestLocalFileName: "",
@@ -500,6 +504,7 @@ function resetCompanionSnapshot(errorMessage = "") {
     sourceUrl: normalizeUrl(settings.peerUrl || ""),
     lastError: errorMessage,
   };
+  writeHallowingHeaderToUart();
 }
 
 function getCompanionSnapshotStatus() {
@@ -510,6 +515,124 @@ function getCompanionSnapshotStatus() {
 
 function getCompanionModelMeta(modelTag) {
   return BOTNET_MODEL_META[String(modelTag || "").trim()] || null;
+}
+
+function compactPersonalityLabel(prompt) {
+  const cleaned = String(prompt || "").replace(/\s+/g, " ").trim();
+  if (!cleaned) {
+    return "--";
+  }
+  const withoutLead = cleaned.replace(/^you are\s+/i, "").replace(/^you're\s+/i, "");
+  const sentence = withoutLead.split(/[.!?]/)[0].trim();
+  const phrase = sentence.split(/[,:;()-]/)[0].trim();
+  const words = (phrase || withoutLead).split(/\s+/).filter(Boolean);
+  return words.slice(0, 3).join(" ").substring(0, 20) || "--";
+}
+
+function buildHallowingBasePayload() {
+  const localModelMeta = getCompanionModelMeta(settings.model);
+  const companionMode = Boolean(normalizeUrl(settings.peerUrl || ""));
+  const badgeText = String(companionSnapshot.badgeText || "").trim();
+  const modelLabel = String(companionSnapshot.modelLabel || "").trim();
+  const headerText = companionMode
+    ? "WHISPLAY"
+    : String(settings.botName || "GroqBotNet").trim();
+  const statusText = companionMode
+    ? String(companionSnapshot.status || "").trim() || "Waiting for Whisplay"
+    : companionSnapshot.configured
+      ? "Link waiting"
+      : settings.enabled
+        ? "GroqBotNet ready"
+        : "Disabled";
+  const rpdText =
+    companionMode &&
+    companionSnapshot.remainingRequests !== null &&
+    companionSnapshot.remainingRequests !== undefined
+      ? String(companionSnapshot.remainingRequests)
+      : localModelMeta?.rpd
+        ? String(localModelMeta.rpd)
+        : "--";
+  const modelText =
+    companionMode
+      ? modelLabel || "--"
+      : localModelMeta?.shortLabel || String(settings.model || "--").trim();
+  const moneyText = companionMode
+    ? String(companionSnapshot.balanceText || "").trim() || "--"
+    : "--";
+  const personalityText = companionMode ? badgeText || "--" : compactPersonalityLabel(settings.personalityPrompt);
+  const sourceText = companionMode ? "WHISPLAY" : "STANDALONE";
+
+  return [
+    `HEADER=${headerText}`,
+    `STATUS=${statusText}`,
+    `RPD=${rpdText}`,
+    `MODEL=${modelText}`,
+    `METER=${moneyText}`,
+    `PERSONALITY=${personalityText}`,
+    `SOURCE=${sourceText}`,
+  ];
+}
+
+function buildHallowingHeaderPayload() {
+  const now = new Date();
+  const timeText = now.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  return [...buildHallowingBasePayload(), `TIME=${timeText}`].join("\n") + "\n";
+}
+
+function ensureHallowingUartConfigured() {
+  if (hallowingUartConfigured) {
+    return true;
+  }
+  const result = spawnSync(
+    "stty",
+    [
+      "-F",
+      HALLOWING_UART_PATH,
+      String(Number.isFinite(HALLOWING_UART_BAUD) ? HALLOWING_UART_BAUD : 115200),
+      "cs8",
+      "-cstopb",
+      "-parenb",
+      "-ixon",
+      "-ixoff",
+      "-crtscts",
+      "raw",
+      "-echo",
+    ],
+    { encoding: "utf8" },
+  );
+  if (result.status !== 0) {
+    const detail = (result.stderr || result.stdout || "").trim();
+    console.error(
+      `[Hallowing] UART setup failed for ${HALLOWING_UART_PATH}${detail ? `: ${detail}` : "."}`,
+    );
+    return false;
+  }
+  hallowingUartConfigured = true;
+  return true;
+}
+
+function writeHallowingHeaderToUart(force = false) {
+  const basePayload = buildHallowingBasePayload().join("\n");
+  if (!force && basePayload === hallowingLastPayload) {
+    return;
+  }
+  if (!ensureHallowingUartConfigured()) {
+    return;
+  }
+  const payload = buildHallowingHeaderPayload();
+  try {
+    fs.writeFileSync(HALLOWING_UART_PATH, payload, "utf8");
+    hallowingLastPayload = basePayload;
+  } catch (error) {
+    hallowingUartConfigured = false;
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`[Hallowing] UART write failed for ${HALLOWING_UART_PATH}: ${message}`);
+  }
+}
+
+function applyHallowingUartMirror() {
+  hallowingLastPayload = "";
+  writeHallowingHeaderToUart(true);
 }
 
 function isCompanionEditStatus(statusText, replyMessage) {
@@ -661,6 +784,7 @@ async function pollCompanionSnapshot() {
       : "";
     nextSnapshot.lastSuccessAt = Date.now();
     companionSnapshot = nextSnapshot;
+    writeHallowingHeaderToUart(true);
     return companionSnapshot;
   } catch (error) {
     companionSnapshot = {
@@ -670,6 +794,7 @@ async function pollCompanionSnapshot() {
       reachable: false,
       lastError: error instanceof Error ? error.message : String(error),
     };
+    writeHallowingHeaderToUart(true);
     return companionSnapshot;
   }
 }
@@ -2035,6 +2160,7 @@ const server = http.createServer(async (req, res) => {
       applyRoomMonitorSettings();
       applyAiImageSyncSettings();
       applyCompanionSettings();
+      applyHallowingUartMirror();
       sendJson(res, 200, { ok: true, settings: getPublicSettings() });
       return;
     }
@@ -2260,6 +2386,7 @@ const server = http.createServer(async (req, res) => {
 applyRoomMonitorSettings();
 applyAiImageSyncSettings();
 applyCompanionSettings();
+applyHallowingUartMirror();
 refreshRoomMonitorCameraInfo().catch((error) => {
   roomMonitorLastError = error instanceof Error ? error.message : String(error);
 });

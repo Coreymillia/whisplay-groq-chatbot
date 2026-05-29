@@ -646,6 +646,9 @@ class GroqBotNetDisplay:
     def _display_ai_image(self, payload: dict) -> bool:
         photos = self._get_ai_slideshow_photos(payload)
         if not photos:
+            if self.current_ai_image is not None:
+                self._disp.image(self.current_ai_image)
+                return True
             self.ai_slideshow_keys = []
             self.ai_slideshow_index = 0
             self.current_ai_image = None
@@ -682,12 +685,25 @@ class GroqBotNetDisplay:
                 self.current_ai_image_key = image_key
                 self.last_ai_slide_change = now
             except Exception:
+                if self.current_ai_image is not None:
+                    self._disp.image(self.current_ai_image)
+                    return True
                 return False
         if self.current_ai_image is None:
             return False
 
         self._disp.image(self.current_ai_image)
         return True
+
+    def _render_idle_placeholder(self, image: Image.Image, draw: ImageDraw.ImageDraw) -> None:
+        draw.rounded_rectangle(
+            (6, 14, self.width - 6, self.height - 14),
+            radius=8,
+            fill=CARD,
+            outline=OUTLINE,
+        )
+        draw.text((14, 26), "AI saver", fill=CYAN, font=self.font_bold)
+        draw.text((14, 46), "Waiting for art", fill=DIM, font=self.font_small)
 
     def _select_source(self, payload: dict) -> tuple[str, dict]:
         settings = payload.get("settings") or {}
@@ -732,9 +748,8 @@ class GroqBotNetDisplay:
             reply_text = str(source_payload.get("replyMessage") or "").strip()
             status = str(source_payload.get("status") or "idle").strip() or "idle"
             model_tag = str(source_payload.get("modelTag") or "Whisplay").strip() or "Whisplay"
-            badge_text = str(source_payload.get("badgeText") or "").strip()
             body_text = reply_text or "Waiting for Whisplay."
-            speaker = badge_text or model_tag
+            speaker = model_tag
             return ("companion", speaker, body_text, status)
 
         conversations = source_payload.get("conversations") or []
@@ -827,9 +842,13 @@ class GroqBotNetDisplay:
         draw = ImageDraw.Draw(image)
 
         if self._get_idle_timeout_sec(payload) > 0 and idle_active:
-            if self._get_idle_mode(payload) == "slideshow" and self._display_ai_image(payload):
-                return
-            self._render_matrix_screensaver(image, draw)
+            idle_mode = self._get_idle_mode(payload)
+            if idle_mode == "slideshow":
+                if self._display_ai_image(payload):
+                    return
+                self._render_idle_placeholder(image, draw)
+            else:
+                self._render_matrix_screensaver(image, draw)
             self._disp.image(image)
             return
 
