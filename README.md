@@ -6,23 +6,6 @@
 
 This project starts from the official PiSugar Whisplay chatbot, but is being tailored for a **Raspberry Pi Zero 2 W** with a **Groq-backed LLM path**, a cleaner bring-up flow for the PiSugar **Whisplay HAT**, working **Raspberry Pi Camera Module v2.1 & 3** support, and companion display paths such as the **CYD** for touch-based remote control.
 
-## Current GroqBotNet display stack
-
-<img src="images/IMG_20260529_155911483_HDR.jpg" alt="Whisplay with GroqBotNet top OLED, bottom SPI display, and external HalloWing companion" width="900" />
-
-The GroqBotNet side of this repo is now behaving more like a **three-screen companion stack** than a single accessory display:
-
-- **Top OLED:** compact status/header view for the GroqBotNet host
-- **Bottom SPI:** the main GroqBotNet reader / AI screensaver display
-- **External HalloWing:** a UART-fed companion display that mirrors Whisplay header data instead of running its own separate bot UI
-
-Current companion behavior:
-
-- the **external HalloWing** now mirrors Whisplay fields such as **header, time, status, RPD, model, meter, and vibe**
-- in companion mode it stays pinned to **Whisplay** data instead of falling back to the local standalone GroqBotNet personality
-- the official Arduino sketch for that display now lives in **`GroqBotNet/Hallowing/Hallowing2.ino`**
-- the **bottom SPI** GroqBotNet display keeps its AI screensaver path without the unwanted matrix fallback that was interrupting the companion setup
-
 ## Current project direction
 
 - **LLM:** Groq through the OpenAI-compatible client path
@@ -304,6 +287,25 @@ These are a few representative shots of the current build. GitHub README pages a
   <img src="images/IMG_20260525_150528164_HDR.jpg" alt="GroqBotNet companion photo editor showing the updated edit workflow" width="48%" />
   <img src="images/IMG_20260525_150710310_HDR.jpg" alt="GroqBotNet companion photo editor with the new dual-screen edit display" width="48%" />
 </p>
+
+### GroqBotNet companion display stack
+
+<p align="center">
+  <img src="images/IMG_20260529_155911483_HDR.jpg" alt="Whisplay with GroqBotNet top OLED, bottom SPI display, and external HalloWing companion" width="70%" />
+</p>
+
+The GroqBotNet companion side currently spans three displays:
+
+- **Top OLED:** compact status/header view for the GroqBotNet host
+- **Bottom SPI:** main GroqBotNet reader / AI screensaver display
+- **External HalloWing:** UART-fed companion display that mirrors Whisplay header fields
+
+Current companion notes:
+
+- the **external HalloWing** mirrors Whisplay **header, time, status, RPD, model, meter, and vibe**
+- in companion mode it stays pinned to **Whisplay** data instead of dropping into the local standalone personality
+- the official Arduino sketch for that display lives in **`GroqBotNet/Hallowing/Hallowing2.ino`**
+- the **bottom SPI** display keeps the AI screensaver path without the unwanted matrix fallback
 
 <p align="center">
   <img src="images/IMG_20260521_173748583.jpg" alt="Whisplay opening screen on the device" width="32%" />
