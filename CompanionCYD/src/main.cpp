@@ -4,6 +4,7 @@
 #include <FS.h>
 #include <SPIFFS.h>
 #include <SD.h>
+#include <Preferences.h>
 #include <Arduino_GFX_Library.h>
 #include <JPEGDEC.h>
 #include <XPT2046_Touchscreen.h>
@@ -59,6 +60,7 @@ static constexpr unsigned long STATE_POLL_MS = 900;
 static constexpr unsigned long SETTINGS_POLL_MS = 6000;
 static constexpr unsigned long PHOTOS_POLL_MS = 12000;
 static constexpr unsigned long AI_PHOTOS_POLL_MS = 45000;
+static constexpr unsigned long AI_SYNC_STEP_MS = 1200;
 static constexpr unsigned long AI_SLIDE_ADVANCE_MS = 30000;
 static constexpr unsigned long AI_CHAT_PEEK_MS = 15000;
 static constexpr unsigned long PHOTO_REFRESH_BOOST_MS = 8000;
@@ -70,11 +72,19 @@ static constexpr char PREVIEW_CACHE_PATH[] = "/preview.jpg";
 static constexpr char AI_SLIDESHOW_DIR[] = "/whisplay-ai";
 static constexpr char AI_SPIFFS_CACHE_PREFIX[] = "/ai-slide-";
 static constexpr char AI_SLIDE_DRAW_CACHE_PATH[] = "/ai-slide-current-v2.jpg";
+static constexpr char AI_MANIFEST_PATH[] = "/whisplay-ai-index-v2.txt";
+static constexpr char AI_MANIFEST_TEMP_PATH[] = "/whisplay-ai-index-v2.tmp";
 static constexpr char AI_CACHE_VERSION[] = "v2";
 static constexpr int AI_SLIDE_RENDER_WIDTH = 320;
 static constexpr int AI_SLIDE_RENDER_HEIGHT = 240;
-static constexpr size_t MAX_AI_REMOTE_IMAGES = 96;
+static constexpr size_t MAX_AI_REMOTE_IMAGES = 48;
 static constexpr size_t MAX_AI_FALLBACK_IMAGES = 24;
+static constexpr size_t AI_SYNC_DOWNLOADS_PER_STEP = 2;
+static constexpr uint32_t SD_SPI_FREQUENCY = 4000000;
+static constexpr unsigned long AI_SLIDE_HUD_MS = 1400;
+static constexpr char AI_PREFS_NAMESPACE[] = "compcyd";
+static constexpr char AI_PREF_KEY_FILE[] = "aislide";
+static constexpr char AI_PREF_KEY_INDEX[] = "aiidx";
 
 enum class UiMode : uint8_t {
   AiSlideshow = 0,
@@ -209,6 +219,7 @@ static CompanionState companionState;
 static CompanionSettings companionSettings;
 static CompanionPhotoLibrary photoLibrary;
 static CompanionPhotoLibrary aiPhotoLibrary;
+static CompanionPhotoLibrary aiSyncPage;
 static JPEGDEC previewJpeg;
 static String toastMessage;
 static String lastLoggedBotText;
@@ -222,6 +233,7 @@ static bool renderDirty = true;
 static bool touchWasDown = false;
 static bool previewReady = false;
 static bool sdReady = false;
+static String sdStatusMessage = "SD not initialized.";
 static unsigned long lastTouchMs = 0;
 static unsigned long lastStatePollMs = 0;
 static unsigned long lastSettingsPollMs = 0;
@@ -238,6 +250,15 @@ static UiMode uiMode = UiMode::AiSlideshow;
 static size_t galleryIndex = 0;
 static size_t aiSlideIndex = 0;
 static size_t selectedSettingsIndex = 0;
+static String persistedAiSlideFileName;
+static bool aiSlidePrefsLoaded = false;
+static unsigned long aiSlideHudUntilMs = 0;
+static size_t aiSdManifestCount = 0;
+static size_t aiSdCacheFileCount = 0;
+static size_t aiSyncOffset = 0;
+static bool aiSyncHasMore = false;
+static bool aiSyncInProgress = false;
+static String aiSyncedRevision;
 
 static void mapTouch(uint16_t rawX, uint16_t rawY, int &screenX, int &screenY) {
   screenX = map(rawX, 200, 3800, 0, 320);
@@ -641,6 +662,198 @@ static const CompanionPhoto *selectedAiPhoto() {
   return &aiPhotoLibrary.photos[aiSlideIndex];
 }
 
+static size_t aiSlideTotalCount() {
+  if (sdReady) {
+    return aiSdCacheFileCount;
+  }
+  return aiPhotoLibrary.count;
+}
+
+static size_t countAiManifestEntries() {
+  if (!sdReady || !SD.exists(AI_MANIFEST_PATH)) {
+    return 0;
+  }
+  File manifest = SD.open(AI_MANIFEST_PATH, "r");
+  if (!manifest) {
+    return 0;
+  }
+  size_t count = 0;
+  while (manifest.available()) {
+    String line = manifest.readStringUntil('\n');
+    line.trim();
+    if (line.length()) {
+      count++;
+    }
+  }
+  manifest.close();
+  return count;
+}
+
+static size_t countAiCachedFilesOnSd() {
+  if (!sdReady) {
+    return 0;
+  }
+  File dir = SD.open(AI_SLIDESHOW_DIR);
+  if (!dir || !dir.isDirectory()) {
+    if (dir) {
+      dir.close();
+    }
+    return 0;
+  }
+  size_t count = 0;
+  while (true) {
+    File entry = dir.openNextFile();
+    if (!entry) {
+      break;
+    }
+    if (!entry.isDirectory()) {
+      String name = String(entry.name());
+      name.toLowerCase();
+      if (name.endsWith(".jpg") || name.endsWith(".jpeg")) {
+        count++;
+      }
+    }
+    entry.close();
+  }
+  dir.close();
+  return count;
+}
+
+static String aiCachePathForFileName(const String &fileName, bool useSdCache);
+static String aiCacheLeafName(const String &path);
+
+static String aiSdCachedPathAt(size_t index) {
+  if (!sdReady) {
+    return "";
+  }
+  File dir = SD.open(AI_SLIDESHOW_DIR);
+  if (!dir || !dir.isDirectory()) {
+    if (dir) {
+      dir.close();
+    }
+    return "";
+  }
+  size_t current = 0;
+  while (true) {
+    File entry = dir.openNextFile();
+    if (!entry) {
+      break;
+    }
+    if (!entry.isDirectory()) {
+      const String name = String(entry.name());
+      const String leaf = aiCacheLeafName(name);
+      String normalized = leaf;
+      normalized.toLowerCase();
+      if (normalized.endsWith(".jpg") || normalized.endsWith(".jpeg")) {
+        if (current == index) {
+          entry.close();
+          dir.close();
+          return String(AI_SLIDESHOW_DIR) + "/" + leaf;
+        }
+        current++;
+      }
+    }
+    entry.close();
+  }
+  dir.close();
+  return "";
+}
+
+static bool aiManifestContainsFileName(const String &fileName) {
+  if (!sdReady || !fileName.length() || !SD.exists(AI_MANIFEST_PATH)) {
+    return false;
+  }
+  File manifest = SD.open(AI_MANIFEST_PATH, "r");
+  if (!manifest) {
+    return false;
+  }
+  while (manifest.available()) {
+    String line = manifest.readStringUntil('\n');
+    line.trim();
+    if (line == fileName) {
+      manifest.close();
+      return true;
+    }
+  }
+  manifest.close();
+  return false;
+}
+
+static bool appendAiManifestFileName(const String &fileName) {
+  if (!sdReady || !fileName.length()) {
+    return false;
+  }
+  if (aiManifestContainsFileName(fileName)) {
+    return true;
+  }
+  File manifest = SD.open(AI_MANIFEST_PATH, SD.exists(AI_MANIFEST_PATH) ? "a" : "w");
+  if (!manifest) {
+    aiSlideError = "SD manifest append";
+    return false;
+  }
+  manifest.println(fileName);
+  manifest.close();
+  aiSdManifestCount++;
+  aiSdCacheFileCount = max(aiSdCacheFileCount, aiSdManifestCount);
+  return true;
+}
+
+static String aiManifestFileNameAt(size_t index) {
+  if (!sdReady || !SD.exists(AI_MANIFEST_PATH)) {
+    return "";
+  }
+  File manifest = SD.open(AI_MANIFEST_PATH, "r");
+  if (!manifest) {
+    return "";
+  }
+  size_t current = 0;
+  String value;
+  while (manifest.available()) {
+    value = manifest.readStringUntil('\n');
+    value.trim();
+    if (!value.length()) {
+      continue;
+    }
+    if (current == index) {
+      manifest.close();
+      return value;
+    }
+    current++;
+  }
+  manifest.close();
+  return "";
+}
+
+static String selectedAiFileName() {
+  if (sdReady) {
+    const size_t total = aiSlideTotalCount();
+    if (total == 0) {
+      aiSlideIndex = 0;
+      return "";
+    }
+    if (aiSlideIndex >= total) {
+      aiSlideIndex = 0;
+    }
+    return aiCacheLeafName(aiSdCachedPathAt(aiSlideIndex));
+  }
+  const CompanionPhoto *photo = selectedAiPhoto();
+  return photo ? photo->fileName : "";
+}
+
+static String selectedAiSdCachePath() {
+  if (!sdReady) {
+    return "";
+  }
+  const size_t total = aiSlideTotalCount();
+  if (total == 0) {
+    return "";
+  }
+  if (aiSlideIndex >= total) {
+    aiSlideIndex = 0;
+  }
+  return aiSdCachedPathAt(aiSlideIndex);
+}
+
 static bool photoLibrariesEqual(const CompanionPhotoLibrary &a, const CompanionPhotoLibrary &b) {
   if (a.count != b.count) {
     return false;
@@ -675,15 +888,121 @@ static void clearAiSlideCacheState() {
   aiSlideError = "";
 }
 
+static void loadAiSlidePrefs() {
+  if (aiSlidePrefsLoaded) {
+    return;
+  }
+  Preferences prefs;
+  prefs.begin(AI_PREFS_NAMESPACE, true);
+  persistedAiSlideFileName = prefs.getString(AI_PREF_KEY_FILE, "");
+  aiSlideIndex = static_cast<size_t>(prefs.getUInt(AI_PREF_KEY_INDEX, 0));
+  prefs.end();
+  aiSlidePrefsLoaded = true;
+}
+
+static void saveAiSlidePrefs() {
+  const String fileName = selectedAiFileName();
+  if (!fileName.length()) {
+    return;
+  }
+  if (persistedAiSlideFileName == fileName) {
+    return;
+  }
+  persistedAiSlideFileName = fileName;
+  Preferences prefs;
+  prefs.begin(AI_PREFS_NAMESPACE, false);
+  prefs.putString(AI_PREF_KEY_FILE, persistedAiSlideFileName);
+  prefs.putUInt(AI_PREF_KEY_INDEX, static_cast<uint32_t>(aiSlideIndex));
+  prefs.end();
+}
+
+static bool restoreAiSlideSelection(const String &preferredFileName) {
+  if (sdReady) {
+    const size_t total = aiSlideTotalCount();
+    if (total == 0) {
+      aiSlideIndex = 0;
+      return false;
+    }
+    if (preferredFileName.length()) {
+      for (size_t current = 0; current < total; current++) {
+        if (aiCacheLeafName(aiSdCachedPathAt(current)) == preferredFileName) {
+          aiSlideIndex = current;
+          return true;
+        }
+      }
+    }
+    if (aiSlideIndex >= total) {
+      aiSlideIndex = 0;
+    }
+    return false;
+  }
+  if (aiPhotoLibrary.count == 0) {
+    aiSlideIndex = 0;
+    return false;
+  }
+  if (preferredFileName.length()) {
+    for (size_t i = 0; i < aiPhotoLibrary.count; i++) {
+      if (aiPhotoLibrary.photos[i].fileName == preferredFileName) {
+        aiSlideIndex = i;
+        return true;
+      }
+    }
+  }
+  if (aiSlideIndex >= aiPhotoLibrary.count) {
+    aiSlideIndex = 0;
+  }
+  return false;
+}
+
+static String aiSlideCountLabel() {
+  const size_t total = aiSlideTotalCount();
+  if (total == 0) {
+    return "0/0";
+  }
+  return String(aiSlideIndex + 1) + "/" + String(total);
+}
+
+static String aiSyncStatusLabel() {
+  if (!sdReady) {
+    return sdStatusMessage.length() ? sdStatusMessage : "SD not ready.";
+  }
+  String label = String("SD files: ") + String(aiSdCacheFileCount);
+  if (aiSyncInProgress) {
+    label += " | syncing more...";
+  } else {
+    label += " | sync idle";
+  }
+  if (aiSlideError.length()) {
+    label += " | ";
+    label += trimTail(aiSlideError, 18);
+  }
+  return label;
+}
+
+static void showAiSlideHud() {
+  aiSlideHudUntilMs = millis() + AI_SLIDE_HUD_MS;
+}
+
+static bool fetchAiPhotosIfDue(bool force = false);
+
 static bool ensureSdCardReady() {
   if (sdReady) {
     return true;
   }
   sdSPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
   sdReady = SD.begin(SD_CS, sdSPI);
-  if (sdReady) {
-    SD.mkdir(AI_SLIDESHOW_DIR);
+  if (!sdReady) {
+    sdStatusMessage = "SD mount failed on HSPI.";
+    return false;
   }
+  if (SD.cardType() == CARD_NONE) {
+    sdReady = false;
+    sdStatusMessage = "SD card not detected.";
+    return false;
+  }
+  sdStatusMessage = "SD ready.";
+  SD.mkdir(AI_SLIDESHOW_DIR);
+  aiSdCacheFileCount = countAiCachedFilesOnSd();
   return sdReady;
 }
 
@@ -732,7 +1051,7 @@ static String aiCacheLeafName(const String &path) {
 }
 
 static size_t aiFetchLimit() {
-  return ensureSdCardReady() ? MAX_AI_REMOTE_IMAGES : MAX_AI_FALLBACK_IMAGES;
+  return MAX_AI_FALLBACK_IMAGES;
 }
 
 static bool aiCacheExists(const String &localPath, bool useSdCache) {
@@ -740,6 +1059,9 @@ static bool aiCacheExists(const String &localPath, bool useSdCache) {
 }
 
 static bool aiDownloadToCache(const String &remotePath, const String &localPath, bool useSdCache) {
+  if (!useSdCache && localPath != AI_SLIDE_DRAW_CACHE_PATH) {
+    return false;
+  }
   return useSdCache
     ? apiDownloadFile(remotePath, SD, localPath.c_str())
     : apiDownloadFile(remotePath, SPIFFS, localPath.c_str());
@@ -855,6 +1177,35 @@ static bool aiLibraryContainsFile(const String &fileName) {
     if (aiPhotoLibrary.photos[i].fileName == fileName) {
       return true;
     }
+  }
+  return false;
+}
+
+static bool ensureCurrentAiSlideCachedFromSd(const String &fileName) {
+  const String archivePath = selectedAiSdCachePath();
+  if (!archivePath.length()) {
+    const String fallbackPath = aiCachePathForFileName(fileName, true);
+    if (fallbackPath.length() && SD.exists(fallbackPath)) {
+      if (copySdFileToSpiffs(fallbackPath, AI_SLIDE_DRAW_CACHE_PATH) && fileLooksLikeJpeg(SPIFFS, AI_SLIDE_DRAW_CACHE_PATH)) {
+        return true;
+      }
+    }
+    aiSlideError = "SD slide path";
+    return false;
+  }
+  if (SD.exists(archivePath) && fileLooksLikeJpeg(SD, archivePath.c_str())) {
+    if (copySdFileToSpiffs(archivePath, AI_SLIDE_DRAW_CACHE_PATH) && fileLooksLikeJpeg(SPIFFS, AI_SLIDE_DRAW_CACHE_PATH)) {
+      return true;
+    }
+    aiSlideError = "SD copy fail";
+    SPIFFS.remove(AI_SLIDE_DRAW_CACHE_PATH);
+    return false;
+  }
+  if (SD.exists(archivePath)) {
+    aiSlideError = "SD bad jpg " + fileSizeLabel(SD, archivePath.c_str());
+    SD.remove(archivePath);
+  } else {
+    aiSlideError = "SD slide missing";
   }
   return false;
 }
@@ -998,6 +1349,9 @@ static bool ensurePreviewForSelection() {
 }
 
 static void pruneAiSlideshowCache(bool useSdCache) {
+  if (useSdCache) {
+    return;
+  }
   File dir = useSdCache ? SD.open(AI_SLIDESHOW_DIR) : SPIFFS.open("/");
   if (!dir || !dir.isDirectory()) {
     if (dir) {
@@ -1044,25 +1398,82 @@ static void pruneAiSlideshowCache(bool useSdCache) {
   dir.close();
 }
 
-static bool syncAiSlideshowCache() {
+static bool syncAiSlideshowCacheStep(bool restartSync) {
   const bool useSdCache = ensureSdCardReady();
-  bool anyReady = false;
-  for (size_t i = 0; i < aiPhotoLibrary.count; i++) {
-    const CompanionPhoto &photo = aiPhotoLibrary.photos[i];
-    String localPath = aiCachePathForFileName(photo.fileName, useSdCache);
-    if (aiCacheExists(localPath, useSdCache)) {
-      anyReady = true;
+  bool anyReady = aiSdCacheFileCount > 0;
+  if (!useSdCache) {
+    return SPIFFS.exists(AI_SLIDE_DRAW_CACHE_PATH) && fileLooksLikeJpeg(SPIFFS, AI_SLIDE_DRAW_CACHE_PATH);
+  }
+  if (restartSync) {
+    aiSyncOffset = 0;
+    aiSyncHasMore = true;
+    aiSyncInProgress = true;
+  }
+  if (!aiSyncInProgress) {
+    return anyReady;
+  }
+  CompanionPhotoLibrary &page = aiSyncPage;
+  page.loaded = false;
+  page.count = 0;
+  page.lastUpdateMs = 0;
+  bool hasMore = false;
+  if (!apiFetchGeneratedImagesPage(page, aiSyncOffset, COMPANION_GENERATED_IMAGES_PAGE_SIZE, &hasMore, nullptr)) {
+    return false;
+  }
+  if (page.count == 0) {
+    aiSyncOffset = 0;
+    aiSyncHasMore = false;
+    aiSyncInProgress = false;
+    if (companionState.generatedImagesRevision.length()) {
+      aiSyncedRevision = companionState.generatedImagesRevision;
+    }
+    return anyReady;
+  }
+
+  size_t downloadBudget = AI_SYNC_DOWNLOADS_PER_STEP;
+  bool pageComplete = true;
+  for (size_t i = 0; i < page.count; i++) {
+    const CompanionPhoto &photo = page.photos[i];
+    if (!photo.fileName.length()) {
       continue;
     }
-    String remotePath = photo.companionImageUrl.length() ? photo.companionImageUrl : photo.imageUrl;
-    if (!remotePath.length()) {
-      continue;
+    const String localPath = aiCachePathForFileName(photo.fileName, true);
+    bool valid = SD.exists(localPath) && fileLooksLikeJpeg(SD, localPath.c_str());
+    if (SD.exists(localPath) && !valid) {
+      SD.remove(localPath);
     }
-    if (aiDownloadToCache(remotePath, localPath, useSdCache)) {
+    if (!valid && downloadBudget > 0) {
+      const String remotePath = aiRemotePathForPhoto(photo);
+      valid = remotePath.length() &&
+        aiDownloadToCache(remotePath, localPath, true) &&
+        fileLooksLikeJpeg(SD, localPath.c_str());
+      if (valid) {
+        downloadBudget--;
+      }
+    }
+    if (valid) {
       anyReady = true;
+    }
+    if (!valid) {
+      pageComplete = false;
+    }
+    yield();
+  }
+  aiSdCacheFileCount = countAiCachedFilesOnSd();
+
+  if (pageComplete) {
+    aiSyncOffset += page.count;
+    aiSyncHasMore = hasMore;
+  } else {
+    aiSyncHasMore = true;
+  }
+  if (pageComplete && !aiSyncHasMore) {
+    aiSyncOffset = 0;
+    aiSyncInProgress = false;
+    if (companionState.generatedImagesRevision.length()) {
+      aiSyncedRevision = companionState.generatedImagesRevision;
     }
   }
-  pruneAiSlideshowCache(useSdCache);
   return anyReady;
 }
 
@@ -1108,69 +1519,89 @@ static bool ensureCurrentAiSlideCached(const CompanionPhoto &photo) {
     return false;
   }
 
-  const String localPath = aiCachePathForFileName(photo.fileName, false);
-  if (SPIFFS.exists(localPath) && fileLooksLikeJpeg(SPIFFS, localPath.c_str())) {
+  if (aiSlideFileName == photo.fileName && SPIFFS.exists(AI_SLIDE_DRAW_CACHE_PATH) && fileLooksLikeJpeg(SPIFFS, AI_SLIDE_DRAW_CACHE_PATH)) {
     return true;
-  } else if (SPIFFS.exists(localPath)) {
-    aiSlideError = "Local bad jpg " + fileSizeLabel(SPIFFS, localPath.c_str());
-    SPIFFS.remove(localPath);
+  } else if (SPIFFS.exists(AI_SLIDE_DRAW_CACHE_PATH)) {
+    aiSlideError = "Local bad jpg " + fileSizeLabel(SPIFFS, AI_SLIDE_DRAW_CACHE_PATH);
+    SPIFFS.remove(AI_SLIDE_DRAW_CACHE_PATH);
   }
   String downloadError;
   if (
-    apiDownloadFile(remotePath, SPIFFS, localPath.c_str(), &downloadError) &&
-    fileLooksLikeJpeg(SPIFFS, localPath.c_str())
+    apiDownloadFile(remotePath, SPIFFS, AI_SLIDE_DRAW_CACHE_PATH, &downloadError) &&
+    fileLooksLikeJpeg(SPIFFS, AI_SLIDE_DRAW_CACHE_PATH)
   ) {
     return true;
   }
-  if (SPIFFS.exists(localPath) && !fileLooksLikeJpeg(SPIFFS, localPath.c_str())) {
-    aiSlideError = "Local bad dl " + fileSizeLabel(SPIFFS, localPath.c_str());
-  } else if (SPIFFS.exists(localPath)) {
-    aiSlideError = "Local dl bad " + fileSizeLabel(SPIFFS, localPath.c_str());
+  if (SPIFFS.exists(AI_SLIDE_DRAW_CACHE_PATH) && !fileLooksLikeJpeg(SPIFFS, AI_SLIDE_DRAW_CACHE_PATH)) {
+    aiSlideError = "Local bad dl " + fileSizeLabel(SPIFFS, AI_SLIDE_DRAW_CACHE_PATH);
+  } else if (SPIFFS.exists(AI_SLIDE_DRAW_CACHE_PATH)) {
+    aiSlideError = "Local dl bad " + fileSizeLabel(SPIFFS, AI_SLIDE_DRAW_CACHE_PATH);
   } else {
     aiSlideError = downloadError.length() ? "Local " + downloadError : "Local dl fail";
   }
-  SPIFFS.remove(localPath);
+  SPIFFS.remove(AI_SLIDE_DRAW_CACHE_PATH);
   return false;
 }
 
 static bool ensureAiSlideReady() {
-  const CompanionPhoto *photo = selectedAiPhoto();
-  if (!photo) {
+  const String fileName = selectedAiFileName();
+  if (!fileName.length()) {
     clearAiSlideCacheState();
     aiSlideError = "No AI images yet.";
     return false;
   }
   const bool useSdCache = ensureSdCardReady();
-  if (aiSlideFileName == photo->fileName) {
+  if (aiSlideFileName == fileName) {
     if (
       (useSdCache && SPIFFS.exists(AI_SLIDE_DRAW_CACHE_PATH)) ||
-      (!useSdCache && SPIFFS.exists(aiCachePathForFileName(photo->fileName, false)))
+      (!useSdCache && SPIFFS.exists(AI_SLIDE_DRAW_CACHE_PATH))
     ) {
       aiSlideError = "";
       return true;
     }
   }
-  if (!ensureCurrentAiSlideCached(*photo)) {
-    aiSlideFileName = photo->fileName;
+  const CompanionPhoto *photo = useSdCache ? nullptr : selectedAiPhoto();
+  const bool cached = useSdCache
+    ? ensureCurrentAiSlideCachedFromSd(fileName)
+    : (photo ? ensureCurrentAiSlideCached(*photo) : false);
+  if (!cached) {
+    aiSlideFileName = fileName;
     return false;
   }
-  aiSlideFileName = photo->fileName;
+  aiSlideFileName = fileName;
   aiSlideError = "";
+  saveAiSlidePrefs();
   return true;
 }
 
+static void moveAiSlide(int delta, bool showHud = true) {
+  const size_t total = aiSlideTotalCount();
+  if (total == 0) {
+    return;
+  }
+  int next = static_cast<int>(aiSlideIndex) + delta;
+  while (next < 0) {
+    next += static_cast<int>(total);
+  }
+  aiSlideIndex = static_cast<size_t>(next % static_cast<int>(total));
+  lastAiSlideAdvanceMs = millis();
+  clearAiSlideCacheState();
+  saveAiSlidePrefs();
+  if (showHud) {
+    showAiSlideHud();
+  }
+  renderDirty = true;
+}
+
 static void advanceAiSlide(bool force = false) {
-  if (aiPhotoLibrary.count == 0) {
+  if (aiSlideTotalCount() == 0) {
     return;
   }
   unsigned long now = millis();
   if (!force && now - lastAiSlideAdvanceMs < AI_SLIDE_ADVANCE_MS) {
     return;
   }
-  lastAiSlideAdvanceMs = now;
-  aiSlideIndex = (aiSlideIndex + 1) % aiPhotoLibrary.count;
-  clearAiSlideCacheState();
-  renderDirty = true;
+  moveAiSlide(1, true);
 }
 
 static void openSetupPortal() {
@@ -1227,15 +1658,24 @@ static bool fetchStateIfDue() {
     nextState.text != companionState.text ||
     nextState.textInputEnabled != companionState.textInputEnabled ||
     nextState.ragIconVisible != companionState.ragIconVisible ||
-    nextState.imageIconVisible != companionState.imageIconVisible;
+    nextState.imageIconVisible != companionState.imageIconVisible ||
+    nextState.generatedImagesRevision != companionState.generatedImagesRevision;
 
   bool freshText = nextState.text.length() && nextState.text != companionState.text;
+  String previousGeneratedImagesRevision = companionState.generatedImagesRevision;
   if (freshText) {
     syncIncomingLogText(nextState.text);
   }
 
   companionState = nextState;
   lastSuccessfulPollMs = now;
+  if (
+    previousGeneratedImagesRevision.length() &&
+    companionState.generatedImagesRevision.length() &&
+    companionState.generatedImagesRevision != previousGeneratedImagesRevision
+  ) {
+    fetchAiPhotosIfDue(true);
+  }
   bool activeChat = companionState.status.length() &&
     companionState.status != "idle" &&
     companionState.status != "last reply";
@@ -1304,13 +1744,18 @@ static bool fetchPhotosIfDue(bool force = false) {
   lastPhotoPollMs = now;
 
   String currentSelectionFile = selectedPhoto() ? selectedPhoto()->fileName : "";
-  CompanionPhotoLibrary nextPhotos;
-  if (!apiFetchPhotos(nextPhotos)) {
+  CompanionPhotoLibrary *nextPhotos = new CompanionPhotoLibrary();
+  if (!nextPhotos) {
+    return false;
+  }
+  if (!apiFetchPhotos(*nextPhotos)) {
+    delete nextPhotos;
     return false;
   }
 
-  bool changed = !photoLibrariesEqual(photoLibrary, nextPhotos);
-  photoLibrary = nextPhotos;
+  bool changed = !photoLibrariesEqual(photoLibrary, *nextPhotos);
+  photoLibrary = *nextPhotos;
+  delete nextPhotos;
   if (photoLibrary.count == 0) {
     galleryIndex = 0;
     clearPreviewCache();
@@ -1337,30 +1782,45 @@ static bool fetchPhotosIfDue(bool force = false) {
   return true;
 }
 
-static bool fetchAiPhotosIfDue(bool force = false) {
+static bool fetchAiPhotosIfDue(bool force) {
   if (!ccEnsureWifiConnected()) {
     return false;
   }
+  if (!ensureSdCardReady()) {
+    aiPhotoLibrary.count = 0;
+    aiPhotoLibrary.loaded = false;
+    return false;
+  }
   unsigned long now = millis();
-  if (!force && now - lastAiPhotoPollMs < AI_PHOTOS_POLL_MS) {
+  const unsigned long pollInterval = (sdReady && aiSyncInProgress) ? AI_SYNC_STEP_MS : AI_PHOTOS_POLL_MS;
+  if (!force && now - lastAiPhotoPollMs < pollInterval) {
     return false;
   }
   lastAiPhotoPollMs = now;
 
-  CompanionPhotoLibrary nextPhotos;
-  if (!apiFetchGeneratedImages(nextPhotos, aiFetchLimit())) {
+  aiPhotoLibrary.count = 0;
+  aiPhotoLibrary.loaded = false;
+  const String currentSelectionFile = selectedAiFileName().length()
+    ? selectedAiFileName()
+    : persistedAiSlideFileName;
+  const size_t previousCount = aiSdCacheFileCount;
+  const bool revisionChanged =
+    companionState.generatedImagesRevision.length() &&
+    companionState.generatedImagesRevision != aiSyncedRevision;
+  const bool needsInitialSync =
+    !aiSyncInProgress &&
+    aiSyncOffset == 0 &&
+    !aiSyncedRevision.length();
+  const bool restartSync = force || revisionChanged || needsInitialSync;
+  if (!syncAiSlideshowCacheStep(restartSync)) {
     return false;
   }
-
-  bool changed = !photoLibrariesEqual(aiPhotoLibrary, nextPhotos);
-  aiPhotoLibrary = nextPhotos;
-  if (aiSlideIndex >= aiPhotoLibrary.count) {
-    aiSlideIndex = 0;
-  }
-  if (changed) {
-    clearAiSlideCacheState();
-    pruneAiSlideshowCache(true);
-    pruneAiSlideshowCache(false);
+  aiSdCacheFileCount = countAiCachedFilesOnSd();
+  restoreAiSlideSelection(currentSelectionFile);
+  saveAiSlidePrefs();
+  clearAiSlideCacheState();
+  if (aiSdCacheFileCount != previousCount || force) {
+    showAiSlideHud();
     renderDirty = true;
   }
   return true;
@@ -1843,15 +2303,19 @@ static void renderChatMode() {
 }
 
 static void renderAiSlideshowMode() {
-  const CompanionPhoto *photo = selectedAiPhoto();
-  if (photo && ensureAiSlideReady()) {
-    const bool useSdCache = ensureSdCardReady();
-    String cachePath = useSdCache ? String(AI_SLIDE_DRAW_CACHE_PATH) : aiCachePathForFileName(photo->fileName, false);
+  const String fileName = selectedAiFileName();
+  const bool useSdCache = ensureSdCardReady();
+  const CompanionPhoto *photo = useSdCache ? nullptr : selectedAiPhoto();
+  if (fileName.length() && ensureAiSlideReady()) {
+    String cachePath = String(AI_SLIDE_DRAW_CACHE_PATH);
     String drawError;
     bool drawOk = drawJpegFromFs(SPIFFS, cachePath.c_str(), 0, 0, 320, 240, &drawError);
     if (!drawOk) {
       SPIFFS.remove(cachePath);
-      if (ensureCurrentAiSlideCached(*photo)) {
+      const bool recached = useSdCache
+        ? ensureCurrentAiSlideCachedFromSd(fileName)
+        : (photo ? ensureCurrentAiSlideCached(*photo) : false);
+      if (recached) {
         drawError = "";
         drawOk = drawJpegFromFs(SPIFFS, cachePath.c_str(), 0, 0, 320, 240, &drawError);
       }
@@ -1859,11 +2323,18 @@ static void renderAiSlideshowMode() {
     if (!drawOk) {
       gfx->fillScreen(COLOR_BG);
       aiSlideError = (useSdCache ? "Tmp " : "Local ") + (drawError.length() ? drawError : String("draw fail"));
-      drawPreviewStatusText(0, 0, 320, 240, trimTail(photo->fileName, 32), aiSlideError);
+      drawPreviewStatusText(0, 0, 320, 240, trimTail(fileName, 32), aiSlideError);
+    } else if (aiSlideHudUntilMs > millis()) {
+      gfx->fillRect(0, 220, 320, 20, COLOR_BG);
+      gfx->setTextColor(COLOR_HEADER_TEXT, COLOR_BG);
+      gfx->setCursor(8, 226);
+      gfx->print(aiSlideCountLabel());
+      gfx->setCursor(312 - min(static_cast<int>(trimTail(fileName, 26).length()), 26) * 6, 226);
+      gfx->print(trimTail(fileName, 26));
     }
-  } else if (photo) {
+  } else if (fileName.length()) {
     gfx->fillScreen(COLOR_BG);
-    drawPreviewStatusText(0, 0, 320, 240, trimTail(photo->fileName, 32), aiSlideError.length() ? aiSlideError : "Waiting for AI cache.");
+    drawPreviewStatusText(0, 0, 320, 240, trimTail(fileName, 32), aiSlideError.length() ? aiSlideError : "Waiting for AI cache.");
   } else {
     gfx->fillScreen(COLOR_BG);
     drawPreviewStatusText(
@@ -1871,8 +2342,8 @@ static void renderAiSlideshowMode() {
       0,
       320,
       240,
-      "No AI images yet.",
-      sdReady ? "Polling the Pi for generated images." : "Using local 24-image fallback cache."
+      useSdCache ? "No AI images on SD yet." : "No SD card detected.",
+      aiSyncStatusLabel()
     );
   }
 }
@@ -1987,6 +2458,17 @@ static void renderUi() {
 }
 
 static void handleModeTouch(int x, int y) {
+  if (uiMode == UiMode::AiSlideshow) {
+    if (x < 80) {
+      moveAiSlide(-1);
+      return;
+    }
+    if (x > 240) {
+      moveAiSlide(1);
+      return;
+    }
+  }
+
   if (pointInButton(x, y, buttonCaptureAction)) {
     handleCapture();
     return;
@@ -2123,7 +2605,15 @@ void setup() {
   ts.setRotation(1);
 
   SPIFFS.begin(true);
+  loadAiSlidePrefs();
+  pruneAiSlideshowCache(false);
   ensureSdCardReady();
+  aiSdManifestCount = countAiManifestEntries();
+  aiSdCacheFileCount = countAiCachedFilesOnSd();
+  if (sdReady) {
+    aiPhotoLibrary.count = 0;
+    aiPhotoLibrary.loaded = false;
+  }
 
   bool forcePortal = digitalRead(BOOT_BTN) == LOW;
   ccConnect(forcePortal);
@@ -2132,7 +2622,7 @@ void setup() {
   fetchStateIfDue();
   fetchSettingsIfDue();
   fetchPhotosIfDue(true);
-  fetchAiPhotosIfDue(true);
+  showAiSlideHud();
   renderUi();
 }
 

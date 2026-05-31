@@ -9,12 +9,14 @@
 
 static constexpr size_t COMPANION_MAX_PRESETS = 16;
 static constexpr size_t COMPANION_MAX_PHOTOS = 96;
+static constexpr size_t COMPANION_GENERATED_IMAGES_PAGE_SIZE = 12;
 
 struct CompanionState {
   bool ready = false;
   bool textInputEnabled = false;
   bool ragIconVisible = false;
   bool imageIconVisible = false;
+  String generatedImagesRevision;
   String status;
   String text;
   String emoji;
@@ -104,13 +106,13 @@ static bool apiFetchState(CompanionState &state) {
     http.end();
     return false;
   }
-  String body = http.getString();
-  http.end();
 
   JsonDocument doc;
-  if (deserializeJson(doc, body)) {
+  if (deserializeJson(doc, http.getStream())) {
+    http.end();
     return false;
   }
+  http.end();
 
   state.ready = doc["ready"] | false;
   state.status = String(doc["status"] | "");
@@ -119,6 +121,7 @@ static bool apiFetchState(CompanionState &state) {
   state.textInputEnabled = doc["text_input_enabled"] | false;
   state.ragIconVisible = doc["rag_icon_visible"] | false;
   state.imageIconVisible = doc["image_icon_visible"] | false;
+  state.generatedImagesRevision = String(doc["generated_images_revision"] | "");
   state.lastUpdateMs = millis();
   return true;
 }
@@ -142,13 +145,13 @@ static bool apiFetchSettings(CompanionSettings &settings) {
     http.end();
     return false;
   }
-  String body = http.getString();
-  http.end();
 
   JsonDocument doc;
-  if (deserializeJson(doc, body)) {
+  if (deserializeJson(doc, http.getStream())) {
+    http.end();
     return false;
   }
+  http.end();
   JsonObject settingsObj = doc["settings"].as<JsonObject>();
   if (settingsObj.isNull()) {
     return false;
@@ -202,13 +205,13 @@ static bool apiFetchPhotos(CompanionPhotoLibrary &library, size_t maxPhotos = CO
     http.end();
     return false;
   }
-  String body = http.getString();
-  http.end();
 
   JsonDocument doc;
-  if (deserializeJson(doc, body)) {
+  if (deserializeJson(doc, http.getStream())) {
+    http.end();
     return false;
   }
+  http.end();
 
   JsonArray photosArray = doc["photos"].as<JsonArray>();
   if (photosArray.isNull()) {
@@ -236,9 +239,18 @@ static bool apiFetchPhotos(CompanionPhotoLibrary &library, size_t maxPhotos = CO
   return true;
 }
 
-static bool apiFetchGeneratedImages(CompanionPhotoLibrary &library, size_t maxPhotos = COMPANION_MAX_PHOTOS) {
-  char url[192];
-  if (!apiBuildUrl(url, sizeof(url), "/api/generated-images")) {
+static bool apiFetchGeneratedImagesPage(
+  CompanionPhotoLibrary &library,
+  size_t offset,
+  size_t limit,
+  bool *hasMoreOut = nullptr,
+  size_t *totalCountOut = nullptr
+) {
+  library.count = 0;
+  String requestPath = String("/api/generated-images?offset=") + String(offset) +
+    "&limit=" + String(limit ? limit : COMPANION_GENERATED_IMAGES_PAGE_SIZE);
+  char url[224];
+  if (!apiBuildUrl(url, sizeof(url), requestPath)) {
     return false;
   }
   HTTPClient http;
@@ -249,22 +261,21 @@ static bool apiFetchGeneratedImages(CompanionPhotoLibrary &library, size_t maxPh
     http.end();
     return false;
   }
-  String body = http.getString();
-  http.end();
 
   JsonDocument doc;
-  if (deserializeJson(doc, body)) {
+  if (deserializeJson(doc, http.getStream())) {
+    http.end();
     return false;
   }
+  http.end();
 
   JsonArray photosArray = doc["photos"].as<JsonArray>();
   if (photosArray.isNull()) {
     return false;
   }
 
-  library.count = 0;
   for (JsonVariant photoVariant : photosArray) {
-    if (library.count >= maxPhotos || library.count >= COMPANION_MAX_PHOTOS) {
+    if (library.count >= COMPANION_MAX_PHOTOS) {
       break;
     }
     JsonObject photoObject = photoVariant.as<JsonObject>();
@@ -276,6 +287,44 @@ static bool apiFetchGeneratedImages(CompanionPhotoLibrary &library, size_t maxPh
     photo.imageUrl = String(photoObject["imageUrl"] | "");
     photo.companionImageUrl = String(photoObject["companionImageUrl"] | "");
     photo.sizeBytes = photoObject["sizeBytes"] | 0;
+  }
+
+  if (hasMoreOut) {
+    *hasMoreOut = doc["hasMore"] | false;
+  }
+  if (totalCountOut) {
+    *totalCountOut = doc["totalCount"] | library.count;
+  }
+
+  library.loaded = true;
+  library.lastUpdateMs = millis();
+  return true;
+}
+
+static bool apiFetchGeneratedImages(CompanionPhotoLibrary &library, size_t maxPhotos = COMPANION_MAX_PHOTOS) {
+  library.count = 0;
+  size_t offset = 0;
+  const size_t clampedMax = maxPhotos > COMPANION_MAX_PHOTOS ? COMPANION_MAX_PHOTOS : maxPhotos;
+  static CompanionPhotoLibrary page;
+
+  while (library.count < clampedMax) {
+    page.loaded = false;
+    page.count = 0;
+    page.lastUpdateMs = 0;
+    bool hasMore = false;
+    if (!apiFetchGeneratedImagesPage(page, offset, COMPANION_GENERATED_IMAGES_PAGE_SIZE, &hasMore, nullptr)) {
+      return false;
+    }
+    if (page.count == 0) {
+      break;
+    }
+    for (size_t i = 0; i < page.count && library.count < clampedMax; i++) {
+      library.photos[library.count++] = page.photos[i];
+    }
+    if (!hasMore) {
+      break;
+    }
+    offset += page.count;
   }
 
   library.loaded = true;

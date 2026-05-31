@@ -1141,7 +1141,13 @@ export class WebDisplayServer implements WebAudioBridgeServer {
     this.router.get("/api/generated-images", (ctx) => {
       ctx.set("Cache-Control", "no-store");
       const selectedFileName = getActiveImageFileNameInDir(imageDir);
-      const photos = listGeneratedImgs().map((photoPath) => {
+      const allPhotos = listGeneratedImgs();
+      const offset = Math.max(0, parseInt(String(ctx.query.offset || "0"), 10) || 0);
+      const limitValue = parseInt(String(ctx.query.limit || "0"), 10) || 0;
+      const pagedPhotos = limitValue > 0
+        ? allPhotos.slice(offset, offset + limitValue)
+        : allPhotos.slice(offset);
+      const photos = pagedPhotos.map((photoPath) => {
         const stats = fs.statSync(photoPath);
         const fileName = path.basename(photoPath);
         return {
@@ -1154,6 +1160,10 @@ export class WebDisplayServer implements WebAudioBridgeServer {
       });
       ctx.body = {
         photos,
+        totalCount: allPhotos.length,
+        offset,
+        limit: limitValue > 0 ? limitValue : allPhotos.length,
+        hasMore: offset + photos.length < allPhotos.length,
         status: getGeneratedImgStatus(),
         selectedFileName,
       };
@@ -2397,6 +2407,11 @@ export class WebDisplayServer implements WebAudioBridgeServer {
       return { ready: false };
     }
 
+    const generatedImagePaths = listGeneratedImgs();
+    const latestGeneratedFileName = generatedImagePaths.length
+      ? path.basename(generatedImagePaths[0] || "")
+      : "";
+
     return {
       ready: true,
       status: this.currentStatus.status,
@@ -2429,6 +2444,7 @@ export class WebDisplayServer implements WebAudioBridgeServer {
       rag_icon_visible: this.currentStatus.rag_icon_visible,
       image_icon_visible: this.currentStatus.image_icon_visible,
       image_revision: this.imageRevision,
+      generated_images_revision: `${generatedImagePaths.length}:${latestGeneratedFileName}`,
       music_progress: this.currentStatus.music_progress,
       music_duration_ms: this.currentStatus.music_duration_ms,
       header_mode: this.currentStatus.header_mode,
