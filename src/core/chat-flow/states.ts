@@ -364,6 +364,7 @@ const previousSongIntentPatterns = [
 
 const PHOTO_BROWSER_EXIT_HOLD_MS = 1800;
 const IMAGE_MODE_TALK_HOLD_MS = 800;
+const IMAGE_PROMPT_HELPER_TIMEOUT_MS = 8000;
 const VOICE_HELP_EXIT_HOLD_MS = 1800;
 const VOICE_COMMAND_HELP_PAGES = buildVoiceCommandHelpPages();
 const TEXT_AUTO_REPLAY_PAUSE_MS = 900;
@@ -378,6 +379,7 @@ interface PendingImageEditConfirmation {
 let pendingImageEditConfirmation: PendingImageEditConfirmation | null = null;
 let cameraCaptureCueTimer: NodeJS.Timeout | null = null;
 let cameraCaptureCueResetTimer: NodeJS.Timeout | null = null;
+let allowImmediateListeningRelease = false;
 const HEADER_BADGE_VIEW_CYCLE: GroqHeaderBadgeView[] = [
   "default",
   "time",
@@ -411,6 +413,13 @@ function shouldUseImagePromptHelper(withImageContext: boolean): boolean {
 
 function isConfirmableImageEditRequest(prompt: string): boolean {
   return shouldRouteToImageGeneration(prompt) && shouldUseImageContextForGeneration(prompt);
+}
+
+function isBareImageEditRequest(prompt: string): boolean {
+  const trimmed = prompt.trim().replace(/\s+/g, " ");
+  return /^(?:please\s+)?(?:edit|restyle|transform|change|make|turn|give|apply)\s+(?:this|the|that|my)?\s*(?:image|photo|picture)\s*[.!?]*$/i.test(
+    trimmed,
+  );
 }
 
 function parseImageEditConfirmCommand(prompt: string): {
@@ -502,6 +511,18 @@ async function buildPersonalityImagePrompt(userPrompt: string): Promise<string> 
     ],
   });
   return normalizeImagePromptHelperOutput(helperPrompt, helperRequest);
+}
+
+async function buildPersonalityImagePromptWithTimeout(
+  userPrompt: string,
+): Promise<string> {
+  const fallbackPrompt = extractImagePromptHelperRequest(userPrompt);
+  return Promise.race([
+    buildPersonalityImagePrompt(userPrompt),
+    new Promise<string>((resolve) => {
+      setTimeout(() => resolve(fallbackPrompt), IMAGE_PROMPT_HELPER_TIMEOUT_MS);
+    }),
+  ]);
 }
 
 function stopCameraCaptureCue(resetToDefault = true): void {
@@ -1594,7 +1615,9 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
         clearTimeout(settingsTimer);
         settingsTimer = null;
       }
-      if (Date.now() - listeningStartedAt < 500) {
+      if (allowImmediateListeningRelease) {
+        allowImmediateListeningRelease = false;
+      } else if (Date.now() - listeningStartedAt < 500) {
         // Too short to be meaningful — stop recording and return to sleep
         console.log("[listening] Button released too quickly, returning to sleep");
         stop();
@@ -2374,6 +2397,12 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
           typeof llmFuncMap.generateImage === "function"
         ) {
           const withImageContext = shouldUseImageContextForGeneration(ctx.asrText);
+          if (withImageContext && isBareImageEditRequest(ctx.asrText)) {
+            transitionToPromptStage(
+              "Tell me how you want to edit this photo. For example: make this photo black and white.",
+            );
+            return;
+          }
           if (shouldUseImagePromptHelper(withImageContext)) {
             const currentImagePath = getPreferredContextImage();
             if (currentImagePath) {
@@ -2386,7 +2415,9 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
               });
               void runReplyFlow(async () => {
                 try {
-                  const helperPrompt = await buildPersonalityImagePrompt(ctx.asrText);
+                  const helperPrompt = await buildPersonalityImagePromptWithTimeout(
+                    ctx.asrText,
+                  );
                   if (currentAnswerId !== ctx.answerId) {
                     return;
                   }
@@ -2620,8 +2651,10 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
     });
     let talkHoldTimer: NodeJS.Timeout | null = null;
     let talkHoldTriggered = false;
+    let talkHoldStartMs = 0;
     onButtonPressed(() => {
       talkHoldTriggered = false;
+      talkHoldStartMs = Date.now();
       if (talkHoldTimer) {
         clearTimeout(talkHoldTimer);
       }
@@ -2629,16 +2662,24 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
         talkHoldTimer = null;
         talkHoldTriggered = true;
         display({ image: "" });
+        allowImmediateListeningRelease = true;
         ctx.transitionTo("listening");
       }, IMAGE_MODE_TALK_HOLD_MS);
     });
     onButtonReleased(() => {
+      const heldLongEnough =
+        talkHoldStartMs > 0 &&
+        Date.now() - talkHoldStartMs >= IMAGE_MODE_TALK_HOLD_MS;
+      talkHoldStartMs = 0;
       if (talkHoldTimer) {
         clearTimeout(talkHoldTimer);
         talkHoldTimer = null;
       }
-      if (talkHoldTriggered) {
+      if (talkHoldTriggered || heldLongEnough) {
         talkHoldTriggered = false;
+        display({ image: "" });
+        allowImmediateListeningRelease = true;
+        ctx.transitionTo("listening");
         return;
       }
       const currentStatus = getCurrentStatus();
