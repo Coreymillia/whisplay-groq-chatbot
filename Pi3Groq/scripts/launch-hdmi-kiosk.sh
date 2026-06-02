@@ -5,6 +5,7 @@ PORT="${PI3GROQ_PORT:-18600}"
 URL="${PI3GROQ_HDMI_URL:-http://127.0.0.1:${PORT}/hdmi}"
 DISPLAY_VALUE="${DISPLAY:-:0}"
 XAUTHORITY_VALUE="${XAUTHORITY:-$HOME/.Xauthority}"
+XDG_RUNTIME_DIR_VALUE="${XDG_RUNTIME_DIR:-$HOME/.cache/pi3groq-runtime}"
 
 pick_browser() {
   local candidate=""
@@ -24,6 +25,9 @@ fi
 
 export DISPLAY="$DISPLAY_VALUE"
 export XAUTHORITY="$XAUTHORITY_VALUE"
+export XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR_VALUE"
+
+mkdir -p "$XDG_RUNTIME_DIR"
 
 if command -v xset >/dev/null 2>&1; then
   xset s off >/dev/null 2>&1 || true
@@ -45,13 +49,18 @@ else
   sleep 10
 fi
 
-exec "$BROWSER_BIN" \
-  --kiosk \
-  --disable-infobars \
-  --noerrdialogs \
-  --disable-session-crashed-bubble \
-  --check-for-update-interval=31536000 \
-  --autoplay-policy=no-user-gesture-required \
-  --overscroll-history-navigation=0 \
-  --disable-features=TranslateUI \
-  "$URL"
+while true; do
+  "$BROWSER_BIN" \
+    --kiosk \
+    --disable-infobars \
+    --noerrdialogs \
+    --disable-session-crashed-bubble \
+    --disable-gpu \
+    --disable-gpu-compositing \
+    --check-for-update-interval=31536000 \
+    --autoplay-policy=no-user-gesture-required \
+    --overscroll-history-navigation=0 \
+    --disable-features=TranslateUI \
+    "$URL" || true
+  sleep 2
+done

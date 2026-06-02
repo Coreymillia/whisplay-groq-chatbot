@@ -133,6 +133,7 @@ import {
   writeEsp32AgentProjectFile,
 } from "../esp32-agent/workspace";
 import { listEsp32AgentSerialPorts } from "../esp32-agent/serial";
+import { listEsp32AgentBoards } from "../esp32-agent/boards";
 import {
   applyEsp32AgentProposal,
   generateEsp32AgentProposal,
@@ -142,7 +143,6 @@ import {
   startEsp32AgentTerminalCommand,
   stopEsp32AgentTerminalCommand,
 } from "../esp32-agent/terminal";
-import { BOTNET_MODEL_OPTIONS } from "../config/botnet-models";
 
 type ButtonHandler = () => void;
 
@@ -457,7 +457,13 @@ export class WebDisplayServer implements WebAudioBridgeServer {
       ctx.set("Cache-Control", "no-store");
       ctx.body = {
         presets: listEsp32AgentPresets(),
-        modelOptions: BOTNET_MODEL_OPTIONS,
+      };
+    });
+
+    this.router.get("/api/esp32-agent/boards", (ctx) => {
+      ctx.set("Cache-Control", "no-store");
+      ctx.body = {
+        boards: listEsp32AgentBoards(),
       };
     });
 
@@ -522,6 +528,7 @@ export class WebDisplayServer implements WebAudioBridgeServer {
           name: getBodyString(body, "name") || "",
           presetId: getBodyString(body, "presetId") || "",
           agentModel: getBodyString(body, "agentModel") || undefined,
+          boardId: getBodyString(body, "boardId") || undefined,
         });
         ctx.body = {
           ok: true,
@@ -755,6 +762,7 @@ export class WebDisplayServer implements WebAudioBridgeServer {
         const project = updateEsp32AgentProjectSettings({
           projectId: String(ctx.params.projectId || ""),
           agentModel: getBodyString(body, "agentModel") || undefined,
+          boardId: getBodyString(body, "boardId") || undefined,
           uploadPort: getBodyString(body, "uploadPort"),
         });
         ctx.body = {

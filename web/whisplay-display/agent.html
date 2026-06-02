@@ -17,7 +17,7 @@
     <section class="agent-sidebar">
       <div class="agent-card">
         <div class="agent-card-title">ESP32 Agent</div>
-        <div class="agent-card-subtitle">Sandboxed PlatformIO workspace for persistent CYD projects.</div>
+        <div class="agent-card-subtitle">Sandboxed PlatformIO workspace for persistent ESP32 projects.</div>
         <div class="agent-actions-top">
           <a class="agent-link-button" href="/" target="_blank" rel="noopener">Open Main UI</a>
         </div>
@@ -30,6 +30,19 @@
 
         <label class="agent-label" for="agentPresetSelect">Preset Template</label>
         <select id="agentPresetSelect" class="agent-select"></select>
+
+        <label class="agent-label" for="agentBoardSelect">Board Target</label>
+        <select id="agentBoardSelect" class="agent-select"></select>
+        <input
+          id="agentCustomBoardId"
+          class="agent-input agent-conditional-input"
+          type="text"
+          placeholder="Custom PlatformIO board ID"
+          hidden
+        />
+        <div class="agent-hint" id="agentCreateBoardHint">
+          Choose a curated board or switch to a custom PlatformIO board ID for unknown hardware.
+        </div>
 
         <label class="agent-label" for="agentModelSelect">Device AI Model</label>
         <select id="agentModelSelect" class="agent-select"></select>
@@ -78,11 +91,28 @@
             </div>
           </div>
         </div>
+        <div class="agent-board-grid">
+          <div>
+            <label class="agent-label" for="agentProjectBoardSelect">Project Board Target</label>
+            <select id="agentProjectBoardSelect" class="agent-select"></select>
+            <input
+              id="agentProjectCustomBoardId"
+              class="agent-input agent-conditional-input"
+              type="text"
+              placeholder="Custom PlatformIO board ID"
+              hidden
+            />
+          </div>
+          <div class="agent-port-actions">
+            <button id="agentSaveBoardBtn" class="agent-button secondary" type="button">Save Board</button>
+          </div>
+        </div>
+        <div id="agentBoardStatus" class="agent-status">No board target loaded.</div>
         <div class="agent-port-grid">
           <div>
             <label class="agent-label" for="agentPortSelect">Detected USB Serial Port</label>
             <select id="agentPortSelect" class="agent-select"></select>
-            <div class="agent-hint">Board preset stays manual. The Pi can reliably detect the serial port and USB bridge details.</div>
+            <div class="agent-hint">Board target stays manual. The Pi can reliably detect the serial port and USB bridge details.</div>
           </div>
           <div class="agent-port-actions">
             <button id="agentRefreshPortsBtn" class="agent-button secondary" type="button">Refresh Ports</button>

@@ -60,6 +60,22 @@ fi
 unzip -o emoji_svg.zip
 cd ..
 
+echo "Installing PlatformIO ESP32 toolchain..."
+export PATH="$HOME/.local/bin:$PATH"
+if ! command_exists pio; then
+    python3 -m pip install --user platformio --break-system-packages
+fi
+
+if command_exists pio; then
+    if [[ "$(uname -m)" =~ ^armv[67]l$ ]] && [ ! -e /lib/ld-linux.so.3 ] && [ -e /lib/ld-linux-armhf.so.3 ]; then
+        sudo ln -s /lib/ld-linux-armhf.so.3 /lib/ld-linux.so.3
+    fi
+    pio platform install espressif32
+else
+    echo "Failed to install PlatformIO Core."
+    exit 1
+fi
+
 
 # Check if git is installed
 # if ! command_exists git; then

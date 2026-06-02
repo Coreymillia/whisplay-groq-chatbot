@@ -12,11 +12,11 @@
       <div>
         <div class="eyebrow">Pi3Groq</div>
         <h1>Whisplay Keyboard Companion</h1>
-        <p class="lede">Type to Whisplay from a local Pi browser UI, while keeping Whisplay as the chatbot brain.</p>
+        <p class="lede">Type to Whisplay from a local Pi browser UI, while the local touch display can run as a full mirror or as an AI screensaver that pops into chat text when Whisplay is active.</p>
       </div>
       <div class="hero-actions">
         <a id="openWhisplayBtn" class="button secondary" href="#" target="_blank" rel="noopener">Open Whisplay UI</a>
-        <a class="button secondary" href="/hdmi" target="_blank" rel="noopener">Open Local HDMI</a>
+        <a class="button secondary" href="/hdmi" target="_blank" rel="noopener">Open Touch Display</a>
       </div>
     </header>
 
@@ -42,6 +42,51 @@
             <option value="2000">2 seconds</option>
             <option value="3000">3 seconds</option>
             <option value="5000">5 seconds</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Touch Display Mode</span>
+          <select id="touchDisplayModeSelect">
+            <option value="slideshow-chat">AI Screensaver + Chat Text</option>
+            <option value="mirror">Full Mirror</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Touch Display Rotation</span>
+          <select id="touchDisplayRotationSelect">
+            <option value="0">0°</option>
+            <option value="90">90°</option>
+            <option value="180">180°</option>
+            <option value="270">270°</option>
+          </select>
+        </label>
+        <div class="field field-toggle">
+          <span>AI Slideshow</span>
+          <label class="checkbox-row" for="slideshowEnabledCheckbox">
+            <input id="slideshowEnabledCheckbox" type="checkbox" />
+            <span>Enable AI gallery screensaver when the touch display is in screensaver mode</span>
+          </label>
+        </div>
+        <label class="field">
+          <span>Slide Interval</span>
+          <select id="slideshowIntervalSelect">
+            <option value="3">3 seconds</option>
+            <option value="5">5 seconds</option>
+            <option value="8">8 seconds</option>
+            <option value="10">10 seconds</option>
+            <option value="15">15 seconds</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Return to Screensaver</span>
+          <select id="chatReturnTimeoutSelect">
+            <option value="5">5 seconds</option>
+            <option value="10">10 seconds</option>
+            <option value="15">15 seconds</option>
+            <option value="20">20 seconds</option>
+            <option value="30">30 seconds</option>
+            <option value="45">45 seconds</option>
+            <option value="60">60 seconds</option>
           </select>
         </label>
         <div class="field field-actions">

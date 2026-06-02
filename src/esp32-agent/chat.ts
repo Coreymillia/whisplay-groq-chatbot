@@ -147,6 +147,8 @@ function buildWorkspaceContext(
   return [
     `Project name: ${project.name}`,
     `Preset: ${project.presetId}`,
+    `Board target: ${project.boardLabel} (${project.boardId})`,
+    `Chip family: ${project.chipFamily}`,
     `Board family: ${project.boardFamily}`,
     `Display profile: ${project.displayProfile}`,
     `Build command: ${project.buildCommand}`,

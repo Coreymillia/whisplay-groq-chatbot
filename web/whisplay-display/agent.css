@@ -250,12 +250,7 @@ body {
   gap: 16px;
 }
 
-.agent-command-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px;
-}
-
+.agent-board-grid,
 .agent-port-grid {
   margin-top: 14px;
   display: grid;
@@ -264,10 +259,20 @@ body {
   align-items: end;
 }
 
+.agent-command-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
 .agent-port-actions {
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
+}
+
+.agent-conditional-input {
+  margin-top: 10px;
 }
 
 .agent-chat-message.assistant {
@@ -387,6 +392,7 @@ body {
   .agent-workspace-grid,
   .agent-command-grid,
   .agent-savepoint-grid,
+  .agent-board-grid,
   .agent-port-grid {
     grid-template-columns: 1fr;
   }

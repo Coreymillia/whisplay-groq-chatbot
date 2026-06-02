@@ -2,6 +2,11 @@ const settingsForm = document.getElementById("settingsForm");
 const modeSelect = document.getElementById("modeSelect");
 const companionBaseUrlInput = document.getElementById("companionBaseUrlInput");
 const pollIntervalSelect = document.getElementById("pollIntervalSelect");
+const touchDisplayModeSelect = document.getElementById("touchDisplayModeSelect");
+const touchDisplayRotationSelect = document.getElementById("touchDisplayRotationSelect");
+const slideshowEnabledCheckbox = document.getElementById("slideshowEnabledCheckbox");
+const slideshowIntervalSelect = document.getElementById("slideshowIntervalSelect");
+const chatReturnTimeoutSelect = document.getElementById("chatReturnTimeoutSelect");
 const settingsStatus = document.getElementById("settingsStatus");
 const companionStatus = document.getElementById("companionStatus");
 const conversationLog = document.getElementById("conversationLog");
@@ -80,6 +85,11 @@ function updateSettingsForm(nextSettings) {
   modeSelect.value = nextSettings.mode || "companion";
   companionBaseUrlInput.value = nextSettings.companionBaseUrl || "";
   pollIntervalSelect.value = String(nextSettings.pollIntervalMs || 2000);
+  touchDisplayModeSelect.value = nextSettings.touchDisplayMode || "slideshow-chat";
+  touchDisplayRotationSelect.value = String(nextSettings.touchDisplayRotationDeg ?? 270);
+  slideshowEnabledCheckbox.checked = nextSettings.slideshowEnabled !== false;
+  slideshowIntervalSelect.value = String(nextSettings.slideshowIntervalSec || 8);
+  chatReturnTimeoutSelect.value = String(nextSettings.chatReturnTimeoutSec || 20);
   const baseUrl = (nextSettings.companionBaseUrl || "").trim();
   openWhisplayBtn.href = baseUrl ? baseUrl : "#";
   openWhisplayBtn.setAttribute("aria-disabled", baseUrl ? "false" : "true");
@@ -173,6 +183,11 @@ async function saveSettings(event) {
         mode: modeSelect.value,
         companionBaseUrl: companionBaseUrlInput.value.trim(),
         pollIntervalMs: Number(pollIntervalSelect.value),
+        touchDisplayMode: touchDisplayModeSelect.value,
+        touchDisplayRotationDeg: Number(touchDisplayRotationSelect.value),
+        slideshowEnabled: slideshowEnabledCheckbox.checked,
+        slideshowIntervalSec: Number(slideshowIntervalSelect.value),
+        chatReturnTimeoutSec: Number(chatReturnTimeoutSelect.value),
       }),
     });
     const payload = await response.json();
@@ -180,7 +195,11 @@ async function saveSettings(event) {
       throw new Error(payload.error || "Failed to save settings.");
     }
     updateSettingsForm(payload.settings);
-    setSaveStatus("Saved. Pi3Groq will now poll the updated Whisplay URL.");
+    setSaveStatus(
+      payload.touchDisplayRotationApplyPending
+        ? "Saved. Pi3Groq is rebooting to apply the new touch display rotation."
+        : "Saved. Pi3Groq will now poll the updated Whisplay URL.",
+    );
     startPolling();
     await pollState();
   } catch (error) {

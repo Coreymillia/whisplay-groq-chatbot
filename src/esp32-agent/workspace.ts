@@ -6,9 +6,16 @@ import {
   DEFAULT_TEXT_LLM_MODEL,
   normalizeTextLlmModel,
 } from "../config/text-llm-models";
+import {
+  DEFAULT_ESP32_AGENT_BOARD_ID,
+  type Esp32AgentChipFamily,
+  type Esp32AgentResolvedBoard,
+  listEsp32AgentBoards,
+  resolveEsp32AgentBoardSelection,
+} from "./boards";
 
-type Esp32AgentBoardFamily = "cyd";
-type Esp32AgentDisplayProfile = "standard" | "inverted";
+type Esp32AgentBoardFamily = "cyd" | "generic";
+type Esp32AgentDisplayProfile = "standard" | "inverted" | "none";
 
 interface Esp32AgentPresetDefinition {
   id: string;
@@ -20,6 +27,8 @@ interface Esp32AgentPresetDefinition {
   buildCommandTemplate: string;
   uploadCommandTemplate: string;
   notes: string[];
+  supportedBoardIds: string[];
+  supportsCustomBoard?: boolean;
   excludedEntries?: string[];
 }
 
@@ -33,6 +42,8 @@ export interface Esp32AgentPresetSummary {
   buildCommandTemplate: string;
   uploadCommandTemplate: string;
   notes: string[];
+  supportedBoardIds: string[];
+  supportsCustomBoard: boolean;
 }
 
 export interface Esp32AgentProjectManifest {
@@ -40,6 +51,9 @@ export interface Esp32AgentProjectManifest {
   name: string;
   slug: string;
   agentModel: string;
+  boardId: string;
+  boardLabel: string;
+  chipFamily: Esp32AgentChipFamily;
   uploadPort: string;
   presetId: string;
   boardFamily: Esp32AgentBoardFamily;
@@ -98,6 +112,9 @@ interface Esp32AgentProjectBundleProject {
   displayProfile: Esp32AgentDisplayProfile;
   templateSourcePath: string;
   agentModel: string;
+  boardId: string;
+  boardLabel: string;
+  chipFamily: Esp32AgentChipFamily;
   uploadPort: string;
 }
 
@@ -129,6 +146,23 @@ const DEFAULT_EXCLUDED_ENTRIES = new Set([
 
 const PRESET_DEFINITIONS: Esp32AgentPresetDefinition[] = [
   {
+    id: "generic-starter",
+    name: "ESP32 Starter (Serial)",
+    description:
+      "Minimal serial-first starter for common ESP32 boards, with no CYD-specific display wiring.",
+    boardFamily: "generic",
+    displayProfile: "none",
+    templateSourcePath: "ESP32AgentTemplates/GenericStarter",
+    buildCommandTemplate: 'pio run -d "{{workspacePath}}"',
+    uploadCommandTemplate: 'pio run -d "{{workspacePath}}" -t upload',
+    notes: [
+      "Best for bring-up on generic dev boards, ESP32-CAM, ESP32-C3, and ESP32-S3 targets.",
+      "Safe starting point for unknown boards because the code only relies on Arduino + Serial.",
+    ],
+    supportedBoardIds: listEsp32AgentBoards().map((entry) => entry.id),
+    supportsCustomBoard: true,
+  },
+  {
     id: "cyd-basic-inverted",
     name: "CYD Starter (Inverted Display)",
     description:
@@ -142,6 +176,7 @@ const PRESET_DEFINITIONS: Esp32AgentPresetDefinition[] = [
       "Best for simple chatbot edits and beginner experiments.",
       "Keeps only the display setup, starter text, and a few drawing primitives.",
     ],
+    supportedBoardIds: ["esp32dev"],
   },
   {
     id: "cyd-basic-standard",
@@ -157,6 +192,7 @@ const PRESET_DEFINITIONS: Esp32AgentPresetDefinition[] = [
       "Best for simple chatbot edits and beginner experiments.",
       "Starts with fill screen, starter text, and simple line/rectangle drawing.",
     ],
+    supportedBoardIds: ["esp32dev"],
     excludedEntries: ["INVERTEDdisplay"],
   },
   {
@@ -173,6 +209,7 @@ const PRESET_DEFINITIONS: Esp32AgentPresetDefinition[] = [
       "Uses the same PlatformIO env as the standard CYD build.",
       "Display inversion is enabled in src/main.cpp via gfx->invertDisplay(true).",
     ],
+    supportedBoardIds: ["esp32dev"],
   },
   {
     id: "cyd-standard",
@@ -188,6 +225,7 @@ const PRESET_DEFINITIONS: Esp32AgentPresetDefinition[] = [
       "Uses the same PlatformIO env as the inverted CYD build.",
       "Keeps the standard display initialization without gfx->invertDisplay(true).",
     ],
+    supportedBoardIds: ["esp32dev"],
     excludedEntries: ["INVERTEDdisplay"],
   },
 ];
@@ -245,6 +283,8 @@ function toPresetSummary(
     buildCommandTemplate: preset.buildCommandTemplate,
     uploadCommandTemplate: preset.uploadCommandTemplate,
     notes: [...preset.notes],
+    supportedBoardIds: [...preset.supportedBoardIds],
+    supportsCustomBoard: preset.supportsCustomBoard === true,
   };
 }
 
@@ -279,16 +319,57 @@ function buildUploadCommand(
   return `${baseCommand} --upload-port ${JSON.stringify(normalizedPort)}`;
 }
 
+function resolveBoardForPresetOrThrow(
+  preset: Esp32AgentPresetDefinition,
+  boardId: unknown,
+): Esp32AgentResolvedBoard {
+  const fallbackBoardId = preset.supportedBoardIds[0] || DEFAULT_ESP32_AGENT_BOARD_ID;
+  const board = resolveEsp32AgentBoardSelection(boardId, fallbackBoardId);
+  if (board.isKnown && preset.supportedBoardIds.includes(board.id)) {
+    return board;
+  }
+  if (!board.isKnown && preset.supportsCustomBoard) {
+    return board;
+  }
+  throw new Error(
+    `${preset.name} does not support the board target "${board.id}".`,
+  );
+}
+
+function updateWorkspacePlatformIoBoard(
+  workspacePath: string,
+  boardId: string,
+): void {
+  const platformIoPath = path.join(workspacePath, "platformio.ini");
+  if (!fs.existsSync(platformIoPath)) {
+    return;
+  }
+  const current = fs.readFileSync(platformIoPath, "utf8");
+  const next = /^\s*board\s*=.*$/m.test(current)
+    ? current.replace(/^\s*board\s*=.*$/m, `board = ${boardId}`)
+    : `${current.trimEnd()}\nboard = ${boardId}\n`;
+  if (next !== current) {
+    fs.writeFileSync(platformIoPath, next, "utf8");
+  }
+}
+
 function hydrateProjectManifest(
   manifest: Esp32AgentProjectManifest,
 ): Esp32AgentProjectManifest {
   const preset = getPresetDefinitionOrThrow(manifest.presetId);
   const normalizedUploadPort = normalizeUploadPort(manifest.uploadPort);
+  const board = resolveBoardForPresetOrThrow(
+    preset,
+    manifest.boardId || DEFAULT_ESP32_AGENT_BOARD_ID,
+  );
   return {
     ...manifest,
     agentModel: normalizeTextLlmModel(
       manifest.agentModel || DEFAULT_TEXT_LLM_MODEL,
     ),
+    boardId: board.id,
+    boardLabel: board.label,
+    chipFamily: board.chipFamily,
     uploadPort: normalizedUploadPort,
     buildCommand: renderCommand(preset.buildCommandTemplate, manifest.workspacePath),
     uploadCommand: buildUploadCommand(
@@ -361,6 +442,7 @@ function createProjectManifest(input: {
   name: string;
   preset: Esp32AgentPresetDefinition;
   agentModel?: string;
+  board: Esp32AgentResolvedBoard;
 }): Esp32AgentProjectManifest {
   ensureProjectsRootExists();
   const trimmedName = input.name.trim();
@@ -387,6 +469,9 @@ function createProjectManifest(input: {
     agentModel: normalizeTextLlmModel(
       input.agentModel || DEFAULT_TEXT_LLM_MODEL,
     ),
+    boardId: input.board.id,
+    boardLabel: input.board.label,
+    chipFamily: input.board.chipFamily,
     uploadPort: "",
     presetId: input.preset.id,
     boardFamily: input.preset.boardFamily,
@@ -606,6 +691,16 @@ function parseProjectBundleOrThrow(bundleContent: string): Esp32AgentProjectBund
       agentModel: normalizeTextLlmModel(
         String(typedBundle.project.agentModel || DEFAULT_TEXT_LLM_MODEL),
       ),
+      boardId: String(
+        typedBundle.project.boardId || DEFAULT_ESP32_AGENT_BOARD_ID,
+      ),
+      boardLabel: String(typedBundle.project.boardLabel || ""),
+      chipFamily:
+        typedBundle.project.chipFamily === "esp32c3" ||
+        typedBundle.project.chipFamily === "esp32s3" ||
+        typedBundle.project.chipFamily === "unknown"
+          ? typedBundle.project.chipFamily
+          : "esp32",
       uploadPort: normalizeUploadPort(typedBundle.project.uploadPort),
     },
     files: typedBundle.files.map((entry) => ({
@@ -643,10 +738,12 @@ export function createEsp32AgentProject(input: {
   name: string;
   presetId: string;
   agentModel?: string;
+  boardId?: string;
 }): Esp32AgentProjectManifest {
   const preset = getPresetDefinitionOrThrow(input.presetId);
   const templatePath = resolveTemplatePath(preset.templateSourcePath);
   ensureTemplateExists(templatePath);
+  const board = resolveBoardForPresetOrThrow(preset, input.boardId);
 
   const excludedEntries = new Set(DEFAULT_EXCLUDED_ENTRIES);
   for (const entry of preset.excludedEntries || []) {
@@ -657,8 +754,10 @@ export function createEsp32AgentProject(input: {
     name: input.name,
     preset,
     agentModel: input.agentModel,
+    board,
   });
   copyTemplateTree(templatePath, manifest.workspacePath, excludedEntries);
+  updateWorkspacePlatformIoBoard(manifest.workspacePath, manifest.boardId);
   return manifest;
 }
 
@@ -667,13 +766,16 @@ export function importEsp32AgentProject(
 ): Esp32AgentProjectManifest {
   const bundle = parseProjectBundleOrThrow(bundleContent);
   const preset = getPresetDefinitionOrThrow(bundle.project.presetId);
+  const board = resolveBoardForPresetOrThrow(preset, bundle.project.boardId);
   const manifest = createProjectManifest({
     name: bundle.project.name,
     preset,
     agentModel: bundle.project.agentModel,
+    board,
   });
 
   restoreWorkspaceSnapshot(manifest.workspacePath, bundle.files);
+  updateWorkspacePlatformIoBoard(manifest.workspacePath, manifest.boardId);
   writeProjectErrorLog(manifest.projectRoot, bundle.errorLog);
 
   for (const checkpoint of bundle.checkpoints) {
@@ -796,16 +898,29 @@ export function getEsp32AgentProject(projectId: string): Esp32AgentProjectManife
 export function updateEsp32AgentProjectSettings(input: {
   projectId: string;
   agentModel?: string;
+  boardId?: string;
   uploadPort?: string;
 }): Esp32AgentProjectManifest {
-  return updateProjectManifest(input.projectId, (project) => ({
-    ...project,
-    agentModel: normalizeTextLlmModel(input.agentModel || project.agentModel),
-    uploadPort:
-      typeof input.uploadPort === "string"
-        ? normalizeUploadPort(input.uploadPort)
-        : project.uploadPort,
-  }));
+  const updatedProject = updateProjectManifest(input.projectId, (project) => {
+    const preset = getPresetDefinitionOrThrow(project.presetId);
+    const board = resolveBoardForPresetOrThrow(
+      preset,
+      typeof input.boardId === "string" ? input.boardId : project.boardId,
+    );
+    return {
+      ...project,
+      agentModel: normalizeTextLlmModel(input.agentModel || project.agentModel),
+      boardId: board.id,
+      boardLabel: board.label,
+      chipFamily: board.chipFamily,
+      uploadPort:
+        typeof input.uploadPort === "string"
+          ? normalizeUploadPort(input.uploadPort)
+          : project.uploadPort,
+    };
+  });
+  updateWorkspacePlatformIoBoard(updatedProject.workspacePath, updatedProject.boardId);
+  return updatedProject;
 }
 
 export function listEsp32AgentProjectFiles(
@@ -997,6 +1112,9 @@ export function exportEsp32AgentProject(projectId: string): {
       displayProfile: project.displayProfile,
       templateSourcePath: project.templateSourcePath,
       agentModel: project.agentModel,
+      boardId: project.boardId,
+      boardLabel: project.boardLabel,
+      chipFamily: project.chipFamily,
       uploadPort: project.uploadPort,
     },
     files: collectWorkspaceSnapshotFiles(project.workspacePath),

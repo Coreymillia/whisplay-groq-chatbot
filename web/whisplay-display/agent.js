@@ -1,4 +1,7 @@
 const presetSelect = document.getElementById("agentPresetSelect");
+const createBoardSelect = document.getElementById("agentBoardSelect");
+const createCustomBoardInput = document.getElementById("agentCustomBoardId");
+const createBoardHint = document.getElementById("agentCreateBoardHint");
 const modelSelect = document.getElementById("agentModelSelect");
 const projectNameInput = document.getElementById("agentProjectName");
 const createBtn = document.getElementById("agentCreateBtn");
@@ -14,11 +17,15 @@ const uploadCommandInput = document.getElementById("agentUploadCommand");
 const copyBuildBtn = document.getElementById("agentCopyBuildBtn");
 const copyUploadBtn = document.getElementById("agentCopyUploadBtn");
 const saveModelBtn = document.getElementById("agentSaveModelBtn");
+const projectBoardSelect = document.getElementById("agentProjectBoardSelect");
+const projectCustomBoardInput = document.getElementById("agentProjectCustomBoardId");
+const saveBoardBtn = document.getElementById("agentSaveBoardBtn");
 const exportBtn = document.getElementById("agentExportBtn");
 const portSelect = document.getElementById("agentPortSelect");
 const refreshPortsBtn = document.getElementById("agentRefreshPortsBtn");
 const savePortBtn = document.getElementById("agentSavePortBtn");
 const portStatus = document.getElementById("agentPortStatus");
+const boardStatus = document.getElementById("agentBoardStatus");
 const terminalInput = document.getElementById("agentTerminalInput");
 const terminalOutput = document.getElementById("agentTerminalOutput");
 const runTerminalBtn = document.getElementById("agentRunTerminalBtn");
@@ -55,6 +62,7 @@ const fixFromErrorBtn = document.getElementById("agentFixFromErrorBtn");
 const errorStatus = document.getElementById("agentErrorStatus");
 
 let presets = [];
+let boards = [];
 let modelOptions = [];
 let projects = [];
 let checkpoints = [];
@@ -67,6 +75,8 @@ let defaultAgentPersonalityPrompt = "";
 let defaultErrorAgentPersonalityPrompt = "";
 let terminalState = null;
 let terminalPollTimer = null;
+
+const CUSTOM_BOARD_OPTION_VALUE = "__custom__";
 
 function setText(node, value) {
   if (node) node.textContent = value;
@@ -175,6 +185,116 @@ function populatePresetOptions() {
   });
 }
 
+function getPresetById(presetId) {
+  return presets.find((preset) => preset.id === presetId) || null;
+}
+
+function getBoardById(boardId) {
+  return boards.find((board) => board.id === boardId) || null;
+}
+
+function getCompatibleBoardsForPreset(presetId) {
+  const preset = getPresetById(presetId);
+  if (!preset) {
+    return boards.slice();
+  }
+  const supported = Array.isArray(preset.supportedBoardIds)
+    ? preset.supportedBoardIds
+    : [];
+  return boards.filter((board) => supported.includes(board.id));
+}
+
+function presetSupportsCustomBoard(presetId) {
+  return getPresetById(presetId)?.supportsCustomBoard === true;
+}
+
+function populateBoardOptions(selectNode, customInputNode, selectedValue, presetId) {
+  if (!selectNode) return;
+  const compatibleBoards = getCompatibleBoardsForPreset(presetId);
+  const supportsCustom = presetSupportsCustomBoard(presetId);
+  selectNode.innerHTML = "";
+
+  compatibleBoards.forEach((board) => {
+    const option = document.createElement("option");
+    option.value = board.id;
+    option.textContent = board.label;
+    selectNode.appendChild(option);
+  });
+
+  if (supportsCustom) {
+    const option = document.createElement("option");
+    option.value = CUSTOM_BOARD_OPTION_VALUE;
+    option.textContent = "Custom PlatformIO board ID";
+    selectNode.appendChild(option);
+  }
+
+  const selectedKnownBoard = getBoardById(selectedValue || "");
+  if (selectedKnownBoard && compatibleBoards.some((board) => board.id === selectedKnownBoard.id)) {
+    selectNode.value = selectedKnownBoard.id;
+    if (customInputNode) {
+      customInputNode.hidden = true;
+    }
+    return;
+  }
+
+  if (supportsCustom && selectedValue && !selectedKnownBoard) {
+    selectNode.value = CUSTOM_BOARD_OPTION_VALUE;
+    if (customInputNode) {
+      customInputNode.hidden = false;
+      customInputNode.value = selectedValue;
+    }
+    return;
+  }
+
+  selectNode.value = compatibleBoards[0]?.id || (supportsCustom ? CUSTOM_BOARD_OPTION_VALUE : "");
+  if (customInputNode) {
+    customInputNode.hidden = selectNode.value !== CUSTOM_BOARD_OPTION_VALUE;
+    if (selectNode.value !== CUSTOM_BOARD_OPTION_VALUE) {
+      customInputNode.value = "";
+    }
+  }
+}
+
+function getSelectedBoardValue(selectNode, customInputNode) {
+  if (!selectNode) {
+    return "";
+  }
+  if (selectNode.value === CUSTOM_BOARD_OPTION_VALUE) {
+    return customInputNode?.value?.trim() || "";
+  }
+  return selectNode.value || "";
+}
+
+function updateCreateBoardHint() {
+  if (!createBoardHint) return;
+  const selectedBoardId = getSelectedBoardValue(
+    createBoardSelect,
+    createCustomBoardInput,
+  );
+  const board = getBoardById(selectedBoardId);
+  const preset = getPresetById(presetSelect?.value || "");
+  if (board) {
+    setText(
+      createBoardHint,
+      `${board.description} ${preset?.supportsCustomBoard ? "You can also switch to a custom PlatformIO board ID." : ""}`.trim(),
+    );
+    return;
+  }
+  setText(
+    createBoardHint,
+    selectedBoardId
+      ? `Custom PlatformIO board ID: ${selectedBoardId}`
+      : "Choose a curated board or switch to a custom PlatformIO board ID for unknown hardware.",
+  );
+}
+
+function findSavedPortSummary() {
+  if (!activeProject?.uploadPort) {
+    return null;
+  }
+  return serialPorts.find((port) => port.path === activeProject.uploadPort) || null;
+}
+
 function populateModelOptions(selectedValue) {
   if (!modelSelect) return;
   modelSelect.innerHTML = "";
@@ -235,7 +355,7 @@ function renderProjects() {
 
     const meta = document.createElement("div");
     meta.className = "agent-project-meta";
-    meta.textContent = `${project.presetId} · ${project.displayProfile} display`;
+    meta.textContent = `${project.boardLabel || project.boardId} · ${project.presetId}`;
 
     item.appendChild(name);
     item.appendChild(meta);
@@ -320,8 +440,16 @@ function renderWorkspaceSummary() {
     if (uploadCommandInput) uploadCommandInput.value = "";
     if (exportBtn) exportBtn.disabled = true;
     if (savePortBtn) savePortBtn.disabled = true;
+    if (saveBoardBtn) saveBoardBtn.disabled = true;
     if (sendBtn) sendBtn.disabled = true;
     if (fixFromErrorBtn) fixFromErrorBtn.disabled = true;
+    populateBoardOptions(
+      projectBoardSelect,
+      projectCustomBoardInput,
+      "",
+      presetSelect?.value || presets[0]?.id || "",
+    );
+    setText(boardStatus, "Select a project to choose a board target.");
     setText(portStatus, serialPorts.length ? "Select a project to save a flash port." : "No USB serial ports loaded.");
     setText(chatStatus, "Select a project to start chatting with the ESP32 Agent.");
     setText(savepointStatus, "Select a project to use savepoints.");
@@ -337,14 +465,35 @@ function renderWorkspaceSummary() {
   setText(workspaceTitle, activeProject.name);
   setText(
     workspaceSubtitle,
-    `${activeProject.presetId} · ${activeProject.displayProfile} display · stored in sandbox workspace`,
+    `${activeProject.boardLabel || activeProject.boardId} · ${activeProject.presetId} · ${
+      activeProject.displayProfile === "none"
+        ? "no fixed display profile"
+        : `${activeProject.displayProfile} display`
+    }`,
   );
   if (buildCommandInput) buildCommandInput.value = activeProject.buildCommand || "";
   if (uploadCommandInput) uploadCommandInput.value = activeProject.uploadCommand || "";
   if (exportBtn) exportBtn.disabled = false;
   if (savePortBtn) savePortBtn.disabled = false;
+  if (saveBoardBtn) saveBoardBtn.disabled = false;
   if (sendBtn) sendBtn.disabled = false;
    if (fixFromErrorBtn) fixFromErrorBtn.disabled = false;
+  populateBoardOptions(
+    projectBoardSelect,
+    projectCustomBoardInput,
+    activeProject.boardId || "",
+    activeProject.presetId,
+  );
+  const savedPort = findSavedPortSummary();
+  const boardSummary = activeProject.boardLabel
+    ? `${activeProject.boardLabel} (${activeProject.boardId})`
+    : activeProject.boardId || "No board target saved";
+  setText(
+    boardStatus,
+    savedPort?.suggestedBoardId && savedPort.suggestedBoardId !== activeProject.boardId
+      ? `Saved board target: ${boardSummary}. Detected port looks more like ${savedPort.suggestedBoardLabel}.`
+      : `Saved board target: ${boardSummary}.`,
+  );
   populateSerialPortOptions(activeProject.uploadPort || "");
   setText(
     portStatus,
@@ -451,7 +600,32 @@ async function loadPresets() {
   const data = await fetchJson("/api/esp32-agent/presets", { cache: "no-store" });
   presets = Array.isArray(data.presets) ? data.presets : [];
   populatePresetOptions();
+  populateBoardOptions(
+    createBoardSelect,
+    createCustomBoardInput,
+    getSelectedBoardValue(createBoardSelect, createCustomBoardInput),
+    presetSelect?.value || presets[0]?.id || "",
+  );
+  updateCreateBoardHint();
   setText(createStatus, "Choose a preset and create or import a sandbox project.");
+}
+
+async function loadBoards() {
+  const data = await fetchJson("/api/esp32-agent/boards", { cache: "no-store" });
+  boards = Array.isArray(data.boards) ? data.boards : [];
+  populateBoardOptions(
+    createBoardSelect,
+    createCustomBoardInput,
+    getSelectedBoardValue(createBoardSelect, createCustomBoardInput),
+    presetSelect?.value || presets[0]?.id || "",
+  );
+  populateBoardOptions(
+    projectBoardSelect,
+    projectCustomBoardInput,
+    activeProject?.boardId || "",
+    activeProject?.presetId || presetSelect?.value || presets[0]?.id || "",
+  );
+  updateCreateBoardHint();
 }
 
 async function loadGlobalSettings() {
@@ -479,6 +653,7 @@ async function loadSerialPorts() {
   const data = await fetchJson("/api/esp32-agent/serial-ports", { cache: "no-store" });
   serialPorts = Array.isArray(data.ports) ? data.ports : [];
   populateSerialPortOptions(activeProject?.uploadPort || "");
+  const suggestedPort = serialPorts.find((port) => port.suggestedBoardId);
   if (!serialPorts.length) {
     setText(portStatus, "No USB serial ports detected on the Pi right now.");
     return;
@@ -489,9 +664,11 @@ async function loadSerialPorts() {
   }
   setText(
     portStatus,
-    serialPorts.length === 1
-      ? "Detected 1 USB serial port. You can save it to this project."
-      : `Detected ${serialPorts.length} USB serial ports. Choose one for flashing.`,
+    suggestedPort?.suggestedBoardLabel
+      ? `Detected ${serialPorts.length} USB serial port${serialPorts.length === 1 ? "" : "s"}. One port looks like ${suggestedPort.suggestedBoardLabel}.`
+      : serialPorts.length === 1
+        ? "Detected 1 USB serial port. You can save it to this project."
+        : `Detected ${serialPorts.length} USB serial ports. Choose one for flashing.`,
   );
 }
 
@@ -602,8 +779,13 @@ async function selectProject(projectId) {
 
 async function createProject() {
   const name = projectNameInput?.value?.trim() || "";
+  const boardId = getSelectedBoardValue(createBoardSelect, createCustomBoardInput);
   if (!name) {
     setText(createStatus, "Enter a project name first.");
+    return;
+  }
+  if (!boardId) {
+    setText(createStatus, "Choose a board target first.");
     return;
   }
   setText(createStatus, "Creating sandbox project…");
@@ -613,6 +795,7 @@ async function createProject() {
     body: JSON.stringify({
       name,
       presetId: presetSelect?.value || "",
+      boardId,
       agentModel: modelSelect?.value || "",
     }),
   });
@@ -1037,6 +1220,32 @@ async function queueCommandToTerminal(command, statusNode, successMessage) {
   }
 }
 
+async function saveProjectBoard() {
+  if (!activeProject) {
+    setText(boardStatus, "Select a project first.");
+    return;
+  }
+  const boardId = getSelectedBoardValue(projectBoardSelect, projectCustomBoardInput);
+  if (!boardId) {
+    setText(boardStatus, "Choose a board target first.");
+    return;
+  }
+  setText(boardStatus, "Saving board target…");
+  const data = await fetchJson(
+    `/api/esp32-agent/projects/${escapePathSegment(activeProject.id)}/settings`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        boardId,
+      }),
+    },
+  );
+  activeProject = data.project || activeProject;
+  await loadProjects();
+  renderWorkspaceSummary();
+}
+
 async function copyText(value, statusNode, successMessage) {
   if (!value) return;
   await navigator.clipboard.writeText(value);
@@ -1047,6 +1256,31 @@ createBtn?.addEventListener("click", () => {
   void createProject().catch((error) => {
     setText(createStatus, error instanceof Error ? error.message : "Failed to create project.");
   });
+});
+
+presetSelect?.addEventListener("change", () => {
+  populateBoardOptions(
+    createBoardSelect,
+    createCustomBoardInput,
+    getSelectedBoardValue(createBoardSelect, createCustomBoardInput),
+    presetSelect.value,
+  );
+  updateCreateBoardHint();
+});
+
+createBoardSelect?.addEventListener("change", () => {
+  if (createCustomBoardInput) {
+    createCustomBoardInput.hidden =
+      createBoardSelect.value !== CUSTOM_BOARD_OPTION_VALUE;
+    if (createCustomBoardInput.hidden) {
+      createCustomBoardInput.value = "";
+    }
+  }
+  updateCreateBoardHint();
+});
+
+createCustomBoardInput?.addEventListener("input", () => {
+  updateCreateBoardHint();
 });
 
 importBtn?.addEventListener("click", () => {
@@ -1079,6 +1313,22 @@ refreshPortsBtn?.addEventListener("click", () => {
 savePortBtn?.addEventListener("click", () => {
   void saveProjectPort().catch((error) => {
     setText(portStatus, error instanceof Error ? error.message : "Failed to save flash port.");
+  });
+});
+
+projectBoardSelect?.addEventListener("change", () => {
+  if (projectCustomBoardInput) {
+    projectCustomBoardInput.hidden =
+      projectBoardSelect.value !== CUSTOM_BOARD_OPTION_VALUE;
+    if (projectCustomBoardInput.hidden) {
+      projectCustomBoardInput.value = "";
+    }
+  }
+});
+
+saveBoardBtn?.addEventListener("click", () => {
+  void saveProjectBoard().catch((error) => {
+    setText(boardStatus, error instanceof Error ? error.message : "Failed to save board target.");
   });
 });
 
@@ -1205,6 +1455,7 @@ refreshTerminalBtn?.addEventListener("click", () => {
 
 Promise.all([
   loadPresets(),
+  loadBoards(),
   loadGlobalSettings(),
   loadAgentSettings(),
   loadSerialPorts(),

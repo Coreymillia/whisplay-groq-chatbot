@@ -3,26 +3,51 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Pi3Groq HDMI Mirror</title>
+  <title>Pi3Groq Touch Display</title>
   <link rel="stylesheet" href="/static/styles.css" />
 </head>
-<body class="hdmi-body">
-  <main class="hdmi-shell">
-    <header class="hdmi-header">
-      <div class="eyebrow">Pi3Groq HDMI</div>
+<body class="hdmi-body touch-body">
+  <main class="hdmi-shell touch-shell">
+    <header class="hdmi-header touch-header">
+      <div class="eyebrow">Pi3Groq Touch Display</div>
       <div id="hdmiStatus" class="hdmi-status">Waiting for Whisplay...</div>
       <div id="hdmiMeta" class="muted">No companion connection yet.</div>
     </header>
-    <section class="hdmi-content">
-      <div class="hdmi-copy">
-        <div id="hdmiEmoji" class="hdmi-emoji">🙂</div>
-        <pre id="hdmiText" class="hdmi-text">Start the local Pi3Groq app and save the Whisplay URL to begin.</pre>
+    <section class="touch-display">
+      <div id="slideshowView" class="display-layer slideshow-view" hidden>
+        <img id="slideshowImage" alt="Pi3Groq AI slideshow" class="slideshow-image" hidden />
+        <div id="slideshowEmpty" class="slideshow-empty">No AI slideshow images yet.</div>
+        <div class="slideshow-overlay">
+          <div id="slideshowModeLabel" class="mode-pill">AI Slideshow</div>
+          <div id="slideshowCaption" class="slideshow-caption">Waiting for generated images...</div>
+          <div id="slideshowCounter" class="slideshow-counter">0 / 0</div>
+        </div>
       </div>
-      <div class="hdmi-image-wrap">
-        <img id="hdmiImage" alt="Current Whisplay image" class="hdmi-image" hidden />
-        <div id="hdmiImageEmpty" class="muted">No active Whisplay image.</div>
+      <div id="chatView" class="display-layer chat-view" hidden>
+        <div class="mirror-topline">
+          <div id="chatModeLabel" class="mode-pill">Chat Text</div>
+          <div id="chatEmoji" class="hdmi-emoji mirror-emoji">🙂</div>
+        </div>
+        <div id="chatStatusLine" class="chat-status-line">Waiting for Whisplay...</div>
+        <pre id="chatText" class="hdmi-text chat-text">Start the local Pi3Groq app and save the Whisplay URL to begin.</pre>
+      </div>
+      <div id="mirrorView" class="display-layer mirror-view">
+        <div class="mirror-topline">
+          <div id="mirrorModeLabel" class="mode-pill">Mirror Mode</div>
+          <div id="hdmiEmoji" class="hdmi-emoji mirror-emoji">🙂</div>
+        </div>
+        <pre id="hdmiText" class="hdmi-text mirror-text">Start the local Pi3Groq app and save the Whisplay URL to begin.</pre>
+        <div class="mirror-image-wrap">
+          <img id="hdmiImage" alt="Current Whisplay image" class="hdmi-image" hidden />
+          <div id="hdmiImageEmpty" class="muted">No active Whisplay image.</div>
+        </div>
       </div>
     </section>
+    <footer id="touchControls" class="touch-controls">
+      <button id="prevSlideBtn" class="button secondary" type="button">Prev</button>
+      <button id="refreshSlidesBtn" class="button secondary" type="button">Refresh</button>
+      <button id="nextSlideBtn" class="button secondary" type="button">Next</button>
+    </footer>
   </main>
 
   <script src="/static/hdmi.js"></script>

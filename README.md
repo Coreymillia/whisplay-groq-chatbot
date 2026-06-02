@@ -128,8 +128,8 @@ Official Google docs clearly show **free vs paid tiers**, billing tiers, and mod
 - **Expanded AI model selector:** the shared browser / ESP32 Agent text-model selector now includes **Llama 3.1 8B**, **Llama 3.3 70B**, **Llama 4 Scout 17B 16E**, **Qwen3 32B**, **Groq Compound**, **Groq Compound Mini**, **GPT-OSS 20B**, **GPT-OSS 120B**, **Gemini 2.5 Flash**, **Gemini 2.5 Flash-Lite**, and **Gemini 2.5 Pro**
 - **Persona Relay mode:** a new GroqBotNet mode where you tell your bot what to send, your local bot rewrites that prompt in character, and the peer bot replies once without falling into an endless loop
 - **Online GroqBotNet groundwork:** Whisplay and the standalone Zero node now both support an **Online Hub** transport with node registration, hub connect/disconnect, and invite create/redeem controls for relay-based internet testing
-- **ESP32 Agent workspace:** `/agent` now provides persistent sandbox projects, a file tree/editor, import/export bundles, savepoints, separate coding and error-fix personalities, Pi-side USB serial-port detection, an in-browser terminal, persistent per-project Agent chat, proposed file operations, and apply-to-sandbox with an automatic savepoint
-- **Safer ESP32 Agent presets:** the Agent now includes **minimal CYD Starter** presets alongside the full Companion CYD presets, plus bot-side guardrails that lock `platformio.ini` from agent edits and reject empty source-file writes
+- **ESP32 Agent workspace:** `/agent` now provides persistent sandbox projects, a file tree/editor, import/export bundles, savepoints, separate coding and error-fix personalities, Pi-side USB serial-port detection with board hints, curated board targets, an in-browser terminal, persistent per-project Agent chat, proposed file operations, and apply-to-sandbox with an automatic savepoint
+- **Safer ESP32 Agent presets:** the Agent now includes a new **generic ESP32 serial starter** alongside the existing **CYD Starter** and full Companion CYD presets, plus bot-side guardrails that lock `platformio.ini` from agent edits and reject empty source-file writes
 - **Room monitor gallery split:** the browser now exposes a dedicated **Room Monitor Gallery** with daily folders plus a separate **Saved Gallery** that moves selected files instead of copying them and supports fullscreen slideshow viewing
 - **GroqBotNet three-screen companion stack:** the current GroqBotNet setup now spans a **top OLED**, **bottom SPI**, and **external HalloWing**, with the HalloWing mirroring Whisplay companion fields over UART while the bottom SPI keeps the AI screensaver / reader role
 
@@ -195,7 +195,8 @@ The Pi-hosted browser UI now includes an **ESP32 Agent** page at **`/agent`**. T
 ### Current ESP32 Agent features
 
 - **Persistent sandbox projects:** create and reopen projects without losing work
-- **Preset templates:** includes both **Companion CYD** presets and simpler **CYD Starter** presets for beginner display tasks like fill screen, text, lines, and basic shapes
+- **Preset templates:** includes both **Companion CYD** presets, simpler **CYD Starter** presets for beginner display tasks, and a **generic ESP32 serial starter** for non-CYD boards
+- **Curated board catalog:** project creation now separates the **template preset** from the **PlatformIO board target**, with a curated list of common ESP32 boards plus a custom board-ID fallback for unknown hardware
 - **File system view:** browse and edit sandbox files directly in the browser
 - **Import / export:** move whole projects around as JSON project bundles
 - **Savepoints:** create, list, and restore exact workspace snapshots
@@ -204,13 +205,13 @@ The Pi-hosted browser UI now includes an **ESP32 Agent** page at **`/agent`**. T
 - **Agent chat + apply flow:** ask the coding agent for changes, review proposed file operations, then apply them into the sandbox with an automatic savepoint first
 - **Fix From Saved Error:** reuse the saved PlatformIO error text with the separate error-fix personality to generate a tighter repair proposal
 - **Browser terminal:** run build or upload commands inside the sandbox from the browser and inspect the output without leaving `/agent`
-- **USB serial detection:** the Pi can list detected serial ports for flashing, while board choice remains manual through the preset selector
+- **USB serial detection + hints:** the Pi can list detected serial ports for flashing and now shows a best-effort likely board hint from USB bridge/device strings without forcing that guess into the project
 - **Guardrails for weak models:** the agent now treats `platformio.ini` as locked, blocks deletes of `src/main.cpp`, and rejects empty writes to source files
 
 ### Current workflow
 
 1. Open `/agent`
-2. Create a sandbox project from a preset template
+2. Create a sandbox project from a preset template and board target
 3. Edit files manually or ask the Agent to propose changes
 4. Review the proposed file operations
 5. Apply them into the sandbox
@@ -219,11 +220,27 @@ The Pi-hosted browser UI now includes an **ESP32 Agent** page at **`/agent`**. T
 
 ### Current limitations
 
-- board detection is still **manual by preset**, even when the Pi can see a USB serial device
+- serial board detection is still only a **best-effort hint**, so the saved project board target should be treated as the source of truth
+- CYD display presets are still CYD-only; other boards should start from the generic serial starter unless a board-specific template exists
 - weaker free-tier models can still produce bad edits if the prompt is broad or the template is too complex
 - free-tier Groq token limits can be hit quickly when large build logs are pasted back into the agent, so the current best workflow is still to paste only the failing tail of the error
 - context is intentionally trimmed to the file tree plus prioritized key files so lower-token Groq models still work reliably
 - staying on the free tier for now may slow deeper coding-agent testing, so broader ESP32 Agent work may remain partially on hold until the current guardrails and starter templates prove themselves
+
+### Current curated board targets
+
+- **`esp32dev`** — generic ESP32 DevKit / WROOM boards and CYD-base hardware
+- **`esp32cam`** — ESP32-CAM / AI Thinker style boards
+- **`esp32c3dev`** — common ESP32-C3 development boards
+- **`esp32-s3-devkitc-1`** — standard Espressif ESP32-S3 DevKitC-1 boards
+- **`m5stack-core2`** — M5Stack Core2
+- **`adafruit_feather_esp32s3_tft`** — Adafruit Feather ESP32-S3 TFT
+- **Custom PlatformIO board ID** — for boards outside the curated list
+
+### Toolchain setup on the Pi
+
+- `install_dependencies.sh` now installs **PlatformIO Core** into `~/.local/bin` and pre-installs the **`espressif32`** platform so the ESP32 Agent terminal can run `pio` builds without separate manual bootstrap on a fresh Pi.
+- On 32-bit Raspberry Pi OS (`armv6l` / `armv7l`), the installer now also adds the `/lib/ld-linux.so.3` compatibility symlink when only `/lib/ld-linux-armhf.so.3` exists, because the current PlatformIO Xtensa compiler package expects that older loader path.
 
 ### Proposed next ESP32 Agent direction
 
