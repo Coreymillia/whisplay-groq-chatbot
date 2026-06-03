@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Pi3Groq Companion</title>
   <link rel="stylesheet" href="/static/styles.css" />
+  <link rel="stylesheet" href="/static/vendor/xterm/xterm.css" />
 </head>
 <body>
   <main class="shell">
@@ -146,8 +147,68 @@
         </div>
       </aside>
     </section>
+
+    <section class="panel pi-agent-panel">
+      <div class="panel-header">
+        <div>
+          <div class="panel-title">PiAgent Browser Terminal</div>
+          <div id="piAgentStatus" class="muted">Checking local PiAgent runtime...</div>
+        </div>
+        <div class="composer-actions">
+          <button class="button secondary" id="piAgentStartBtn" type="button">Start PiAgent</button>
+          <button class="button secondary" id="piAgentStopBtn" type="button">Stop PiAgent</button>
+        </div>
+      </div>
+      <div class="muted pi-agent-note">PiAgent runs unchanged on the Pi3 companion. Use the terminal below for <code>/login</code>, model selection, and chat.</div>
+      <div id="piAgentTerminal" class="pi-agent-terminal"></div>
+
+      <div class="pi-agent-projects-grid">
+        <aside class="pi-agent-project-sidebar">
+          <div class="panel-title">PiAgent Projects</div>
+          <label class="field">
+            <span>Project Name</span>
+            <input id="piAgentProjectName" type="text" placeholder="ESP32 Blink Test" />
+          </label>
+          <label class="field">
+            <span>Starter Brief</span>
+            <textarea id="piAgentProjectStarter" rows="4" placeholder="Simple text to describe what this project should be. It will be saved into README.md for PiAgent to see."></textarea>
+          </label>
+          <div class="composer-actions">
+            <button class="button secondary" id="piAgentProjectCreateBtn" type="button">Create Project</button>
+          </div>
+          <div id="piAgentProjectStatus" class="muted">Create a lightweight project sandbox, then start PiAgent inside it.</div>
+          <div id="piAgentProjectsList" class="pi-agent-project-list"></div>
+        </aside>
+
+        <section class="pi-agent-project-workspace">
+          <div class="panel-title">Project Workspace</div>
+          <div id="piAgentWorkspaceStatus" class="muted">Select a PiAgent project to view its files.</div>
+          <div class="pi-agent-workspace-grid">
+            <div class="pi-agent-tree-card">
+              <div class="field-label">Files</div>
+              <div id="piAgentFileTree" class="pi-agent-file-tree"></div>
+            </div>
+            <div class="pi-agent-editor-card">
+              <div class="panel-header">
+                <div>
+                  <div class="field-label">Editor</div>
+                  <div id="piAgentFilePath" class="muted">Choose a file from the project tree.</div>
+                </div>
+                <div class="composer-actions">
+                  <button class="button secondary" id="piAgentSaveFileBtn" type="button">Save File</button>
+                </div>
+              </div>
+              <textarea id="piAgentFileEditor" class="pi-agent-file-editor" spellcheck="false" placeholder="File contents will appear here when you open a project file."></textarea>
+              <div id="piAgentEditorStatus" class="muted">No file loaded.</div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </section>
   </main>
 
+  <script src="/static/vendor/xterm/xterm.js"></script>
+  <script src="/static/vendor/xterm/addon-fit.js"></script>
   <script src="/static/app.js"></script>
 </body>
 </html>

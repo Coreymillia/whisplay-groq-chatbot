@@ -259,6 +259,112 @@ textarea {
   gap: 12px;
 }
 
+.pi-agent-panel {
+  margin-top: 16px;
+  padding: 18px;
+}
+
+.pi-agent-note {
+  margin-bottom: 12px;
+}
+
+.pi-agent-terminal {
+  min-height: 480px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: #05080d;
+  overflow: hidden;
+  padding: 6px;
+}
+
+.pi-agent-terminal .xterm {
+  padding: 8px;
+}
+
+.pi-agent-projects-grid {
+  display: grid;
+  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
+  gap: 16px;
+  margin-top: 18px;
+}
+
+.pi-agent-project-sidebar,
+.pi-agent-project-workspace,
+.pi-agent-tree-card,
+.pi-agent-editor-card {
+  background: rgba(10, 16, 24, 0.6);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 14px;
+}
+
+.pi-agent-project-list,
+.pi-agent-file-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 420px;
+  overflow: auto;
+  margin-top: 12px;
+}
+
+.pi-agent-project-item,
+.pi-agent-tree-node {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  padding: 10px 12px;
+}
+
+.pi-agent-project-button,
+.pi-agent-tree-button {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  padding: 0;
+  cursor: pointer;
+}
+
+.pi-agent-project-button.active,
+.pi-agent-tree-button.active {
+  color: var(--accent);
+}
+
+.pi-agent-project-meta {
+  color: var(--muted);
+  font-size: 0.85rem;
+  margin-top: 6px;
+}
+
+.pi-agent-workspace-grid {
+  display: grid;
+  grid-template-columns: minmax(240px, 320px) minmax(0, 1fr);
+  gap: 16px;
+  margin-top: 12px;
+}
+
+.pi-agent-tree-children {
+  margin-top: 8px;
+  margin-left: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pi-agent-file-editor {
+  min-height: 420px;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+}
+
+@media (max-width: 1100px) {
+  .pi-agent-projects-grid,
+  .pi-agent-workspace-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .preview-box {
   border: 1px solid var(--border);
   border-radius: 14px;

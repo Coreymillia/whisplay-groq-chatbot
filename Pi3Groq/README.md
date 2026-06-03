@@ -47,6 +47,7 @@ The first software pass is browser-first so the local companion flow can be test
 
 ```bash
 cd Pi3Groq
+python3 -m pip install --user -r requirements.txt
 python3 app.py
 ```
 
@@ -67,6 +68,34 @@ Pi3Groq currently saves:
 - `slideshowEnabled` - whether idle AI slideshow mode runs on the touch display
 - `slideshowIntervalSec` - touch-display AI slide interval
 - `chatReturnTimeoutSec` - how long the touch display stays on chat text before returning to the slideshow
+
+## PiAgent browser terminal
+
+Pi3Groq can also host a local PiAgent terminal without changing PiAgent itself.
+
+- install PiAgent on the Pi companion in `~/.local/bin/pi-agent`
+- open the normal Pi3Groq browser UI
+- use the **PiAgent Browser Terminal** panel to start PiAgent locally
+- complete `/login`, provider selection, model selection, and chat inside that terminal
+
+The Pi3Groq web server keeps PiAgent separate from Whisplay companion mode:
+
+- HTTP UI stays on `http://127.0.0.1:18600`
+- PiAgent terminal streaming uses a local websocket bridge on `ws://127.0.0.1:18601`
+- PiAgent project sandboxes live under `Pi3Groq/data/pi-agent-projects/`
+
+The browser UI now also supports lightweight PiAgent project workspaces:
+
+- create/select a PiAgent project sandbox
+- browse a recursive project tree
+- open files in the browser
+- save file edits back into the selected project
+- start PiAgent inside the selected project root without changing PiAgent itself
+
+Environment overrides:
+
+- `PI3GROQ_PI_AGENT_BIN` - alternate PiAgent executable path
+- `PI3GROQ_PI_AGENT_WS_PORT` - alternate websocket bridge port
 
 ## Touch display / HDMI page
 
