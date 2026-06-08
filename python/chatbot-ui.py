@@ -33,6 +33,7 @@ emoji_font_size=40
 battery_font_size=13
 IDLE_RENDER_INTERVAL = 0.5
 IDLE_COMPATIBLE_STATUSES = {"idle", "last reply"}
+LOOP_SCROLL_STATUSES = {"last reply", "answering", "answering...", "photo edit", "photo ready"}
 RANDOM_SCREENSAVER_INTERVAL_SEC = 120
 IMAGE_SCREENSAVER_INTERVAL_SEC = 25
 IMAGE_SCREENSAVER_REFRESH_SEC = 8
@@ -631,7 +632,7 @@ class RenderThread(threading.Thread):
                     pixels_to_move = pixels_per_sec * elapsed_sec
                     current_scroll_top += pixels_to_move
             last_scroll_frame_time = current_time
-        if current_status == "last reply" and scroll_speed > 0 and max_scroll_top > 0:
+        if current_status in LOOP_SCROLL_STATUSES and scroll_speed > 0 and max_scroll_top > 0:
             if current_scroll_top >= max_scroll_top:
                 current_scroll_top = 0
                 current_scroll_sync_speed = None
