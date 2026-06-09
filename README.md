@@ -872,6 +872,7 @@ TTS_SERVER=espeak-ng
 - Set **Voice mode** to **Voice chat** in the browser or HAT settings to enable spoken replies
 - The current `espeak-ng` plugin defaults to `ESPEAK_NG_VOICE=en` unless you override it in `.env`
 - This was confirmed working through the Whisplay speaker path on the Pi Zero 2 W hardware
+- **Tip:** if the bot finishes a reply but you never hear speech, check whether `.env` silently fell back to `TTS_SERVER=test`. Switching it back to `TTS_SERVER=espeak-ng` (and restarting `chatbot.service`) restores the voice instantly.
 
 ## Settings UI notes
 
