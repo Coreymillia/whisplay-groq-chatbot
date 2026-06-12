@@ -18,6 +18,7 @@ enum class RdBootMode : uint8_t {
     Bot,
     Radio,
     AiScreensaver,
+    CosmicPortal,
 };
 
 struct RdModelOption {
@@ -84,6 +85,7 @@ static char rd_groq_api_key[128] = "";
 static char rd_groq_model[64] = "";
 static char rd_personality_prompt[512] = "";
 static char rd_whisplay_url[160] = "";
+static char rd_cosmic_portal_name[36] = "";
 static RdBootMode rd_boot_mode = RdBootMode::Bot;
 static uint8_t rd_record_seconds = RD_DEFAULT_RECORD_SECONDS;
 static uint16_t rd_scroll_ms = RD_DEFAULT_SCROLL_MS;
@@ -166,6 +168,9 @@ static RdBootMode rdParseBootMode(const String &value) {
     if (normalized == "ai" || normalized == "ai-screensaver" || normalized == "screensaver") {
         return RdBootMode::AiScreensaver;
     }
+    if (normalized == "cosmic" || normalized == "portal" || normalized == "cosmic-portal") {
+        return RdBootMode::CosmicPortal;
+    }
     return RdBootMode::Bot;
 }
 
@@ -175,6 +180,8 @@ static const char *rdBootModeValue(RdBootMode mode) {
             return "radio";
         case RdBootMode::AiScreensaver:
             return "ai";
+        case RdBootMode::CosmicPortal:
+            return "cosmic";
         case RdBootMode::Bot:
         default:
             return "bot";
@@ -187,6 +194,8 @@ static String rdCurrentBootModeLabel() {
             return "Radio";
         case RdBootMode::AiScreensaver:
             return "AI Show";
+        case RdBootMode::CosmicPortal:
+            return "Portal";
         case RdBootMode::Bot:
         default:
             return "Bot";
@@ -255,6 +264,7 @@ static void rdLoadSettings() {
     String model = prefs.getString("model", RD_DEFAULT_MODEL);
     String personality = prefs.getString("personality", RD_DEFAULT_PERSONALITY);
     String whisplayUrl = prefs.getString("whisplayUrl", "");
+    String cosmicPortalName = prefs.getString("cosmicPortalName", "");
     String bootMode = prefs.getString("bootMode", "");
     bool bootModeRadioLegacy = prefs.getBool("bootRadio", false);
     rd_record_seconds = rdClampRecordSeconds(
@@ -269,6 +279,7 @@ static void rdLoadSettings() {
     model.toCharArray(rd_groq_model, sizeof(rd_groq_model));
     personality.toCharArray(rd_personality_prompt, sizeof(rd_personality_prompt));
     rdNormalizeBaseUrl(whisplayUrl).toCharArray(rd_whisplay_url, sizeof(rd_whisplay_url));
+    cosmicPortalName.toCharArray(rd_cosmic_portal_name, sizeof(rd_cosmic_portal_name));
     rd_boot_mode = bootMode.length()
                        ? rdParseBootMode(bootMode)
                        : (bootModeRadioLegacy ? RdBootMode::Radio : RdBootMode::Bot);
@@ -285,7 +296,8 @@ static void rdLoadSettings() {
 static void rdSaveSettings(const char *ssid, const char *pass, const char *groqKey,
                            const char *model, const char *personality,
                            const char *whisplayUrl, uint8_t recordSeconds,
-                           RdBootMode bootMode, uint16_t scrollMs) {
+                           RdBootMode bootMode, uint16_t scrollMs,
+                           const char *cosmicPortalName = nullptr) {
     Preferences prefs;
     prefs.begin("core2groq", false);
     prefs.putString("ssid", ssid ? ssid : "");
@@ -295,6 +307,7 @@ static void rdSaveSettings(const char *ssid, const char *pass, const char *groqK
     prefs.putString("personality",
                     personality && personality[0] ? personality : RD_DEFAULT_PERSONALITY);
     prefs.putString("whisplayUrl", rdNormalizeBaseUrl(whisplayUrl ? whisplayUrl : ""));
+    prefs.putString("cosmicPortalName", cosmicPortalName ? cosmicPortalName : "");
     prefs.putString("bootMode", rdBootModeValue(bootMode));
     prefs.putBool("bootRadio", bootMode == RdBootMode::Radio);
     prefs.putUChar("recordSec", rdClampRecordSeconds(recordSeconds));
@@ -311,6 +324,11 @@ static void rdSaveSettings(const char *ssid, const char *pass, const char *groqK
             sizeof(rd_personality_prompt));
     rdNormalizeBaseUrl(whisplayUrl ? whisplayUrl : "")
         .toCharArray(rd_whisplay_url, sizeof(rd_whisplay_url));
+    if (cosmicPortalName && cosmicPortalName[0]) {
+        strlcpy(rd_cosmic_portal_name, cosmicPortalName, sizeof(rd_cosmic_portal_name));
+    } else {
+        rd_cosmic_portal_name[0] = '\0';
+    }
     rd_record_seconds = rdClampRecordSeconds(recordSeconds);
     rd_boot_mode = bootMode;
     rd_scroll_ms = rdClampScrollMs(static_cast<int>(scrollMs));
@@ -425,6 +443,29 @@ static void rdHandleRoot() {
     html += rdEscapeHtml(String(rd_whisplay_url));
     html +=
         "' placeholder='http://10.160.0.136:17880'>"
+        "<label>Cosmic Portal Name <small style='font-weight:normal;color:#7fa3bf'>(max 32 chars)</small></label>"
+        "<div style='display:flex;gap:6px;align-items:center'>"
+        "<input type='text' id='portalName' name='cosmicPortalName' maxlength='32' value='";
+    html += rdEscapeHtml(String(rd_cosmic_portal_name));
+    html +=
+        "' placeholder='Core2Groq Portal' style='flex:1'>"
+        "</div>"
+        "<div style='display:flex;flex-wrap:wrap;gap:5px;margin-top:6px'>";
+    static const char* const portalEmojis[] = {
+        "\xF0\x9F\x8C\x8C", "\xF0\x9F\xAA\x90", "\xF0\x9F\x8C\xA0", "\xE2\xAD\x90",
+        "\xF0\x9F\x92\xAB", "\xE2\x9C\xA8", "\xF0\x9F\x8C\x99", "\xF0\x9F\x94\xAE",
+        "\xF0\x9F\x91\x81", "\xE2\x9A\xA1", "\xF0\x9F\x94\xA5", "\xF0\x9F\x8C\x80",
+        "\xF0\x9F\x9B\xB8", "\xF0\x9F\xA7\xAC", "\xE2\x98\xAF", "\xF0\x9F\x92\x8E",
+    };
+    for (int i = 0; i < 16; i++) {
+        html += "<button type='button' onclick=\"document.getElementById('portalName').value+='";
+        html += portalEmojis[i];
+        html += "'\" style='font-size:1.1rem;padding:4px 7px;background:#1a2535;border:1px solid #35516f;border-radius:5px;cursor:pointer'>";
+        html += portalEmojis[i];
+        html += "</button>";
+    }
+    html +=
+        "</div>"
         "<label>Chat Model</label>"
         "<select name='model'>";
 
@@ -475,8 +516,10 @@ static void rdHandleRoot() {
     if (rd_boot_mode == RdBootMode::AiScreensaver) html += " selected";
     html += ">AI Screensaver</option><option value='radio'";
     if (rd_boot_mode == RdBootMode::Radio) html += " selected";
+    html += ">Radio</option><option value='cosmic'";
+    if (rd_boot_mode == RdBootMode::CosmicPortal) html += " selected";
     html +=
-        ">Radio</option></select>"
+        ">Cosmic Portal</option></select>"
         "<button type='submit'>Save &amp; Reboot</button>"
         "</form>";
 
@@ -496,6 +539,7 @@ static void rdHandleSave() {
     String pass = portalServer->arg("pass");
     String groqKey = portalServer->arg("groqKey");
     String whisplayUrl = portalServer->arg("whisplayUrl");
+    String cosmicPortalName = portalServer->arg("cosmicPortalName");
     String model = portalServer->arg("model");
     String personality = portalServer->arg("personality");
     RdBootMode bootMode = rdParseBootMode(portalServer->arg("bootMode"));
@@ -511,7 +555,8 @@ static void rdHandleSave() {
     }
 
     rdSaveSettings(ssid.c_str(), pass.c_str(), groqKey.c_str(), model.c_str(),
-                   personality.c_str(), whisplayUrl.c_str(), recordSec, bootMode, scrollMs);
+                   personality.c_str(), whisplayUrl.c_str(), recordSec, bootMode, scrollMs,
+                   cosmicPortalName.c_str());
 
     portalServer->send(
         200, "text/html",

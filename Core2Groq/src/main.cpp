@@ -20,6 +20,7 @@
 #include "GroqApi.h"
 #include "Core2Lcd.h"
 #include "Portal.h"
+#include "CosmicPortal.h"
 
 #define SCREEN_W 320
 #define SCREEN_H 240
@@ -77,7 +78,7 @@ static constexpr int BOT_VIEW_TOGGLE_W = 44;
 static constexpr int BOT_VIEW_TOGGLE_H = 18;
 static constexpr int BOT_FOOTER_LABEL_Y = 222;
 static constexpr int BOT_SETTINGS_TILE_COLS = 3;
-static constexpr int BOT_SETTINGS_TILE_ROWS = 3;
+static constexpr int BOT_SETTINGS_TILE_ROWS = 4;
 static constexpr int BOT_SETTINGS_TILE_W = 96;
 static constexpr int BOT_SETTINGS_TILE_H = 58;
 static constexpr int BOT_SETTINGS_TILE_GAP = 8;
@@ -94,6 +95,7 @@ enum class AppMode : uint8_t {
     Bot,
     Radio,
     AiScreensaver,
+    CosmicPortal,
 };
 
 enum class BotRecordingMode : uint8_t {
@@ -203,6 +205,7 @@ bool radioStreamingStarted = false;
 unsigned short grays[18];
 
 AppMode activeMode = AppMode::Bot;
+AppMode cpPrevMode = AppMode::Bot;
 BotScreen botScreen = BotScreen::Chat;
 String botStatus = "Ready.";
 String botPendingUserMessage;
@@ -438,6 +441,8 @@ static AppMode appModeForBootMode(RdBootMode bootMode) {
             return AppMode::Radio;
         case RdBootMode::AiScreensaver:
             return AppMode::AiScreensaver;
+        case RdBootMode::CosmicPortal:
+            return AppMode::CosmicPortal;
         case RdBootMode::Bot:
         default:
             return AppMode::Bot;
@@ -449,6 +454,8 @@ static bool bootModeIsConfigured(RdBootMode bootMode) {
         case RdBootMode::AiScreensaver:
             return rdHasAiScreensaverReady();
         case RdBootMode::Radio:
+            return true;
+        case RdBootMode::CosmicPortal:
             return true;
         case RdBootMode::Bot:
         default:
@@ -463,6 +470,7 @@ static String bootModeMissingMessage(RdBootMode bootMode) {
         case RdBootMode::Bot:
             return "Add Groq key in setup.";
         case RdBootMode::Radio:
+        case RdBootMode::CosmicPortal:
         default:
             return "Finish setup first.";
     }
@@ -885,6 +893,65 @@ static void enterAiMode(bool redraw) {
     }
 }
 
+static void enterCosmicPortalMode() {
+    stopRadioPlayback();
+    inSettings = false;
+    activeMode = AppMode::CosmicPortal;
+    M5.Lcd.fillScreen(TFT_BLACK);
+    M5.Lcd.setTextColor(TFT_CYAN);
+    M5.Lcd.setTextSize(2);
+    M5.Lcd.setCursor(40, 60);
+    M5.Lcd.print("COSMIC PORTAL");
+    M5.Lcd.setTextColor(TFT_WHITE);
+    M5.Lcd.setTextSize(1);
+    M5.Lcd.setCursor(60, 100);
+    M5.Lcd.print("Starting AP...");
+    // Use the saved cosmic portal name if set, otherwise default
+    if (rd_cosmic_portal_name[0] != '\0') {
+        cpPrefs.begin("cosmic", false);
+        cpPrefs.putString("cpApName", String(rd_cosmic_portal_name));
+        cpPrefs.end();
+    }
+    cpInitPortal();
+}
+
+static void drawCosmicPortalClock() {
+    // Minimal clock display — only time on screen
+    unsigned long now = millis();
+    unsigned long totalSecs = now / 1000;
+    int hours = (totalSecs / 3600) % 24;
+    int mins = (totalSecs / 60) % 60;
+    int secs = totalSecs % 60;
+
+    char timeBuf[16];
+    snprintf(timeBuf, sizeof(timeBuf), "%02d:%02d:%02d", hours, mins, secs);
+
+    // Only redraw if seconds changed
+    static int lastSecs = -1;
+    if (secs == lastSecs) return;
+    lastSecs = secs;
+
+    M5.Lcd.setTextColor(TFT_CYAN, TFT_BLACK);
+    M5.Lcd.setTextSize(4);
+    M5.Lcd.setCursor(56, 80);
+    M5.Lcd.print(timeBuf);
+
+    // WiFi AP status line
+    M5.Lcd.setTextSize(1);
+    M5.Lcd.setTextColor(TFT_GREEN, TFT_BLACK);
+    M5.Lcd.setCursor(44, 140);
+    const char* apLabel = cpApName.length() > 0 ? cpApName.c_str() : CP_AP_SSID;
+    M5.Lcd.print(apLabel);
+    M5.Lcd.setTextColor(TFT_WHITE, TFT_BLACK);
+    M5.Lcd.setCursor(72, 160);
+    M5.Lcd.print(CP_PORTAL_IP);
+
+    int clients = WiFi.softAPgetStationNum();
+    M5.Lcd.setCursor(80, 180);
+    M5.Lcd.print("Visitors: ");
+    M5.Lcd.print(clients);
+}
+
 static void clearBotChat() {
     rdResetChatHistory();
     botPendingUserMessage = "";
@@ -1066,6 +1133,7 @@ static void drawBotSettingsScreen() {
                         rdHasAiScreensaverReady() ? TFT_CYAN : TFT_RED);
     drawBotSettingsTile(7, "RADIO", "Launch now", TFT_ORANGE);
     drawBotSettingsTile(8, "BACK", "Chat", TFT_WHITE);
+    drawBotSettingsTile(10, "PORTAL", "Cosmic art AP", TFT_MAGENTA);
 }
 
 static int botSettingsTileAtPoint(const TouchPoint_t &p) {
@@ -1088,6 +1156,9 @@ static void cycleBotBootMode() {
             nextMode = RdBootMode::AiScreensaver;
             break;
         case RdBootMode::AiScreensaver:
+            nextMode = RdBootMode::CosmicPortal;
+            break;
+        case RdBootMode::CosmicPortal:
             nextMode = RdBootMode::Radio;
             break;
         case RdBootMode::Radio:
@@ -1113,6 +1184,9 @@ static void launchBotSelectedBootMode() {
             break;
         case AppMode::Radio:
             enterRadioMode();
+            break;
+        case AppMode::CosmicPortal:
+            enterCosmicPortalMode();
             break;
         case AppMode::Bot:
         default:
@@ -1627,28 +1701,38 @@ void setup() {
 
     M5.Lcd.fillScreen(TFT_BLACK);
     M5.Lcd.setTextSize(2);
-    M5.Lcd.setTextColor(TFT_GREEN);
-    M5.Lcd.setCursor(2, 20);
-    M5.Lcd.println("Connecting to WiFi...");
-
-    WiFi.mode(WIFI_STA);
-    wifiMulti.addAP(rd_wifi_ssid, rd_wifi_pass);
-    wifiMulti.run();
-    Serial.println(String("[BOOT] WiFi status after first run: ") + WiFi.status());
-
-    M5.Lcd.setCursor(2, 50);
-    M5.Lcd.setTextSize(1);
-    M5.Lcd.setTextColor(TFT_WHITE);
-    M5.Lcd.println("Core2Groq runtime ready.");
-    delay(400);
-
-    xTaskCreatePinnedToCore(audioTask, "audioT", 8192, nullptr, 2, &audioTaskHandle, 0);
 
     const AppMode bootMode = appModeForBootMode(rdGetBootMode());
+
+    if (bootMode != AppMode::CosmicPortal) {
+        M5.Lcd.setTextColor(TFT_GREEN);
+        M5.Lcd.setCursor(2, 20);
+        M5.Lcd.println("Connecting to WiFi...");
+
+        WiFi.mode(WIFI_STA);
+        wifiMulti.addAP(rd_wifi_ssid, rd_wifi_pass);
+        wifiMulti.run();
+        Serial.println(String("[BOOT] WiFi status after first run: ") + WiFi.status());
+
+        M5.Lcd.setCursor(2, 50);
+        M5.Lcd.setTextSize(1);
+        M5.Lcd.setTextColor(TFT_WHITE);
+        M5.Lcd.println("Core2Groq runtime ready.");
+        delay(400);
+
+        xTaskCreatePinnedToCore(audioTask, "audioT", 8192, nullptr, 2, &audioTaskHandle, 0);
+    }
+
     Serial.println(String("[BOOT] launching mode: ") +
                    (bootMode == AppMode::Bot ? "bot" :
-                    bootMode == AppMode::Radio ? "radio" : "ai"));
-    if (bootMode == AppMode::Radio) {
+                    bootMode == AppMode::Radio ? "radio" :
+                    bootMode == AppMode::AiScreensaver ? "ai" : "portal"));
+    
+    if (bootMode == AppMode::CosmicPortal) {
+        // Skip WiFi STA — go straight to AP portal mode
+        cpPrevMode = AppMode::Bot;
+        enterCosmicPortalMode();
+    } else if (bootMode == AppMode::Radio) {
         enterRadioMode();
     } else if (bootMode == AppMode::AiScreensaver) {
         enterAiMode();
@@ -1662,6 +1746,52 @@ void setup() {
 
 void loop() {
     M5.update();
+
+    // ── WiFi watchdog: auto-enter/exit Cosmic Portal ────────────────────────
+    static unsigned long lastWifiCheck = 0;
+    static unsigned long wifiLostSince = 0;
+    static unsigned long lastPortalWifiScan = 0;
+
+    if (millis() - lastWifiCheck > 3000) {
+        lastWifiCheck = millis();
+        if (activeMode != AppMode::CosmicPortal && activeMode != AppMode::Radio) {
+            // In Bot/Ai modes, watch for WiFi loss
+            if (WiFi.status() != WL_CONNECTED) {
+                if (wifiLostSince == 0) wifiLostSince = millis();
+                else if (millis() - wifiLostSince > 15000 && rd_has_settings) {
+                    Serial.println("[WiFi] Lost connection, auto-entering Cosmic Portal");
+                    cpPrevMode = activeMode;
+                    stopRadioPlayback();
+                    enterCosmicPortalMode();
+                    wifiLostSince = 0;
+                    return;
+                }
+            } else {
+                wifiLostSince = 0;
+            }
+        } else if (activeMode == AppMode::CosmicPortal && rd_has_settings) {
+            // In portal mode, periodically scan for saved WiFi
+            if (millis() - lastPortalWifiScan > 60000) {
+                lastPortalWifiScan = millis();
+                int n = WiFi.scanNetworks();
+                for (int i = 0; i < n; i++) {
+                    if (WiFi.SSID(i) == String(rd_wifi_ssid)) {
+                        Serial.println("[WiFi] Found saved network, exiting portal");
+                        cpClosePortal();
+                        WiFi.mode(WIFI_STA);
+                        wifiMulti.addAP(rd_wifi_ssid, rd_wifi_pass);
+                        wifiMulti.run();
+                        activeMode = cpPrevMode;
+                        if (cpPrevMode == AppMode::AiScreensaver) enterAiMode();
+                        else enterBotMode();
+                        WiFi.scanDelete();
+                        return;
+                    }
+                }
+                WiFi.scanDelete();
+            }
+        }
+    }
 
     static unsigned long lastRSSI = 0;
     static unsigned long lastSlide = 0;
@@ -1767,6 +1897,10 @@ void loop() {
                     return;
                 } else if (tileIndex == 8) {
                     toggleBotSettingsMenu();
+                } else if (tileIndex == 10) {
+                    enterCosmicPortalMode();
+                    botPrevTouch = touchNow;
+                    return;
                 }
             } else if (botTouchInRect(p, BOT_ACTION_SETUP_X, BOT_ACTION_Y, BOT_ACTION_W,
                                       BOT_ACTION_H)) {
@@ -1854,6 +1988,35 @@ void loop() {
         if (aiDrawNeeded) {
             lastDraw = millis();
             drawAiUi();
+        }
+
+        vTaskDelay(5);
+        return;
+    }
+
+    if (activeMode == AppMode::CosmicPortal) {
+        cpRunPortal();
+        drawCosmicPortalClock();
+
+        // Button A: exit portal back to previous mode
+        if (M5.BtnA.wasPressed()) {
+            haptic();
+            cpClosePortal();
+            activeMode = cpPrevMode;
+            if (cpPrevMode == AppMode::Radio) {
+                WiFi.mode(WIFI_STA);
+                wifiMulti.addAP(rd_wifi_ssid, rd_wifi_pass);
+                enterRadioMode();
+            } else if (cpPrevMode == AppMode::AiScreensaver) {
+                WiFi.mode(WIFI_STA);
+                wifiMulti.addAP(rd_wifi_ssid, rd_wifi_pass);
+                enterAiMode();
+            } else {
+                WiFi.mode(WIFI_STA);
+                wifiMulti.addAP(rd_wifi_ssid, rd_wifi_pass);
+                enterBotMode();
+            }
+            return;
         }
 
         vTaskDelay(5);
