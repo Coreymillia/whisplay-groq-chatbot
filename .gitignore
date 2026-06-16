@@ -27,3 +27,11 @@ CompanionCARDPUTER/.pio
 CompanionCARDPUTER/.vscode
 
 CompanionCYD/AISlideshow/.pio/
+Core1Display/.pio
+Core2Groq/.pio
+Groqputer/.pio
+GroqWatch/.pio
+ESP32CAM/.pio
+GroqWatch/CMakeLists.txt
+GroqWatch/idf_component.yml
+GroqWatch/sdkconfig.defaults

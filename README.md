@@ -26,7 +26,7 @@ This repo now has **multiple chatbot paths**, not just one screen with one model
 | **Gemini vision + photo edit path** | analyze photos, generate images, and edit the currently shown photo | Gemini API | image generation / editing may require billing enabled on the Google project |
 | **BotNet chat** | peer-bot / persona relay experiments | curated **Groq-only** model dropdown | intentionally separate from the shared Gemini-capable selector |
 | **ESP32 Agent workspace** | browser-side coding helper for PlatformIO ESP32 projects | same shared text-model selector as normal chat | separate Agent personalities, same text model family choices |
-| **Companion clients** | CYD, Cardputer, Groqputer, Core2, Core1Display, and related sidecars | mostly relay to the Pi-hosted chatbot stack | these are extra control/display surfaces, not separate cloud backends |
+| **Companion clients** | CYD, Cardputer, Groqputer, Core2, Core1Display, GroqWatch, and related sidecars | mostly relay to the Pi-hosted chatbot stack | these are extra control/display surfaces, not separate cloud backends |
 
 ## Cloud model, pricing, and limit snapshot
 
@@ -83,6 +83,7 @@ Official Google docs clearly show **free vs paid tiers**, billing tiers, and mod
 - **Companion Cardputer client:** working as an early rough-start build, with text chat confirmed and more settings/UI work planned
 - **Groqputer standalone Cardputer firmware:** standalone Groq Cardputer firmware now running in this repo, with a full-screen incoming/outgoing reader, battery in the header, direct Groq chat/Whisper, saved custom personalities from the AP or Cardputer, optional 16x2 I2C LCD output, on-device bot settings, and early same-LAN Whisplay relay testing
 - **Core2Groq unified M5Core2 firmware:** early dual-mode Core2 build now running in this repo, combining the existing OTR radio project with a new Groq bot mode, touch-first controls, and a path toward future BotNet connectivity
+- **GroqWatch Waveshare AMOLED companion:** working as a Whisplay companion display and remote control on the Waveshare ESP32-S3 Touch AMOLED 2.06 with polling-driven chat mirror, AI slideshow, Whisplay chat repeat/reset controls, SD-backed image cache, and three-mode navigation (Watch / Whisplay Bot / AI Screensaver)
 - **Core1Display wireless external display:** working as a lightweight M5Stack Core / Core1 display mirror for both Groqputer and Whisplay over the local network with polling, auto-follow mode, button-driven reader UI, idle screensaver support, and a working AI Show mode with optional SD storage plus internal-flash fallback
 - **Standalone GroqBotNet Pi Zero node:** working as a separate same-network experiment with browser chat plus Mini PiTFT output
 - **GroqBotNet external HalloWing companion:** working as a UART-fed mirror for Whisplay header/status data, with the official sketch now tracked in `GroqBotNet/Hallowing/Hallowing2.ino`
