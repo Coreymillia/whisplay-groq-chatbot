@@ -49,6 +49,7 @@ enum class AppMode : uint8_t {
     Watch,
     AiScreensaver,
     Bot,
+    Tetris,
     Settings,
 };
 

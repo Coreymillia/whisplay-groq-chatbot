@@ -24,6 +24,7 @@
 #include "PixelCanvas.h"
 #include "SettingsMenu.h"
 #include "SetupPortal.h"
+#include "Tetris.h"
 
 using namespace GroqWatch;
 
@@ -249,6 +250,10 @@ void setMode(AppMode newMode) {
         botBtnPrev = false;
         resetTouchState();
     }
+    if (oldMode == AppMode::Tetris && newMode != AppMode::Tetris) {
+        Tetris::tetrisEnd();
+        resetTouchState();
+    }
     if (oldMode == AppMode::Watch && newMode != AppMode::Watch && cpIsRunning()) {
         cpClosePortal();
     }
@@ -289,6 +294,18 @@ void setMode(AppMode newMode) {
         resetTouchState();
         botFetchRemoteState(true);
     }
+    if (currentMode == AppMode::Tetris) {
+        if (cpIsRunning()) cpClosePortal();
+        disconnectWiFi();
+        pinMode(WATCH_BOOT_BUTTON_PIN, INPUT_PULLUP);
+        aiBootDown = false;
+        aiBootLongHandled = false;
+        aiBootDownMs = 0;
+        wakeBootWaitRelease = digitalRead(WATCH_BOOT_BUTTON_PIN) == LOW;
+        wakeInputIgnoreUntilMs = millis() + 250;
+        resetTouchState();
+        Tetris::tetrisBegin(*gfx);
+    }
     if (currentMode == AppMode::Watch) {
         aiClearCurrentSlide();
         aiModeActive = false;
@@ -302,7 +319,7 @@ void setMode(AppMode newMode) {
 }
 
 void checkWifiAndFallback() {
-    if (currentMode == AppMode::Watch || currentMode == AppMode::Settings) return;
+    if (currentMode == AppMode::Watch || currentMode == AppMode::Settings || currentMode == AppMode::Tetris) return;
     if (millis() - lastWifiCheckMs < 10000) return;
     lastWifiCheckMs = millis();
 
@@ -1057,6 +1074,7 @@ void renderCurrentMode() {
         case AppMode::Watch: renderWatchFrame(); break;
         case AppMode::AiScreensaver: renderAiFrame(); break;
         case AppMode::Bot: renderBotFrame(); break;
+        case AppMode::Tetris: Tetris::tDraw(); break;
         case AppMode::Settings: settingsMenu.draw(*gfx); break;
     }
 }
@@ -1097,6 +1115,9 @@ void handleSettingsTile(int tileIndex) {
             break;
         case 5: // AI
             if (hasWhisplayUrl(settings) || aiCanRunOffline()) setMode(AppMode::AiScreensaver);
+            break;
+        case 6: // TETRIS
+            setMode(AppMode::Tetris);
             break;
         case 7: // BACK
             setMode(AppMode::Watch);
@@ -1181,7 +1202,7 @@ void handleTouch(const TouchState &touch) {
         }
         return;
     }
-    if (touch.y > 430) {
+    if (touch.y > 400) {
         setMode(AppMode::Settings);
         return;
     }
@@ -1374,7 +1395,17 @@ void loop() {
             touchPollingSuspended = false;
             TouchState touch;
             if (pollTouch(touch)) {
-                handleTouch(touch);
+                if (currentMode == AppMode::Tetris) {
+                    if (Tetris::tetrisIsGameOver() && touch.justPressed) {
+                        Tetris::tetrisBegin(*gfx);  // restart
+                        lastActivityMs = millis();
+                    } else if (!Tetris::tetrisIsGameOver()) {
+                        Tetris::tetrisHandleTouch(touch.x, touch.y, touch.pressed, touch.justReleased);
+                        lastActivityMs = millis();
+                    }
+                } else {
+                    handleTouch(touch);
+                }
             }
         }
     }
@@ -1406,11 +1437,62 @@ void loop() {
         }
     }
 
+    // Tetris: BOOT short = rotate, BOOT long = back to Watch
+    if (currentMode == AppMode::Tetris && !wakeBootWaitRelease && millis() >= wakeInputIgnoreUntilMs) {
+        if (bootNow && !aiBootDown) {
+            aiBootDown = true;
+            aiBootLongHandled = false;
+            aiBootDownMs = millis();
+        }
+        if (bootNow && aiBootDown && !aiBootLongHandled && millis() - aiBootDownMs >= AI_BOOT_LONG_MS) {
+            aiBootLongHandled = true;
+            Tetris::tetrisEnd();
+            setMode(AppMode::Watch);
+            return;
+        }
+        if (!bootNow && aiBootDown) {
+            const unsigned long heldMs = millis() - aiBootDownMs;
+            aiBootDown = false;
+            if (!aiBootLongHandled && heldMs >= 30) {
+                Tetris::tetrisHandleBoot();
+                lastActivityMs = millis();
+            }
+            aiBootLongHandled = false;
+            aiBootDownMs = 0;
+        }
+    }
+
+    // Watch: BOOT long = Settings (reliable rescue path)
+    if (currentMode == AppMode::Watch && !wakeBootWaitRelease && millis() >= wakeInputIgnoreUntilMs) {
+        if (bootNow && !aiBootDown) {
+            aiBootDown = true;
+            aiBootLongHandled = false;
+            aiBootDownMs = millis();
+        }
+        if (bootNow && aiBootDown && !aiBootLongHandled && millis() - aiBootDownMs >= AI_BOOT_LONG_MS) {
+            aiBootLongHandled = true;
+            GW_LOGLN("[Watch] BOOT long -> Settings");
+            setMode(AppMode::Settings);
+            return;
+        }
+        if (!bootNow && aiBootDown) {
+            aiBootDown = false;
+            aiBootLongHandled = false;
+            aiBootDownMs = 0;
+        }
+    }
+
     // Per-frame work
     if (millis() - lastFrameMs >= 90) {
         lastFrameMs = millis();
         pollClock();
-        checkWifiAndFallback();
+
+        if (currentMode == AppMode::Tetris) {
+            Tetris::tUpdate();
+            Tetris::tDraw();
+        } else {
+            checkWifiAndFallback();
+        }
 
         if (currentMode == AppMode::Watch) {
             updateParticles();
@@ -1420,8 +1502,11 @@ void loop() {
             }
             renderWatchFrame();
         } else if (currentMode == AppMode::AiScreensaver) {
-            // Rescue behavior: no automatic slide advance for now.
-            // AI mode changes only on explicit user action so BOOT handling stays responsive.
+            if (aiModeActive && millis() - aiLastSlideMs >= AI_SLIDE_INTERVAL_MS) {
+                aiModeActive = aiShowNextSlide(settings.whisplayUrl, false);
+                aiFrameLastMs = millis();
+                lastActivityMs = millis();
+            }
             if (aiNeedsRedraw) {
                 renderAiFrame();
             }

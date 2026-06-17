@@ -134,7 +134,8 @@ private:
         // 5: AI
         tile_[5].label = "AI"; tile_[5].value = (hasWhisplayUrl(*settings_) || aiCanRunOffline()) ? "Launch now" : "Needs URL";
         tile_[5].accent = (hasWhisplayUrl(*settings_) || aiCanRunOffline()) ? RGB565_CYAN : RGB565_RED;
-        // 6: empty
+        // 6: TETRIS
+        tile_[6].label = "TETRIS"; tile_[6].value = "Play now"; tile_[6].accent = RGB565_RED;
         // 7: BACK
         tile_[7].label = "BACK"; tile_[7].value = "Close"; tile_[7].accent = RGB565_WHITE;
     }

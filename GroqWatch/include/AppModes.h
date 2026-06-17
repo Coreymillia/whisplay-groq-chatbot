@@ -11,6 +11,7 @@ inline AppMode bootModeFromString(const char *str) {
     s.toLowerCase();
     if (s == "bot" || s == "chatbot") return AppMode::Bot;
     if (s == "ai" || s == "screensaver") return AppMode::AiScreensaver;
+    if (s == "tetris") return AppMode::Tetris;
     return AppMode::Watch;
 }
 
@@ -18,6 +19,7 @@ inline const char *bootModeToString(AppMode mode) {
     switch (mode) {
         case AppMode::Bot: return "bot";
         case AppMode::AiScreensaver: return "ai";
+        case AppMode::Tetris: return "tetris";
         default: return "watch";
     }
 }
@@ -27,6 +29,7 @@ inline const char *modeLabel(AppMode mode) {
         case AppMode::Bot: return "Bot";
         case AppMode::AiScreensaver: return "AI Show";
         case AppMode::Watch: return "Watch";
+        case AppMode::Tetris: return "Tetris";
         case AppMode::Settings: return "Settings";
         default: return "?";
     }
