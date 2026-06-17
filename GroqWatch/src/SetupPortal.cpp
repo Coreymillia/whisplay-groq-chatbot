@@ -9,6 +9,7 @@
 
 #include "AppSettings.h"
 #include "AppModes.h"
+#include "GroqWatchLog.h"
 #include "pin_config.h"
 
 namespace GroqWatch {
@@ -80,6 +81,8 @@ void drawPortalScreen(const char *statusLine = "Open 192.168.4.1") {
 
     gGfx->setCursor(18, 178);
     gGfx->print("3. Save & Reboot");
+    gGfx->setCursor(18, 202);
+    gGfx->print("Hold BOOT to cancel");
     gGfx->setTextColor(RGB565_CYAN);
     gGfx->setCursor(18, 240);
     gGfx->print(statusLine);
@@ -90,6 +93,17 @@ void drawPortalScreen(const char *statusLine = "Open 192.168.4.1") {
         gGfx->print("SSID: ");
         gGfx->print(gSettings.wifiSsid);
     }
+}
+
+bool portalBootExitHeld() {
+    static unsigned long heldMs = 0;
+    const bool down = digitalRead(WATCH_BOOT_BUTTON_PIN) == LOW;
+    if (!down) {
+        heldMs = 0;
+        return false;
+    }
+    if (heldMs == 0) heldMs = millis();
+    return millis() - heldMs >= 1000;
 }
 
 void handleRoot() {
@@ -224,10 +238,17 @@ bool watchBootButtonHeld() {
     gServer->onNotFound(handleRoot);
     gServer->begin();
 
-    Serial.printf("[setup] AP SSID=%s IP=%s\n", kApSsid, WiFi.softAPIP().toString().c_str());
+    GW_LOGF("[setup] AP SSID=%s IP=%s\n", kApSsid, WiFi.softAPIP().toString().c_str());
+    pinMode(WATCH_BOOT_BUTTON_PIN, INPUT_PULLUP);
     drawPortalScreen();
 
     while (true) {
+        if (portalBootExitHeld()) {
+            drawPortalScreen("BOOT held. Rebooting...");
+            GW_LOGLN("[setup] BOOT held -> reboot");
+            delay(250);
+            ESP.restart();
+        }
         gDns->processNextRequest();
         gServer->handleClient();
         delay(2);

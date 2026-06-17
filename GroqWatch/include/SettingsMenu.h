@@ -8,6 +8,8 @@
 
 namespace GroqWatch {
 
+static constexpr uint16_t SCREEN_TIMEOUT_OPTIONS[] = {0, 15, 30, 60, 120, 300, 600};
+
 struct SettingsTile {
     int16_t x, y, w, h;
     const char *label;
@@ -29,27 +31,49 @@ public:
     void begin(AppSettings &settings, AppMode &currentMode) {
         settings_ = &settings;
         mode_ = &currentMode;
+        watchSettingsOpen_ = false;
         dirty_ = true;
         buildTiles();
+    }
+
+    bool inWatchSettings() const { return watchSettingsOpen_; }
+
+    void openWatchSettings() {
+        watchSettingsOpen_ = true;
+        buildWatchTiles();
+        dirty_ = true;
+    }
+
+    void closeWatchSettings() {
+        watchSettingsOpen_ = false;
+        buildTiles();
+        dirty_ = true;
     }
 
     void draw(Arduino_GFX &gfx) {
         if (!dirty_) return;
         gfx.fillScreen(RGB565_BLACK);
 
-        // Header
-        gfx.setCursor(12, 8);
-        gfx.setTextColor(RGB565_CYAN, RGB565_BLACK);
-        gfx.setTextSize(2);
-        gfx.print("SETTINGS");
-
-        gfx.setCursor(280, 8);
-        gfx.setTextColor(RGB565_YELLOW, RGB565_BLACK);
-        gfx.setTextSize(1);
-        gfx.print("tap tile to act");
-
-        for (int i = 0; i < kCols * kRows; i++) {
-            drawTile(gfx, tile_[i]);
+        if (watchSettingsOpen_) {
+            gfx.setCursor(12, 8);
+            gfx.setTextColor(RGB565_CYAN, RGB565_BLACK);
+            gfx.setTextSize(2);
+            gfx.print("WATCH SETTINGS");
+            for (int i = 0; i < kCols * kRows; i++) {
+                if (tile_[i].label[0]) drawTile(gfx, tile_[i]);
+            }
+        } else {
+            gfx.setCursor(12, 8);
+            gfx.setTextColor(RGB565_CYAN, RGB565_BLACK);
+            gfx.setTextSize(2);
+            gfx.print("SETTINGS");
+            gfx.setCursor(240, 8);
+            gfx.setTextColor(RGB565_YELLOW, RGB565_BLACK);
+            gfx.setTextSize(1);
+            gfx.print("tap tile to act");
+            for (int i = 0; i < kCols * kRows; i++) {
+                if (tile_[i].label[0]) drawTile(gfx, tile_[i]);
+            }
         }
         dirty_ = false;
     }
@@ -57,6 +81,7 @@ public:
     int tileAtPoint(uint16_t px, uint16_t py) {
         for (int i = 0; i < kCols * kRows; i++) {
             const auto &t = tile_[i];
+            if (!t.label[0]) continue;
             if (px >= (uint16_t)t.x && px <= (uint16_t)(t.x + t.w) &&
                 py >= (uint16_t)t.y && py <= (uint16_t)(t.y + t.h))
                 return t.index;
@@ -65,7 +90,8 @@ public:
     }
 
     void rebuild() {
-        buildTiles();
+        if (watchSettingsOpen_) buildWatchTiles();
+        else buildTiles();
         dirty_ = true;
     }
 
@@ -74,60 +100,74 @@ private:
     AppMode *mode_;
     SettingsTile tile_[kCols * kRows];
     bool dirty_ = false;
+    bool watchSettingsOpen_ = false;
+
+    static int findTimeoutIndex(uint16_t val) {
+        for (int i = 0; i < 7; i++)
+            if (SCREEN_TIMEOUT_OPTIONS[i] == val) return i;
+        return 1;
+    }
 
     void buildTiles() {
         for (int i = 0; i < kCols * kRows; i++) {
+            tile_[i].label = "";  // blank by default
+            tile_[i].index = i;
             int col = i % kCols;
             int row = i / kCols;
             tile_[i].x = kGridX + col * (kTileW + kGap);
             tile_[i].y = kGridY + row * (kTileH + kGap);
             tile_[i].w = kTileW;
             tile_[i].h = kTileH;
-            tile_[i].index = i;
         }
 
         // 0: SETUP
-        tile_[0].label = "SETUP";
-        tile_[0].value = "AP portal";
-        tile_[0].accent = RGB565_CYAN;
+        tile_[0].label = "SETUP"; tile_[0].value = "AP portal"; tile_[0].accent = RGB565_CYAN;
+        // 1: FACE
+        tile_[1].label = "FACE"; tile_[1].value = kWatchFaceNames[settings_->watchFace]; tile_[1].accent = gfx_Color565(120, 220, 255);
+        // 2: WATCH
+        tile_[2].label = "WATCH"; tile_[2].value = "Launch now"; tile_[2].accent = gfx_Color565(180, 140, 255);
+        // 3: BOOT
+        tile_[3].label = "BOOT"; tile_[3].value = settings_->bootMode; tile_[3].accent = gfx_Color565(255, 100, 40);
+        // 4: BOT
+        tile_[4].label = "BOT"; tile_[4].value = hasWhisplayUrl(*settings_) ? "Launch now" : "Needs URL";
+        tile_[4].accent = hasWhisplayUrl(*settings_) ? RGB565_GREEN : RGB565_RED;
+        // 5: AI
+        tile_[5].label = "AI"; tile_[5].value = (hasWhisplayUrl(*settings_) || aiCanRunOffline()) ? "Launch now" : "Needs URL";
+        tile_[5].accent = (hasWhisplayUrl(*settings_) || aiCanRunOffline()) ? RGB565_CYAN : RGB565_RED;
+        // 6: empty
+        // 7: BACK
+        tile_[7].label = "BACK"; tile_[7].value = "Close"; tile_[7].accent = RGB565_WHITE;
+    }
 
-        // 1: MODE
-        tile_[1].label = "MODE";
-        tile_[1].value = modeLabel(*mode_);
-        tile_[1].accent = RGB565_GREEN;
+    void buildWatchTiles() {
+        for (int i = 0; i < kCols * kRows; i++) {
+            tile_[i].label = "";
+            tile_[i].index = i;
+            int col = i % kCols;
+            int row = i / kCols;
+            tile_[i].x = kGridX + col * (kTileW + kGap);
+            tile_[i].y = kGridY + row * (kTileH + kGap);
+            tile_[i].w = kTileW;
+            tile_[i].h = kTileH;
+        }
 
-        // 2: PERSONA
-        tile_[2].label = "PERSONA";
-        tile_[2].value = personaShortLabel();
-        tile_[2].accent = gfx_Color565(255, 180, 50);
+        // Sleep is intentionally disabled until wake is proven 100% reliable.
+        // Leave this submenu effectively empty except for BACK.
 
-        // 3: MODEL
-        tile_[3].label = "MODEL";
-        tile_[3].value = shorten(settings_->model, 14);
-        tile_[3].accent = gfx_Color565(255, 215, 0);
+        // 0: unused
+        // 1: unused
 
-        // 4: BOOT
-        tile_[4].label = "BOOT";
-        tile_[4].value = settings_->bootMode;
-        tile_[4].accent = gfx_Color565(255, 100, 40);
+        // 4: (spare — draw empty for layout)
+        // 5: (spare)
 
-        // 5: LAUNCH
-        tile_[5].label = "LAUNCH";
-        tile_[5].value = modeLabel(bootModeFromString(settings_->bootMode));
-        tile_[5].accent = RGB565_GREEN;
-
-        // 6: AI SHOW
-        tile_[6].label = "AI SHOW";
-        tile_[6].value = hasWhisplayUrl(*settings_) ? "Launch now" : "Needs URL";
-        tile_[6].accent = hasWhisplayUrl(*settings_) ? RGB565_CYAN : RGB565_RED;
+        // 6: (spare)
 
         // 7: BACK
-        tile_[7].label = "BACK";
-        tile_[7].value = modeLabel(*mode_);
-        tile_[7].accent = RGB565_WHITE;
+        tile_[7].label = "BACK"; tile_[7].value = "Settings"; tile_[7].accent = RGB565_WHITE;
     }
 
     void drawTile(Arduino_GFX &gfx, const SettingsTile &t) {
+        if (!t.label[0]) return;
         gfx.fillRoundRect(t.x, t.y, t.w, t.h, 8, 0x1082);
         gfx.drawRoundRect(t.x, t.y, t.w, t.h, 8, t.accent);
         gfx.setTextColor(t.accent, 0x1082);
@@ -136,27 +176,9 @@ private:
         gfx.setCursor(lx, t.y + 12);
         gfx.print(t.label);
         gfx.setTextColor(RGB565_WHITE, 0x1082);
-        gfx.setTextSize(1);
-        gfx.setCursor(t.x + 8, t.y + 44);
+        gfx.setTextSize(2);
+        gfx.setCursor(t.x + 8, t.y + 52);
         gfx.print(t.value.c_str());
-    }
-
-    const char *personaShortLabel() {
-        if (!settings_->personaPrompt[0]) return "Default";
-        String p = settings_->personaPrompt;
-        if (p.indexOf("concise") >= 0 && p.indexOf("practical") >= 0) return "Neutral";
-        if (p.indexOf("warm") >= 0) return "Friendly";
-        if (p.indexOf("cranky") >= 0) return "Cranky";
-        if (p.indexOf("roast") >= 0) return "Roast";
-        if (p.indexOf("sleepy") >= 0 || p.indexOf("overworked") >= 0) return "Sleepy";
-        if (p.indexOf("coach") >= 0 || p.indexOf("supportive") >= 0) return "Coach";
-        if (p.indexOf("philosopher") >= 0) return "Philos.";
-        if (p.indexOf("oracle") >= 0 || p.indexOf("mythic") >= 0) return "Oracle";
-        if (p.indexOf("joke") >= 0) return "Joke";
-        if (p.indexOf("tutor") >= 0) return "Tutor";
-        if (p.indexOf("detective") >= 0) return "Detectv";
-        if (p.indexOf("zen") >= 0) return "Zen";
-        return "Custom";
     }
 
     static String shorten(const char *str, int maxLen) {

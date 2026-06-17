@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "AppSettings.h"
+#include "GroqWatchLog.h"
 #include "pin_config.h"
 
 static constexpr unsigned long AI_LIST_REFRESH_MS = 30000;
@@ -202,16 +203,16 @@ static bool aiEnsureSdCache() {
     if (aiSdChecked) return aiSdReady;
     aiSdChecked = true;
 
-    Serial.println("[AI] checking SD cache...");
+    GW_LOGLN("[AI] checking SD cache...");
     SD_MMC.setPins(SDMMC_CLK, SDMMC_CMD, SDMMC_DATA);
     if (!SD_MMC.begin("/sdcard", true, false)) {
         aiSdReady = false;
-        Serial.println("[AI] SD_MMC begin failed");
+        GW_LOGLN("[AI] SD_MMC begin failed");
         return false;
     }
     if (SD_MMC.cardType() == CARD_NONE) {
         aiSdReady = false;
-        Serial.println("[AI] no SD card detected");
+        GW_LOGLN("[AI] no SD card detected");
         return false;
     }
     if (!SD_MMC.exists(AI_CACHE_DIR)) SD_MMC.mkdir(AI_CACHE_DIR);
@@ -219,7 +220,7 @@ static bool aiEnsureSdCache() {
     aiRefreshSdStats();
     aiRefreshCachedFiles();
     aiMarkNeedsRedraw();
-    Serial.printf("[AI] SD cache %s, total=%lluMB used=%lluMB files=%u\n",
+    GW_LOGF("[AI] SD cache %s, total=%lluMB used=%lluMB files=%u\n",
                   aiSdReady ? "ready" : "unavailable",
                   (unsigned long long)(aiSdTotalBytes / (1024ULL * 1024ULL)),
                   (unsigned long long)(aiSdUsedBytes / (1024ULL * 1024ULL)),
@@ -254,7 +255,7 @@ static bool aiEnsureFreeSpaceForCache(uint64_t incomingBytes, String &error) {
 
     for (const auto &entry : oldestFirst) {
         if (aiCurrentSlide.fromSd && entry.path == aiCurrentSlide.cachePath) continue;
-        Serial.println(String("[AI] pruning cached slide: ") + entry.path);
+        GW_LOGLN(String("[AI] pruning cached slide: ") + entry.path);
         SD_MMC.remove(entry.path);
         aiRefreshSdStats();
         freeBytes = aiSdTotalBytes > aiSdUsedBytes ? (aiSdTotalBytes - aiSdUsedBytes) : 0;
@@ -273,14 +274,14 @@ static bool aiFetchRemoteList(const char *baseUrl, String &error) {
     error = "";
     std::vector<String> nextFiles;
     String reqUrl = aiNormalizeUrl(String(baseUrl)) + "/api/generated-images";
-    Serial.println(String("[AI] fetching list: ") + reqUrl);
+    GW_LOGLN(String("[AI] fetching list: ") + reqUrl);
     HTTPClient http;
     http.begin(reqUrl);
     http.setTimeout(7000);
     int code = http.GET();
     if (code != 200) {
         error = code > 0 ? "HTTP " + String(code) : "List failed.";
-        Serial.println(String("[AI] list fetch failed: ") + error);
+        GW_LOGLN(String("[AI] list fetch failed: ") + error);
         http.end();
         return false;
     }
@@ -315,7 +316,7 @@ static bool aiFetchRemoteList(const char *baseUrl, String &error) {
 
     aiRemoteFiles.swap(nextFiles);
     aiLastListRefreshMs = millis();
-    Serial.printf("[AI] remote photo count=%u\n", (unsigned)aiRemoteFiles.size());
+    GW_LOGF("[AI] remote photo count=%u\n", (unsigned)aiRemoteFiles.size());
     return true;
 }
 
@@ -329,7 +330,7 @@ static bool aiSetCurrentSlideFromMemory(const String &fileName, uint8_t *buffer,
     aiStatus = "Showing AI gallery";
     aiLastError = "";
     aiMarkNeedsRedraw();
-    Serial.println(String("[AI] slide ready from RAM: ") + fileName);
+    GW_LOGLN(String("[AI] slide ready from RAM: ") + fileName);
     return true;
 }
 
@@ -342,7 +343,7 @@ static bool aiSetCurrentSlideFromSd(const String &fileName, const String &cacheP
     aiStatus = "Showing AI gallery";
     aiLastError = "";
     aiMarkNeedsRedraw();
-    Serial.println(String("[AI] slide ready from SD: ") + cachePath);
+    GW_LOGLN(String("[AI] slide ready from SD: ") + cachePath);
     return true;
 }
 
@@ -363,7 +364,7 @@ static bool aiDownloadSlideToMemory(const char *baseUrl, size_t index, String &e
     if (!aiBuildCompanionUrl(baseUrl, index, reqUrl, error)) return false;
 
     const String &fn = aiRemoteFiles[index];
-    Serial.println(String("[AI] downloading to RAM: ") + fn);
+    GW_LOGLN(String("[AI] downloading to RAM: ") + fn);
 
     HTTPClient http;
     http.begin(reqUrl);
@@ -454,7 +455,7 @@ static bool aiDownloadSlideToSd(const char *baseUrl, size_t index, String &error
 
     String reqUrl;
     if (!aiBuildCompanionUrl(baseUrl, index, reqUrl, error)) return false;
-    Serial.println(String("[AI] downloading to SD: ") + fn + " -> " + cachePath);
+    GW_LOGLN(String("[AI] downloading to SD: ") + fn + " -> " + cachePath);
 
     HTTPClient http;
     http.begin(reqUrl);
@@ -553,7 +554,7 @@ static bool aiShowNextSlide(const char *baseUrl, bool forceRefresh = false) {
     if (wifiUp && baseUrl && baseUrl[0]) {
         if (forceRefresh || aiRemoteFiles.empty() || millis() - aiLastListRefreshMs >= AI_LIST_REFRESH_MS) {
             if (!aiFetchRemoteList(baseUrl, err)) {
-                Serial.println(String("[AI] remote list unavailable, falling back to SD: ") + err);
+                GW_LOGLN(String("[AI] remote list unavailable, falling back to SD: ") + err);
                 if (aiShowNextCachedSlide()) return true;
                 aiClearCurrentSlide();
                 aiStatus = err.length() ? err : "No AI images.";
@@ -567,7 +568,7 @@ static bool aiShowNextSlide(const char *baseUrl, bool forceRefresh = false) {
             size_t next = (size_t)((aiSlideIndex + 1) % (int)aiRemoteFiles.size());
             for (size_t attempt = 0; attempt < aiRemoteFiles.size(); attempt++) {
                 if (aiDownloadSlideToSd(baseUrl, next, err)) return true;
-                Serial.println(String("[AI] SD download failed, trying RAM fallback: ") + err);
+                GW_LOGLN(String("[AI] SD download failed, trying RAM fallback: ") + err);
                 if (aiDownloadSlideToMemory(baseUrl, next, err)) return true;
                 next = (next + 1) % aiRemoteFiles.size();
             }
@@ -642,11 +643,11 @@ static bool aiRenderCurrentSlideJpegDec(Arduino_GFX &gfx, String &error) {
 
     bool opened = false;
     if (aiCurrentSlide.fromSd && aiCurrentSlide.cachePath.length()) {
-        Serial.println(String("[AI] JPEGDEC open SD: ") + aiCurrentSlide.cachePath);
+        GW_LOGLN(String("[AI] JPEGDEC open SD: ") + aiCurrentSlide.cachePath);
         opened = aiJpeg.open(aiCurrentSlide.cachePath.c_str(), aiJpegOpenFile, aiJpegCloseFile,
                              aiJpegReadFile, aiJpegSeekFile, aiJpegDrawCallback);
     } else if (aiCurrentSlide.buffer && aiCurrentSlide.bufferLen) {
-        Serial.printf("[AI] JPEGDEC open RAM: %s bytes=%u\n", aiCurrentSlide.fileName.c_str(), (unsigned)aiCurrentSlide.bufferLen);
+        GW_LOGF("[AI] JPEGDEC open RAM: %s bytes=%u\n", aiCurrentSlide.fileName.c_str(), (unsigned)aiCurrentSlide.bufferLen);
         opened = aiJpeg.openRAM(aiCurrentSlide.buffer, aiCurrentSlide.bufferLen, aiJpegDrawCallback);
     }
 
@@ -687,7 +688,7 @@ static bool aiRenderCurrentSlideJpegDec(Arduino_GFX &gfx, String &error) {
     const int drawY = max(0, (AI_RENDER_H - scaledH) / 2);
 
     gfx.fillScreen(RGB565_BLACK);
-    Serial.printf("[AI] JPEGDEC decode %s src=%dx%d scale=%d draw=%d,%d scaled=%dx%d\n",
+    GW_LOGF("[AI] JPEGDEC decode %s src=%dx%d scale=%d draw=%d,%d scaled=%dx%d\n",
                   aiCurrentSlide.fileName.c_str(), width, height, scale, drawX, drawY, scaledW, scaledH);
     int decodeResult = aiJpeg.decode(drawX, drawY, scale);
     aiJpeg.close();
@@ -697,7 +698,7 @@ static bool aiRenderCurrentSlideJpegDec(Arduino_GFX &gfx, String &error) {
         return false;
     }
 
-    Serial.printf("[AI] JPEGDEC rendered %s\n", aiCurrentSlide.fileName.c_str());
+    GW_LOGF("[AI] JPEGDEC rendered %s\n", aiCurrentSlide.fileName.c_str());
     return true;
 }
 
@@ -713,7 +714,7 @@ static void aiDrawCurrentSlide(Arduino_GFX &gfx) {
         if (!aiRecoveryInProgress && recoverableCacheIssue && aiCurrentSlide.fromSd && aiCurrentSlide.cachePath.length() &&
             aiLastBaseUrl.length() && WiFi.status() == WL_CONNECTED && aiSlideIndex >= 0) {
             aiRecoveryInProgress = true;
-            Serial.println(String("[AI] purging bad cached slide and retrying: ") + aiCurrentSlide.cachePath + " reason=" + decodeError);
+            GW_LOGLN(String("[AI] purging bad cached slide and retrying: ") + aiCurrentSlide.cachePath + " reason=" + decodeError);
             SD_MMC.remove(aiCurrentSlide.cachePath);
             aiRefreshCachedFiles();
             aiClearCurrentSlide();
@@ -723,7 +724,7 @@ static void aiDrawCurrentSlide(Arduino_GFX &gfx) {
                 aiDrawCurrentSlide(gfx);
                 return;
             }
-            Serial.println(String("[AI] retry download failed: ") + retryError);
+            GW_LOGLN(String("[AI] retry download failed: ") + retryError);
             decodeError = retryError.length() ? retryError : decodeError;
             aiRecoveryInProgress = false;
         }

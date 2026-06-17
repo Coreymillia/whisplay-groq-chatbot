@@ -17,10 +17,16 @@ static constexpr const char *kKeyModel = "model";
 static constexpr const char *kKeyPersona = "persona";
 static constexpr const char *kKeyBootMode = "bootMode";
 static constexpr const char *kKeyStyle = "style";
+static constexpr const char *kKeyWatchFace = "wface";
+static constexpr const char *kKeyScreenTimeout = "scrto";
+static constexpr const char *kKeyWakeMethod = "wakem";
 
 static constexpr const char *kDefaultModel = "llama-3.1-8b-instant";
 static constexpr const char *kDefaultPersona =
     "You are a concise, practical wrist-worn assistant. Keep replies short and helpful.";
+
+static constexpr const char *kWatchFaceNames[] = {"Particles", "Clean", "Stub"};
+static constexpr uint8_t kWatchFaceCount = 3;
 
 struct AppSettings {
     char wifiSsid[64];
@@ -34,6 +40,9 @@ struct AppSettings {
     char personaPrompt[512];
     char bootMode[12];
     uint8_t watchStyle;
+    uint8_t watchFace;
+    uint16_t screenTimeoutSec;  // 0 = never
+    uint8_t wakeMethod;         // 0 = button, 1 = shake, 2 = both
 };
 
 enum class AppMode : uint8_t {
@@ -50,6 +59,9 @@ inline void defaultSettings(AppSettings &settings) {
     strlcpy(settings.personaPrompt, kDefaultPersona, sizeof(settings.personaPrompt));
     strlcpy(settings.bootMode, "watch", sizeof(settings.bootMode));
     settings.watchStyle = 0;
+    settings.watchFace  = 0;
+    settings.screenTimeoutSec = 30;
+    settings.wakeMethod = 0;  // button only
 }
 
 inline bool hasWiFi(const AppSettings &settings) {
@@ -62,6 +74,10 @@ inline bool hasGroqKey(const AppSettings &settings) {
 
 inline bool hasWhisplayUrl(const AppSettings &settings) {
     return settings.whisplayUrl[0] != '\0';
+}
+
+inline bool hasNwsLocation(const AppSettings &settings) {
+    return settings.latitude[0] != '\0' && settings.longitude[0] != '\0';
 }
 
 inline void loadSettings(AppSettings &settings) {
@@ -79,7 +95,10 @@ inline void loadSettings(AppSettings &settings) {
     String model = prefs.getString(kKeyModel, kDefaultModel);
     String persona = prefs.getString(kKeyPersona, kDefaultPersona);
     String bootMode = prefs.getString(kKeyBootMode, "watch");
-    settings.watchStyle = prefs.getUChar(kKeyStyle, 0);
+    settings.watchStyle  = prefs.getUChar(kKeyStyle, 0);
+    settings.watchFace   = prefs.getUChar(kKeyWatchFace, 0);
+    settings.screenTimeoutSec = prefs.getUShort(kKeyScreenTimeout, 30);
+    settings.wakeMethod  = prefs.getUChar(kKeyWakeMethod, 0);
     prefs.end();
 
     ssid.toCharArray(settings.wifiSsid, sizeof(settings.wifiSsid));
@@ -94,6 +113,9 @@ inline void loadSettings(AppSettings &settings) {
     bootMode.toCharArray(settings.bootMode, sizeof(settings.bootMode));
 
     if (settings.watchStyle > 2) settings.watchStyle = 0;
+    if (settings.watchFace  > 2) settings.watchFace  = 0;
+    if (settings.screenTimeoutSec > 3600) settings.screenTimeoutSec = 30;
+    if (settings.wakeMethod > 2) settings.wakeMethod = 0;
     if (settings.bootMode[0] == '\0') strlcpy(settings.bootMode, "watch", sizeof(settings.bootMode));
 }
 
@@ -111,6 +133,9 @@ inline void saveSettings(const AppSettings &settings) {
     prefs.putString(kKeyPersona, settings.personaPrompt);
     prefs.putString(kKeyBootMode, settings.bootMode);
     prefs.putUChar(kKeyStyle, settings.watchStyle);
+    prefs.putUChar(kKeyWatchFace, settings.watchFace);
+    prefs.putUShort(kKeyScreenTimeout, settings.screenTimeoutSec);
+    prefs.putUChar(kKeyWakeMethod, settings.wakeMethod);
     prefs.end();
 }
 

@@ -3,6 +3,7 @@
 #include <HTTPClient.h>
 #include <WiFi.h>
 #include <Wire.h>
+#include <esp_log.h>
 #include <time.h>
 #include <vector>
 
@@ -17,12 +18,15 @@
 #include "AppModes.h"
 #include "AppSettings.h"
 #include "GroqApi.h"
+#include "GroqWatchLog.h"
 #include "mic_audio.h"
 #include "PixelCanvas.h"
 #include "SettingsMenu.h"
 #include "SetupPortal.h"
 
 using namespace GroqWatch;
+
+void manualScreenSleep();
 
 // ── Hardware globals ─────────────────────────────────────────────────────────
 namespace {
@@ -58,8 +62,23 @@ unsigned long lastTouchLogMs = 0;
 unsigned long lastWifiCheckMs = 0;
 unsigned long aiFrameLastMs = 0;
 bool aiModeActive = false;
-bool aiBtnPrev = false;
-unsigned long aiBtnLastMs = 0;
+bool aiBootDown = false;
+bool aiBootLongHandled = false;
+unsigned long aiBootDownMs = 0;
+unsigned long lastActivityMs = 0;
+bool screenBlanked = false;
+unsigned long wakeInputIgnoreUntilMs = 0;
+bool wakeBootWaitRelease = false;
+static constexpr unsigned long AI_BOOT_LONG_MS = 900;
+
+// ── Clean watch face state ────────────────────────────────────────────
+bool cleanWatchDirty = true;
+int cleanWatchLastMinute = -1;
+String cleanWatchForecast = "";
+unsigned long cleanWatchForecastMs = 0;
+unsigned long cleanWatchForecastNextAttemptMs = 0;
+static constexpr unsigned long WEATHER_REFRESH_MS = 30 * 60 * 1000;  // 30 min
+static constexpr unsigned long WEATHER_RETRY_MS = 60 * 1000;         // 1 min
 
 struct CachedClock {
     int year = 2026, month = 1, day = 1, hour = 12, minute = 0, second = 0;
@@ -75,6 +94,11 @@ struct TouchState {
 
 bool touchPrevPressed = false;
 uint16_t touchLastX = 0, touchLastY = 0;
+unsigned long lastTouchPollMs = 0;
+unsigned long touchErrorBackoffUntilMs = 0;
+static constexpr unsigned long TOUCH_IDLE_POLL_MS = 30;
+static constexpr unsigned long TOUCH_ACTIVE_POLL_MS = 16;
+static constexpr unsigned long TOUCH_ERROR_BACKOFF_MS = 80;
 
 struct Particle {
     int16_t x = 0, y = 0;
@@ -193,7 +217,12 @@ bool ensureWifiConnected() {
 void renderCurrentMode();
 void resetTouchState();
 bool botTouchReadSuspended();
+void dirtyAllModes();
 static bool botFetchRemoteState(bool force);
+void renderCleanWatchFace();
+void renderStubWatchFace();
+void cycleWatchFace();
+void fetchNwsForecast();
 enum class BotState : uint8_t { Idle, Syncing, ShowingReply };
 extern BotState botState;
 extern String botStatus;
@@ -220,7 +249,9 @@ void setMode(AppMode newMode) {
     }
 
     currentMode = newMode;
-    Serial.printf("mode %s -> %s\n", modeLabel(oldMode), modeLabel(currentMode));
+    lastActivityMs = millis();
+    screenBlanked = false;
+    GW_LOGF("mode %s -> %s\n", modeLabel(oldMode), modeLabel(currentMode));
 
     if (currentMode == AppMode::AiScreensaver) {
         aiModeActive = false;
@@ -229,6 +260,11 @@ void setMode(AppMode newMode) {
             ensureWifiConnected();
         }
         pinMode(WATCH_BOOT_BUTTON_PIN, INPUT_PULLUP);
+        aiBootDown = false;
+        aiBootLongHandled = false;
+        aiBootDownMs = 0;
+        wakeBootWaitRelease = digitalRead(WATCH_BOOT_BUTTON_PIN) == LOW;
+        wakeInputIgnoreUntilMs = millis() + 250;
         aiModeActive = aiShowNextSlide(settings.whisplayUrl, true);
         aiFrameLastMs = millis();
     }
@@ -251,6 +287,8 @@ void setMode(AppMode newMode) {
     if (currentMode == AppMode::Watch) {
         aiClearCurrentSlide();
         aiModeActive = false;
+        cleanWatchDirty = true;
+        cleanWatchLastMinute = -1;
     }
     if (currentMode == AppMode::Settings) {
         settingsMenu.begin(settings, currentMode);
@@ -266,38 +304,75 @@ void checkWifiAndFallback() {
 
     if (currentMode == AppMode::AiScreensaver) {
         if (wifiConnected && WiFi.status() != WL_CONNECTED) {
-            Serial.println("WiFi lost -> AI continuing from SD cache if available");
+            GW_LOGLN("WiFi lost -> AI continuing from SD cache if available");
             disconnectWiFi();
         }
         return;
     }
 
     if (!wifiConnected || WiFi.status() != WL_CONNECTED) {
-        Serial.println("WiFi lost -> fallback to Watch");
+        GW_LOGLN("WiFi lost -> fallback to Watch");
         disconnectWiFi();
         setMode(AppMode::Watch);
     }
 }
 
 // ── Touch ──────────────────────────────────────────────────────────────
-TouchState pollTouch() {
-    TouchState ts;
-    int fc=(int)touchDev->IIC_Read_Device_Value(Arduino_IIC_Touch::Value_Information::TOUCH_FINGER_NUMBER);
-    ts.pressed=fc>0;
-    if(ts.pressed) {
-        touchLastX=(uint16_t)touchDev->IIC_Read_Device_Value(Arduino_IIC_Touch::Value_Information::TOUCH_COORDINATE_X);
-        touchLastY=(uint16_t)touchDev->IIC_Read_Device_Value(Arduino_IIC_Touch::Value_Information::TOUCH_COORDINATE_Y);
+bool touchShouldPollNow() {
+    const unsigned long now = millis();
+    if (!touchReady) return false;
+    if (now < touchErrorBackoffUntilMs) return false;
+
+    const unsigned long pollMs = touchPrevPressed ? TOUCH_ACTIVE_POLL_MS : TOUCH_IDLE_POLL_MS;
+    if (lastTouchPollMs != 0 && now - lastTouchPollMs < pollMs) return false;
+    return true;
+}
+
+bool pollTouch(TouchState &ts) {
+    if (!touchShouldPollNow()) return false;
+
+    lastTouchPollMs = millis();
+    const int fc = (int)touchDev->IIC_Read_Device_Value(
+        Arduino_IIC_Touch::Value_Information::TOUCH_FINGER_NUMBER);
+    if (fc < 0) {
+        touchErrorBackoffUntilMs = millis() + TOUCH_ERROR_BACKOFF_MS;
+        return false;
     }
-    ts.x=touchLastX; ts.y=touchLastY;
-    ts.justPressed=ts.pressed&&!touchPrevPressed; ts.justReleased=!ts.pressed&&touchPrevPressed;
-    touchPrevPressed=ts.pressed;
-    return ts;
+
+    ts.pressed = fc > 0;
+    if (ts.pressed) {
+        const int rx = (int)touchDev->IIC_Read_Device_Value(
+            Arduino_IIC_Touch::Value_Information::TOUCH_COORDINATE_X);
+        const int ry = (int)touchDev->IIC_Read_Device_Value(
+            Arduino_IIC_Touch::Value_Information::TOUCH_COORDINATE_Y);
+        if (rx < 0 || ry < 0) {
+            touchErrorBackoffUntilMs = millis() + TOUCH_ERROR_BACKOFF_MS;
+            return false;
+        }
+        touchLastX = (uint16_t)rx;
+        touchLastY = (uint16_t)ry;
+    }
+
+    ts.x = touchLastX;
+    ts.y = touchLastY;
+    ts.justPressed = ts.pressed && !touchPrevPressed;
+    ts.justReleased = !ts.pressed && touchPrevPressed;
+    touchPrevPressed = ts.pressed;
+
+    if (touchDev->IIC_Interrupt_Flag == true) {
+        touchDev->IIC_Interrupt_Flag = false;
+    }
+
+    return ts.pressed || ts.justPressed || ts.justReleased;
 }
 
 void resetTouchState() {
     touchPrevPressed = false;
     touchLastX = 0;
     touchLastY = 0;
+    lastTouchPollMs = 0;
+    touchErrorBackoffUntilMs = 0;
+    touchDev->IIC_Interrupt_Flag = false;
 }
 
 bool botTouchReadSuspended() {
@@ -400,7 +475,7 @@ void renderClockToCanvas() {
 void renderWatchStatusBar() {
     char db[24]; snprintf(db,sizeof(db),"%04d-%02d-%02d %02d:%02d:%02d",clockNow.year,clockNow.month,clockNow.day,clockNow.hour,clockNow.minute,clockNow.second);
     gfx->setTextSize(1);
-    gfx->setTextColor(RGB565_CYAN, RGB565_BLACK); gfx->setCursor(8,8); gfx->print(kStyleNames[activeStyle]);
+    gfx->setTextColor(RGB565_CYAN, RGB565_BLACK); gfx->setCursor(8,8); gfx->print(kWatchFaceNames[settings.watchFace]);
     gfx->setTextColor(RGB565_WHITE, RGB565_BLACK); gfx->setCursor(8,482); gfx->print("tap top:style");
     gfx->setCursor(270,482); gfx->print("bottom:menu");
     gfx->setCursor(70,458); gfx->print(db);
@@ -410,11 +485,185 @@ void renderWatchStatusBar() {
 }
 
 void renderWatchFrame() {
-    renderStyleBackground(); renderClockToCanvas(); canvas.render(*gfx); renderWatchStatusBar();
+    switch (settings.watchFace) {
+        case 0: renderStyleBackground(); renderClockToCanvas(); canvas.render(*gfx); break;
+        case 1: renderCleanWatchFace(); break;
+        case 2: renderStubWatchFace(); break;
+    }
+    renderWatchStatusBar();
 }
 
-void cycleWatchStyle() {
-    settings.watchStyle=clampStyle((settings.watchStyle+1)%3); saveSettings(settings); initParticlesForStyle(settings.watchStyle);
+void fetchNwsForecast() {
+    const unsigned long now = millis();
+    if (!hasNwsLocation(settings)) {
+        cleanWatchForecast = "";
+        cleanWatchForecastNextAttemptMs = 0;
+        return;
+    }
+    if (!wifiConnected || WiFi.status() != WL_CONNECTED) {
+        if (cleanWatchForecast != "Weather offline") {
+            cleanWatchForecast = "Weather offline";
+            cleanWatchDirty = true;
+        }
+        cleanWatchForecastNextAttemptMs = now + WEATHER_RETRY_MS;
+        return;
+    }
+    if (cleanWatchForecastNextAttemptMs && now < cleanWatchForecastNextAttemptMs) return;
+
+    auto failForecast = [&](const String &msg) {
+        cleanWatchForecast = msg;
+        cleanWatchForecastNextAttemptMs = millis() + WEATHER_RETRY_MS;
+        cleanWatchDirty = true;
+        GW_LOGF("[NWS] %s; retry in %lu ms\n", msg.c_str(), WEATHER_RETRY_MS);
+    };
+
+    const unsigned long fetchStartMs = millis();
+    GW_LOGLN("[NWS] forecast fetch start");
+
+    String pointsPath = "https://api.weather.gov/points/" + String(settings.latitude) + "," + String(settings.longitude);
+    HTTPClient http;
+    http.setTimeout(4000);
+    if (!http.begin(pointsPath)) { failForecast("NWS begin fail"); return; }
+    http.addHeader("User-Agent", "(GroqWatch, coreymillia@gmail.com)");
+    int code = http.GET();
+    if (code != 200) { http.end(); failForecast("NWS HTTP " + String(code)); return; }
+
+    JsonDocument ptsDoc;
+    if (deserializeJson(ptsDoc, http.getStream())) { http.end(); failForecast("NWS parse"); return; }
+    http.end();
+    String forecastUrl = String(ptsDoc["properties"]["forecast"] | "");
+    if (!forecastUrl.length()) { failForecast("No NWS fcst"); return; }
+
+    HTTPClient http2;
+    http2.setTimeout(4000);
+    if (!http2.begin(forecastUrl)) { failForecast("NWS url fail"); return; }
+    http2.addHeader("User-Agent", "(GroqWatch, coreymillia@gmail.com)");
+    code = http2.GET();
+    if (code != 200) { http2.end(); failForecast("NWS fcst " + String(code)); return; }
+
+    JsonDocument fcDoc;
+    if (deserializeJson(fcDoc, http2.getStream())) { http2.end(); failForecast("NWS fcst parse"); return; }
+    http2.end();
+
+    JsonArray periods = fcDoc["properties"]["periods"].as<JsonArray>();
+    if (!periods || periods.size() < 2) { failForecast("No NWS periods"); return; }
+
+    String fc = "";
+    for (int i = 0; i < min(4, (int)periods.size()); i++) {
+        String name  = String(periods[i]["name"]  | "");
+        String temp  = String(periods[i]["temperature"] | 0);
+        String unit  = String(periods[i]["temperatureUnit"] | "F");
+        String sFore = String(periods[i]["shortForecast"] | "");
+        if (i > 0) fc += " | ";
+        fc += name + ": " + temp + unit + " " + sFore;
+    }
+    cleanWatchForecast = fc;
+    cleanWatchForecastMs = now;
+    cleanWatchForecastNextAttemptMs = now + WEATHER_REFRESH_MS;
+    cleanWatchDirty = true;
+    GW_LOGF("[NWS] forecast updated in %lu ms\n", millis() - fetchStartMs);
+}
+
+void renderCleanWatchFace() {
+    const int minuteKey = clockNow.hour * 60 + clockNow.minute;
+    if (!cleanWatchDirty && minuteKey == cleanWatchLastMinute) return;
+    cleanWatchDirty = false;
+    cleanWatchLastMinute = minuteKey;
+
+    gfx->fillScreen(RGB565_BLACK);
+    if (!clockNow.valid) return;
+
+    int h12 = clockNow.hour % 12; if (h12 == 0) h12 = 12;
+    char tb[12]; snprintf(tb, sizeof(tb), "%d:%02d", h12, clockNow.minute);
+    char db[24]; snprintf(db, sizeof(db), "%04d-%02d-%02d", clockNow.year, clockNow.month, clockNow.day);
+
+    // Large time at top
+    gfx->setTextSize(5);
+    gfx->setTextColor(gfx->color565(250, 250, 250), RGB565_BLACK);
+    int tw = strlen(tb) * 30;
+    gfx->setCursor((LCD_WIDTH - tw) / 2, 30);
+    gfx->print(tb);
+
+    // Date below time
+    gfx->setTextSize(2);
+    gfx->setTextColor(gfx->color565(255, 180, 50), RGB565_BLACK);
+    int dw = strlen(db) * 12;
+    gfx->setCursor((LCD_WIDTH - dw) / 2, 105);
+    gfx->print(db);
+
+    gfx->setTextSize(1);
+    gfx->setTextColor(gfx->color565(180, 200, 220), RGB565_BLACK);
+    gfx->setCursor((LCD_WIDTH - 24) / 2, 130);
+    gfx->print(clockNow.hour >= 12 ? "PM" : "AM");
+
+    // NWS forecast section
+    const int forecastY = 155;
+    gfx->fillRoundRect(8, forecastY, LCD_WIDTH - 16, 200, 8, gfx->color565(10, 20, 40));
+    gfx->drawRoundRect(8, forecastY, LCD_WIDTH - 16, 200, 8, gfx->color565(60, 120, 200));
+    gfx->setTextSize(1);
+    gfx->setTextColor(gfx->color565(60, 120, 200), gfx->color565(10, 20, 40));
+    gfx->setCursor(18, forecastY + 8);
+    gfx->print("NWS Forecast");
+
+    if (cleanWatchForecast.length()) {
+        gfx->setTextSize(2);
+        gfx->setTextColor(RGB565_WHITE, gfx->color565(10, 20, 40));
+        gfx->setCursor(18, forecastY + 30);
+        // Word-wrap the forecast
+        String fc = cleanWatchForecast; fc.trim();
+        const int maxChars = 24;
+        int cy = forecastY + 30;
+        size_t pos = 0;
+        while (pos < fc.length() && cy < forecastY + 190) {
+            while (pos < fc.length() && fc[pos] == ' ') pos++;
+            if (pos >= fc.length()) break;
+            size_t end = min(fc.length(), pos + maxChars);
+            int sep = fc.indexOf(" | ", pos);
+            if (sep >= 0 && (size_t)sep < end) end = sep;
+            else if (end < fc.length()) {
+                int sp = fc.lastIndexOf(' ', (int)end);
+                if (sp >= 0 && (size_t)sp > (int)pos) end = (size_t)sp;
+            }
+            String line = fc.substring(pos, end); line.trim();
+            gfx->setCursor(18, cy);
+            gfx->print(line);
+            cy += 21;
+            pos = end;
+            if (pos < fc.length() && fc[pos] == '|') pos += 2;
+        }
+    } else if (!hasNwsLocation(settings)) {
+        gfx->setTextSize(1);
+        gfx->setTextColor(gfx->color565(120, 140, 160), gfx->color565(10, 20, 40));
+        gfx->setCursor(18, forecastY + 40);
+        gfx->print("Set lat/lon in Setup for weather.");
+    } else {
+        gfx->setTextSize(1);
+        gfx->setTextColor(gfx->color565(120, 140, 160), gfx->color565(10, 20, 40));
+        gfx->setCursor(18, forecastY + 40);
+        gfx->print("Fetching weather data...");
+        cleanWatchForecastMs = 0;  // force immediate retry
+    }
+}
+
+void renderStubWatchFace() {
+    // Placeholder for future analog / weather face
+    gfx->fillScreen(gfx->color565(12, 18, 32));
+    gfx->setTextSize(2);
+    gfx->setTextColor(RGB565_CYAN, RGB565_BLACK);
+    gfx->setCursor(60, 200);
+    gfx->print("Watch Face #3");
+    gfx->setTextSize(1);
+    gfx->setCursor(40, 240);
+    gfx->print("(analog / weather -- coming soon)");
+}
+
+void cycleWatchFace() {
+    settings.watchFace = (settings.watchFace + 1) % kWatchFaceCount;
+    if (settings.watchFace != 0) {
+        // Keep particle style separate for face 0 only
+    }
+    saveSettings(settings);
+    if (settings.watchFace == 0) initParticlesForStyle(settings.watchStyle);
 }
 
 // ── Mode rendering ─────────────────────────────────────────────────────
@@ -782,33 +1031,43 @@ void renderCurrentMode() {
 
 // ── Settings tile action ───────────────────────────────────────────────
 void handleSettingsTile(int tileIndex) {
+    // If in watch settings sub-menu, handle those tiles
+    if (settingsMenu.inWatchSettings()) {
+        switch (tileIndex) {
+            case 7: // BACK
+                settingsMenu.closeWatchSettings();
+                break;
+        }
+        return;
+    }
+
+    // Main settings tiles
     switch (tileIndex) {
         case 0: // SETUP
             disconnectWiFi();
             runSetupPortalModal(gfx, settings);
             break;
-        case 1: // MODE - cycle
-            if (currentMode == AppMode::Watch) setMode(AppMode::AiScreensaver);
-            else if (currentMode == AppMode::AiScreensaver) setMode(AppMode::Bot);
-            else setMode(AppMode::Watch);
+        case 1: // FACE - cycle
+            settings.watchFace = (settings.watchFace + 1) % kWatchFaceCount;
+            saveSettings(settings);
+            if (settings.watchFace == 0) {
+                initParticlesForStyle(settings.watchStyle);
+            }
             settingsMenu.rebuild();
+            renderCurrentMode();
             break;
-        case 2: // PERSONA
-            cyclePersona();
-            settingsMenu.rebuild();
+        case 2: // WATCH
+            setMode(AppMode::Watch);
             break;
-        case 3: // MODEL
-            cycleModel();
-            settingsMenu.rebuild();
-            break;
-        case 4: // BOOT
+        case 3: // BOOT
             cycleBootMode();
             settingsMenu.rebuild();
+            renderCurrentMode();
             break;
-        case 5: // LAUNCH
-            setMode(bootModeFromString(settings.bootMode));
+        case 4: // BOT
+            setMode(AppMode::Bot);
             break;
-        case 6: // AI SHOW
+        case 5: // AI
             if (hasWhisplayUrl(settings) || aiCanRunOffline()) setMode(AppMode::AiScreensaver);
             break;
         case 7: // BACK
@@ -822,7 +1081,7 @@ static void handleBotTouch(const TouchState &touch) {
     if (!touch.justPressed) return;
 
     if (millis() - lastTouchLogMs > 250) {
-        Serial.printf("touch x=%u y=%u mode=%s\n", touch.x, touch.y, modeLabel(currentMode));
+        GW_LOGF("touch x=%u y=%u mode=%s\n", touch.x, touch.y, modeLabel(currentMode));
         lastTouchLogMs = millis();
     }
 
@@ -851,6 +1110,8 @@ static void handleBotTouch(const TouchState &touch) {
 }
 
 void handleTouch(const TouchState &touch) {
+    if (!touch.pressed && !touch.justPressed && !touch.justReleased) return;
+    lastActivityMs = millis();
     if (currentMode == AppMode::Bot) {
         handleBotTouch(touch);
         return;
@@ -858,7 +1119,7 @@ void handleTouch(const TouchState &touch) {
 
     if (!touch.justPressed) return;
     if (millis() - lastTouchLogMs > 250) {
-        Serial.printf("touch x=%u y=%u mode=%s\n", touch.x, touch.y, modeLabel(currentMode));
+        GW_LOGF("touch x=%u y=%u mode=%s\n", touch.x, touch.y, modeLabel(currentMode));
         lastTouchLogMs = millis();
     }
 
@@ -881,7 +1142,15 @@ void handleTouch(const TouchState &touch) {
 
     // Watch mode touch zones
     if (touch.y < 80) {
-        cycleWatchStyle();
+        if (settings.watchFace == 0) {
+            // Face 0: cycle particle sub-style on top tap
+            settings.watchStyle = clampStyle((settings.watchStyle + 1) % 3);
+            saveSettings(settings);
+            initParticlesForStyle(settings.watchStyle);
+        } else {
+            // Other faces: cycle to next watch face on top tap
+            cycleWatchFace();
+        }
         return;
     }
     if (touch.y > 430) {
@@ -893,40 +1162,53 @@ void handleTouch(const TouchState &touch) {
 // ── Hardware init ──────────────────────────────────────────────────────
 void initHardware() {
     Serial.begin(115200); delay(100);
-    Serial.println(); Serial.println("GroqWatch boot");
-    Serial.printf("psramFound=%s size=%u free=%u heap=%u largest=%u\n",
-                  psramFound() ? "yes" : "no",
-                  static_cast<unsigned>(ESP.getPsramSize()),
-                  static_cast<unsigned>(ESP.getFreePsram()),
-                  static_cast<unsigned>(ESP.getFreeHeap()),
-                  static_cast<unsigned>(ESP.getMaxAllocHeap()));
+#if defined(GROQWATCH_LOW_LOG_BUILD) && GROQWATCH_LOW_LOG_BUILD
+    Serial.setDebugOutput(false);
+    esp_log_level_set("*", ESP_LOG_NONE);
+#endif
+    GW_LOGLN();
+    GW_LOGLN("GroqWatch boot");
+    GW_LOGF("psramFound=%s size=%u free=%u heap=%u largest=%u\n",
+            psramFound() ? "yes" : "no",
+            static_cast<unsigned>(ESP.getPsramSize()),
+            static_cast<unsigned>(ESP.getFreePsram()),
+            static_cast<unsigned>(ESP.getFreeHeap()),
+            static_cast<unsigned>(ESP.getMaxAllocHeap()));
     Wire.begin(IIC_SDA, IIC_SCL);
 
     displayReady = gfx->begin();
-    if (!displayReady) { Serial.println("display fail"); return; }
+    if (!displayReady) { GW_LOGLN("display fail"); return; }
     gfx->fillScreen(RGB565_BLACK);
     drawStatusScreen("GroqWatch","Display ready","Bringing up hardware...");
 
     touchReady = touchDev->begin();
     if (touchReady) {
         touchDev->IIC_Write_Device_State(Arduino_IIC_Touch::Device::TOUCH_POWER_MODE, Arduino_IIC_Touch::Device_Mode::TOUCH_POWER_MONITOR);
-        Serial.println("touch ready");
-    } else Serial.println("touch fail");
+        GW_LOGLN("touch ready");
+    } else GW_LOGLN("touch fail");
 
     rtcReady = rtc.begin(Wire, IIC_SDA, IIC_SCL);
     if (rtcReady) {
         RTC_DateTime dt=rtc.getDateTime(); rtcHasValidTime=rtcDateTimeLooksValid(dt);
         if(rtcHasValidTime){setFallbackFromRtc(dt);timeStatus="RTC";}
-        Serial.printf("rtc ready valid=%s\n",rtcHasValidTime?"yes":"no");
-    } else Serial.println("rtc fail");
+        GW_LOGF("rtc ready valid=%s\n",rtcHasValidTime?"yes":"no");
+    } else GW_LOGLN("rtc fail");
 
     pmuReady = power.begin(Wire, AXP2101_SLAVE_ADDRESS, IIC_SDA, IIC_SCL);
     if (pmuReady) {
         power.enableBattDetection(); power.enableBattVoltageMeasure();
         power.enableVbusVoltageMeasure(); power.enableSystemVoltageMeasure();
         power.enableTemperatureMeasure();
-        Serial.println("pmu ready");
-    } else Serial.println("pmu fail");
+        power.disableIRQ(XPOWERS_AXP2101_ALL_IRQ);
+        power.clearIrqStatus();
+        power.enableIRQ(
+            XPOWERS_AXP2101_PKEY_SHORT_IRQ |
+            XPOWERS_AXP2101_PKEY_LONG_IRQ |
+            XPOWERS_AXP2101_PKEY_POSITIVE_IRQ |
+            XPOWERS_AXP2101_PKEY_NEGATIVE_IRQ
+        );
+        GW_LOGLN("pmu ready");
+    } else GW_LOGLN("pmu fail");
 }
 
 }  // namespace
@@ -939,59 +1221,155 @@ void setup() {
     if (!displayReady) return;
 
     if (watchBootButtonHeld()) {
-        Serial.println("boot held -> setup");
+        GW_LOGLN("boot held -> setup");
         runSetupPortalModal(gfx, settings);
     }
     if (!hasWiFi(settings)) {
-        Serial.println("no wifi -> setup");
+        GW_LOGLN("no wifi -> setup");
         runSetupPortalModal(gfx, settings);
     }
 
     connectWiFi();
     aiEnsureSdCache();
     pollClock();
+    lastActivityMs = millis();
+    screenBlanked = false;
     settings.watchStyle=clampStyle(settings.watchStyle);
     initParticlesForStyle(settings.watchStyle);
 
-    // Determine initial mode from boot setting
+    // Honor the saved boot mode.
     AppMode bootMode = bootModeFromString(settings.bootMode);
-    if (bootMode == AppMode::Watch) {
-        setMode(AppMode::Watch);
-    } else {
-        setMode(bootMode);
-    }
+    GW_LOGF("startup boot mode=%s\n", settings.bootMode);
+    setMode(bootMode);
     renderCurrentMode();
+}
+
+// ── Screen timeout helpers ─────────────────────────────────────────────
+void dirtyAllModes() {
+    cleanWatchDirty = true;
+    cleanWatchLastMinute = -1;
+    botDirty = true;
+    aiMarkNeedsRedraw();
+}
+
+void setScreenPowerState(bool on) {
+    if (on) {
+        if (!screenBlanked) return;
+        gfx->displayOn();
+        screenBlanked = false;
+        lastActivityMs = millis();
+        wakeInputIgnoreUntilMs = millis() + 500;
+        wakeBootWaitRelease = digitalRead(WATCH_BOOT_BUTTON_PIN) == LOW;
+        aiBootDown = false;
+        aiBootLongHandled = false;
+        aiBootDownMs = 0;
+        resetTouchState();
+        cleanWatchDirty = true;
+        cleanWatchLastMinute = -1;
+        botDirty = true;
+        aiMarkNeedsRedraw();
+        GW_LOGLN("[Screen] PWR wake");
+        renderCurrentMode();
+        return;
+    }
+
+    if (screenBlanked) return;
+    resetTouchState();
+    gfx->displayOff();
+    screenBlanked = true;
+    GW_LOGLN("[Screen] PWR sleep");
+}
+
+void manualScreenSleep() {
+    GW_LOGLN("[Screen] manual sleep disabled until wake is proven reliable");
 }
 
 void loop() {
     if (!displayReady) { delay(1000); return; }
+
+    bool pwrShortPress = false;
+    if (pmuReady) {
+        const uint64_t pmuIrq = power.getIrqStatus();
+        if (pmuIrq) {
+            if (power.isPekeyShortPressIrq())  { GW_LOGLN("[PMU] PWR short press"); pwrShortPress = true; }
+            if (power.isPekeyLongPressIrq())   GW_LOGLN("[PMU] PWR long press");
+            if (power.isPekeyPositiveIrq())    GW_LOGLN("[PMU] PWR positive edge");
+            if (power.isPekeyNegativeIrq())    GW_LOGLN("[PMU] PWR negative edge");
+            power.clearIrqStatus();
+        }
+    }
+
+    // ── Screen power toggle via PWR short press ────────────────────
+    if (screenBlanked) {
+        const bool bootWake = digitalRead(WATCH_BOOT_BUTTON_PIN) == LOW;
+        if (pwrShortPress || bootWake) {
+            setScreenPowerState(true);
+        } else {
+            delay(20);
+        }
+        return;
+    }
+    if (pwrShortPress) {
+        setScreenPowerState(false);
+        return;
+    }
+
+    const bool bootNow = digitalRead(WATCH_BOOT_BUTTON_PIN) == LOW;
+    if (bootNow) lastActivityMs = millis();
+
+    if (wakeBootWaitRelease) {
+        if (!bootNow) {
+            wakeBootWaitRelease = false;
+            aiBootDown = false;
+            aiBootLongHandled = false;
+            aiBootDownMs = 0;
+        }
+    }
 
     if (currentMode == AppMode::Bot) {
         MicAudio::poll();
     }
 
     if (touchReady) {
-        if (botTouchReadSuspended()) {
+        if (botTouchReadSuspended() || millis() < wakeInputIgnoreUntilMs) {
             if (!touchPollingSuspended) {
                 resetTouchState();
                 touchPollingSuspended = true;
             }
         } else {
             touchPollingSuspended = false;
-            const TouchState touch = pollTouch();
-            handleTouch(touch);
+            TouchState touch;
+            if (pollTouch(touch)) {
+                handleTouch(touch);
+            }
         }
     }
 
-    // BOOT button in AI mode — sampled every loop, not rate-limited
-    if (currentMode == AppMode::AiScreensaver) {
-        const bool aiBtnNow = digitalRead(WATCH_BOOT_BUTTON_PIN) == LOW;
-        if (aiBtnNow && !aiBtnPrev && millis() - aiBtnLastMs > 300) {
-            aiBtnLastMs = millis();
-            aiModeActive = aiShowNextSlide(settings.whisplayUrl, false);
-            aiFrameLastMs = millis();
+    // AI mode: BOOT shortcuts are also active. Short press = next slide, long hold = back to Watch.
+    if (currentMode == AppMode::AiScreensaver && !wakeBootWaitRelease && millis() >= wakeInputIgnoreUntilMs) {
+        if (bootNow && !aiBootDown) {
+            aiBootDown = true;
+            aiBootLongHandled = false;
+            aiBootDownMs = millis();
         }
-        aiBtnPrev = aiBtnNow;
+        if (bootNow && aiBootDown && !aiBootLongHandled && millis() - aiBootDownMs >= AI_BOOT_LONG_MS) {
+            aiBootLongHandled = true;
+            GW_LOGLN("[AI] BOOT long -> Watch");
+            setMode(AppMode::Watch);
+            return;
+        }
+        if (!bootNow && aiBootDown) {
+            const unsigned long heldMs = millis() - aiBootDownMs;
+            aiBootDown = false;
+            if (!aiBootLongHandled && heldMs >= 30) {
+                GW_LOGLN("[AI] BOOT short -> next slide");
+                aiModeActive = aiShowNextSlide(settings.whisplayUrl, false);
+                aiFrameLastMs = millis();
+                lastActivityMs = millis();
+            }
+            aiBootLongHandled = false;
+            aiBootDownMs = 0;
+        }
     }
 
     // Per-frame work
@@ -1002,13 +1380,14 @@ void loop() {
 
         if (currentMode == AppMode::Watch) {
             updateParticles();
+            // Fetch NWS weather for the Clean watch face (face 1)
+            if (settings.watchFace == 1 && hasNwsLocation(settings)) {
+                fetchNwsForecast();
+            }
             renderWatchFrame();
         } else if (currentMode == AppMode::AiScreensaver) {
-            // Advance slides on interval
-            if (millis() - aiFrameLastMs >= AI_SLIDE_INTERVAL_MS) {
-                aiModeActive = aiShowNextSlide(settings.whisplayUrl, false);
-                aiFrameLastMs = millis();
-            }
+            // Rescue behavior: no automatic slide advance for now.
+            // AI mode changes only on explicit user action so BOOT handling stays responsive.
             if (aiNeedsRedraw) {
                 renderAiFrame();
             }
