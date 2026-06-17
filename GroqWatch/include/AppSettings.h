@@ -25,7 +25,7 @@ static constexpr const char *kDefaultModel = "llama-3.1-8b-instant";
 static constexpr const char *kDefaultPersona =
     "You are a concise, practical wrist-worn assistant. Keep replies short and helpful.";
 
-static constexpr const char *kWatchFaceNames[] = {"Particles", "Clean", "Stub"};
+static constexpr const char *kWatchFaceNames[] = {"Particles", "NWS", "Stub"};
 static constexpr uint8_t kWatchFaceCount = 3;
 
 struct AppSettings {

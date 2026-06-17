@@ -17,6 +17,7 @@
 #include "AiScreensaver.h"
 #include "AppModes.h"
 #include "AppSettings.h"
+#include "CosmicPortal.h"
 #include "GroqApi.h"
 #include "GroqWatchLog.h"
 #include "mic_audio.h"
@@ -218,6 +219,7 @@ void renderCurrentMode();
 void resetTouchState();
 bool botTouchReadSuspended();
 void dirtyAllModes();
+void applyWatchFaceConnectivity();
 static bool botFetchRemoteState(bool force);
 void renderCleanWatchFace();
 void renderStubWatchFace();
@@ -247,6 +249,9 @@ void setMode(AppMode newMode) {
         botBtnPrev = false;
         resetTouchState();
     }
+    if (oldMode == AppMode::Watch && newMode != AppMode::Watch && cpIsRunning()) {
+        cpClosePortal();
+    }
 
     currentMode = newMode;
     lastActivityMs = millis();
@@ -256,7 +261,7 @@ void setMode(AppMode newMode) {
     if (currentMode == AppMode::AiScreensaver) {
         aiModeActive = false;
         aiEnsureSdCache();
-        if (hasWhisplayUrl(settings) && !wifiConnected) {
+        if (!wifiConnected) {
             ensureWifiConnected();
         }
         pinMode(WATCH_BOOT_BUTTON_PIN, INPUT_PULLUP);
@@ -287,8 +292,7 @@ void setMode(AppMode newMode) {
     if (currentMode == AppMode::Watch) {
         aiClearCurrentSlide();
         aiModeActive = false;
-        cleanWatchDirty = true;
-        cleanWatchLastMinute = -1;
+        applyWatchFaceConnectivity();
     }
     if (currentMode == AppMode::Settings) {
         settingsMenu.begin(settings, currentMode);
@@ -424,6 +428,36 @@ void cycleBootMode() {
     saveSettings(settings);
 }
 
+bool watchFaceUsesPortal(uint8_t face) {
+    return face != 1;
+}
+
+void applyWatchFaceConnectivity() {
+    if (currentMode != AppMode::Watch) return;
+
+    if (watchFaceUsesPortal(settings.watchFace)) {
+        if (!cpIsRunning()) {
+            disconnectWiFi();
+            cpInitPortal();
+        }
+    } else {
+        if (cpIsRunning()) {
+            cpClosePortal();
+        }
+        if (hasWiFi(settings)) {
+            ensureWifiConnected();
+        } else {
+            wifiConnected = false;
+        }
+        if (!cleanWatchForecast.length()) {
+            cleanWatchForecastNextAttemptMs = 0;
+        }
+    }
+
+    cleanWatchDirty = true;
+    cleanWatchLastMinute = -1;
+}
+
 // ── Watch rendering ────────────────────────────────────────────────────
 void initParticlesForStyle(uint8_t s) {
     activeStyle=clampStyle(s); randomSeed(esp_random());
@@ -476,7 +510,7 @@ void renderWatchStatusBar() {
     char db[24]; snprintf(db,sizeof(db),"%04d-%02d-%02d %02d:%02d:%02d",clockNow.year,clockNow.month,clockNow.day,clockNow.hour,clockNow.minute,clockNow.second);
     gfx->setTextSize(1);
     gfx->setTextColor(RGB565_CYAN, RGB565_BLACK); gfx->setCursor(8,8); gfx->print(kWatchFaceNames[settings.watchFace]);
-    gfx->setTextColor(RGB565_WHITE, RGB565_BLACK); gfx->setCursor(8,482); gfx->print("tap top:style");
+    gfx->setTextColor(RGB565_WHITE, RGB565_BLACK); gfx->setCursor(8,482); gfx->print(settings.watchFace == 0 ? "tap top:style" : "tap top:face");
     gfx->setCursor(270,482); gfx->print("bottom:menu");
     gfx->setCursor(70,458); gfx->print(db);
     gfx->setTextColor(RGB565_YELLOW, RGB565_BLACK); gfx->setCursor(300,8); gfx->print(timeStatus);
@@ -501,7 +535,7 @@ void fetchNwsForecast() {
         return;
     }
     if (!wifiConnected || WiFi.status() != WL_CONNECTED) {
-        if (cleanWatchForecast != "Weather offline") {
+        if (!cleanWatchForecast.length()) {
             cleanWatchForecast = "Weather offline";
             cleanWatchDirty = true;
         }
@@ -659,11 +693,9 @@ void renderStubWatchFace() {
 
 void cycleWatchFace() {
     settings.watchFace = (settings.watchFace + 1) % kWatchFaceCount;
-    if (settings.watchFace != 0) {
-        // Keep particle style separate for face 0 only
-    }
     saveSettings(settings);
     if (settings.watchFace == 0) initParticlesForStyle(settings.watchStyle);
+    applyWatchFaceConnectivity();
 }
 
 // ── Mode rendering ─────────────────────────────────────────────────────
@@ -1048,11 +1080,7 @@ void handleSettingsTile(int tileIndex) {
             runSetupPortalModal(gfx, settings);
             break;
         case 1: // FACE - cycle
-            settings.watchFace = (settings.watchFace + 1) % kWatchFaceCount;
-            saveSettings(settings);
-            if (settings.watchFace == 0) {
-                initParticlesForStyle(settings.watchStyle);
-            }
+            cycleWatchFace();
             settingsMenu.rebuild();
             renderCurrentMode();
             break;
@@ -1220,17 +1248,20 @@ void setup() {
     initHardware();
     if (!displayReady) return;
 
+    AppMode bootMode = bootModeFromString(settings.bootMode);
+
     if (watchBootButtonHeld()) {
         GW_LOGLN("boot held -> setup");
         runSetupPortalModal(gfx, settings);
     }
-    if (!hasWiFi(settings)) {
+    if (bootMode != AppMode::Watch && !hasWiFi(settings)) {
         GW_LOGLN("no wifi -> setup");
         runSetupPortalModal(gfx, settings);
     }
 
-    connectWiFi();
-    aiEnsureSdCache();
+    if (bootMode != AppMode::Watch) {
+        connectWiFi();
+    }
     pollClock();
     lastActivityMs = millis();
     screenBlanked = false;
@@ -1238,7 +1269,6 @@ void setup() {
     initParticlesForStyle(settings.watchStyle);
 
     // Honor the saved boot mode.
-    AppMode bootMode = bootModeFromString(settings.bootMode);
     GW_LOGF("startup boot mode=%s\n", settings.bootMode);
     setMode(bootMode);
     renderCurrentMode();
@@ -1286,6 +1316,10 @@ void manualScreenSleep() {
 
 void loop() {
     if (!displayReady) { delay(1000); return; }
+
+    if (cpIsRunning()) {
+        cpRunPortal();
+    }
 
     bool pwrShortPress = false;
     if (pmuReady) {
