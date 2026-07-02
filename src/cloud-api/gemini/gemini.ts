@@ -1,7 +1,7 @@
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
 import { undiciProxyFetch } from "../proxy-fetch";
-import { getRuntimeSettings } from "../../config/runtime-settings";
+import { getRuntimeSettings, normalizeGeminiImageModel } from "../../config/runtime-settings";
 
 dotenv.config();
 
@@ -14,8 +14,9 @@ export const geminiTTSLanguageCode =
   process.env.GEMINI_TTS_LANGUAGE_CODE || "en-US";
 export const geminiVisionModel =
   process.env.GEMINI_VISION_MODEL || "gemini-2.5-flash";
-export const geminiImageModel =
-  process.env.GEMINI_IMAGE_MODEL || "gemini-2.5-flash-image";
+export const geminiImageModel = normalizeGeminiImageModel(
+  process.env.GEMINI_IMAGE_MODEL || "gemini-2.5-flash-image",
+);
 
 export const getGeminiClient = (): GoogleGenAI | null => {
   const runtimeKey = getRuntimeSettings().geminiApiKey;

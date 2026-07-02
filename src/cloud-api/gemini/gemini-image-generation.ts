@@ -11,6 +11,7 @@ import { readFileSync, writeFileSync } from "fs";
 import {
   GEMINI_LOW_TIER_IMAGE_COST_USD,
   getRuntimeSettings,
+  normalizeGeminiImageModel,
 } from "../../config/runtime-settings";
 import { buildGeminiImagePrompt } from "../../config/gemini-image-presets";
 import { undiciProxyFetch } from "../proxy-fetch";
@@ -28,10 +29,10 @@ const getGeminiImageClient = (): GoogleGenAI | null => {
 };
 
 const getGeminiImageModel = (): string => {
-  return (
+  return normalizeGeminiImageModel(
     getRuntimeSettings().geminiImageModel ||
-    process.env.GEMINI_IMAGE_MODEL ||
-    "gemini-2.5-flash-image"
+      process.env.GEMINI_IMAGE_MODEL ||
+      "gemini-2.5-flash-image",
   );
 };
 

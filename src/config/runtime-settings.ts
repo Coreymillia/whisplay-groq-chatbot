@@ -44,9 +44,10 @@ export type HeaderMode =
   | "vu-wave";
 export type GroqHeaderBadgeMode = "model" | "rpd-remaining";
 export type GeminiImageModel =
-  | "gemini-2.5-flash-image"
-  | "gemini-3.1-flash-image-preview"
-  | "gemini-3-pro-image-preview";
+  | "gemini-3.1-flash-lite-image"
+  | "gemini-3.1-flash-image"
+  | "gemini-3-pro-image"
+  | "gemini-2.5-flash-image";
 export type ScreensaverMode =
   | "off"
   | "ai-gallery"
@@ -260,9 +261,10 @@ export const GEMINI_IMAGE_MODEL_OPTIONS: Array<{
   id: GeminiImageModel;
   label: string;
 }> = [
+  { id: "gemini-3.1-flash-lite-image", label: "Gemini 3.1 Flash Lite Image" },
+  { id: "gemini-3.1-flash-image", label: "Gemini 3.1 Flash Image" },
+  { id: "gemini-3-pro-image", label: "Gemini 3 Pro Image" },
   { id: "gemini-2.5-flash-image", label: "Gemini 2.5 Flash Image" },
-  { id: "gemini-3.1-flash-image-preview", label: "Gemini 3.1 Flash Image Preview" },
-  { id: "gemini-3-pro-image-preview", label: "Gemini 3 Pro Image Preview" },
 ];
 export { GEMINI_IMAGE_PRESET_OPTIONS };
 export const SCREENSAVER_MODES: ScreensaverMode[] = [
@@ -332,10 +334,14 @@ const VALID_SCREENSAVER_MODES = new Set<ScreensaverMode>([
   "kaleidoscope",
   "tetris-rain",
 ]);
+const GEMINI_IMAGE_MODEL_ALIASES: Record<string, GeminiImageModel> = {
+  "gemini-3.1-flash-image-preview": "gemini-3.1-flash-image",
+  "gemini-3-pro-image-preview": "gemini-3-pro-image",
+};
+
 const VALID_GEMINI_IMAGE_MODELS = new Set<GeminiImageModel>(
   GEMINI_IMAGE_MODEL_OPTIONS.map((option) => option.id),
 );
-
 const VALID_HAT_FONT_SIZES = new Set<HatFontSize>([
   "small",
   "medium",
@@ -523,12 +529,13 @@ function normalizeGroqHeaderBadgeMode(value: unknown): GroqHeaderBadgeMode {
     : DEFAULT_GROQ_HEADER_BADGE_MODE;
 }
 
-function normalizeGeminiImageModel(value: unknown): GeminiImageModel {
-  if (
-    typeof value === "string" &&
-    VALID_GEMINI_IMAGE_MODELS.has(value as GeminiImageModel)
-  ) {
-    return value as GeminiImageModel;
+export function normalizeGeminiImageModel(value: unknown): GeminiImageModel {
+  if (typeof value === "string") {
+    const normalizedValue =
+      GEMINI_IMAGE_MODEL_ALIASES[value] || value;
+    if (VALID_GEMINI_IMAGE_MODELS.has(normalizedValue as GeminiImageModel)) {
+      return normalizedValue as GeminiImageModel;
+    }
   }
   return DEFAULT_GEMINI_IMAGE_MODEL;
 }
