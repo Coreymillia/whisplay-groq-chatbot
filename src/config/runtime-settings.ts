@@ -47,7 +47,8 @@ export type GeminiImageModel =
   | "gemini-3.1-flash-lite-image"
   | "gemini-3.1-flash-image"
   | "gemini-3-pro-image"
-  | "gemini-2.5-flash-image";
+  | "gemini-2.5-flash-image"
+  | "imagen-4.0-fast-generate-001";
 export type ScreensaverMode =
   | "off"
   | "ai-gallery"
@@ -265,6 +266,7 @@ export const GEMINI_IMAGE_MODEL_OPTIONS: Array<{
   { id: "gemini-3.1-flash-image", label: "Gemini 3.1 Flash Image" },
   { id: "gemini-3-pro-image", label: "Gemini 3 Pro Image" },
   { id: "gemini-2.5-flash-image", label: "Gemini 2.5 Flash Image" },
+  { id: "imagen-4.0-fast-generate-001", label: "Imagen 4.0 Fast Generate" },
 ];
 export { GEMINI_IMAGE_PRESET_OPTIONS };
 export const SCREENSAVER_MODES: ScreensaverMode[] = [
@@ -538,6 +540,10 @@ export function normalizeGeminiImageModel(value: unknown): GeminiImageModel {
     }
   }
   return DEFAULT_GEMINI_IMAGE_MODEL;
+}
+
+export function isImagenImageModel(value: string): boolean {
+  return typeof value === "string" && value.startsWith("imagen-");
 }
 
 function normalizeGeminiImagePromptHelperTokenLimit(value: unknown): number {

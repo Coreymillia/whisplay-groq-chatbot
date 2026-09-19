@@ -34,6 +34,8 @@ const generatedGalleryStatus = document.getElementById("generatedGalleryStatus")
 const generatedGalleryToggleBtn = document.getElementById("generatedGalleryToggleBtn");
 const chatHistorySelect = document.getElementById("chatHistorySelect");
 const loadChatBtn = document.getElementById("loadChatBtn");
+const copyReplyBtn = document.getElementById("copyReplyBtn");
+const replyPreview = document.getElementById("replyPreview");
 const newChatBtn = document.getElementById("newChatBtn");
 const chatStatus = document.getElementById("chatStatus");
 const musicFileInput = document.getElementById("musicFileInput");
@@ -177,6 +179,7 @@ let generatedGalleryPhotos = [];
 let selectedManualPhotoFileName = "";
 let selectedGeneratedPhotoFileName = "";
 let savedChatHistories = [];
+let latestAssistantReplyText = "";
 let screenBlankTimeoutOptions = [];
 let roomMonitorIntervalOptions = [];
 let roomMonitorDays = [];
@@ -858,6 +861,9 @@ function applyState(data) {
     currentGroqHeaderBadgeMode = data.groq_header_badge_mode;
   }
   statusText.textContent = status === "last reply" ? "Last" : status;
+  if (status === "last reply" && typeof data.text === "string") {
+    setLatestAssistantReply(data.text);
+  }
   emojiText.textContent = data.emoji || "";
   updateText(
     data.text || "",
@@ -972,6 +978,15 @@ function connectWebSocket() {
     }
     if (message.type === "state") {
       applyState(message.payload);
+    } else if (message.type === "conversation_turn") {
+      if (message.payload && message.payload.role === "bot" && typeof message.payload.text === "string") {
+        setLatestAssistantReply(message.payload.text);
+      }
+    } else if (message.type === "conversation_history") {
+      const latestReply = extractLatestAssistantReply(message.payload);
+      if (latestReply) {
+        setLatestAssistantReply(latestReply);
+      }
     } else if (message.type === "start_record") {
       startWebAudioRecording();
     } else if (message.type === "stop_record") {
@@ -1032,6 +1047,79 @@ function setChatStatus(message, isError = false) {
   chatStatus.textContent = message;
   chatStatus.style.color = isError ? "#ff8a8a" : "";
 }
+
+function updateCopyReplyButton() {
+  if (!copyReplyBtn) return;
+  copyReplyBtn.disabled = !latestAssistantReplyText.trim();
+}
+
+function updateReplyPreview() {
+  if (!replyPreview) return;
+  replyPreview.value = latestAssistantReplyText;
+}
+
+function setLatestAssistantReply(text) {
+  latestAssistantReplyText = typeof text === "string" ? text.trim() : "";
+  updateReplyPreview();
+  updateCopyReplyButton();
+}
+
+function extractLatestAssistantReply(turns) {
+  if (!Array.isArray(turns)) {
+    return "";
+  }
+  for (let index = turns.length - 1; index >= 0; index -= 1) {
+    const turn = turns[index];
+    if (turn && turn.role === "bot" && typeof turn.text === "string" && turn.text.trim()) {
+      return turn.text.trim();
+    }
+  }
+  return "";
+}
+
+async function copyTextToClipboard(text) {
+  if (!text) {
+    return false;
+  }
+  if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+    await navigator.clipboard.writeText(text);
+    return true;
+  }
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "true");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  textarea.style.top = "0";
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+  const copied = document.execCommand("copy");
+  document.body.removeChild(textarea);
+  return copied;
+}
+
+async function copyLatestAssistantReply() {
+  const text = latestAssistantReplyText.trim();
+  if (!text) {
+    setChatStatus("No assistant reply is available to copy yet.", true);
+    return;
+  }
+  try {
+    const copied = await copyTextToClipboard(text);
+    if (!copied) {
+      throw new Error("Clipboard copy was blocked.");
+    }
+    setChatStatus("Latest reply copied to clipboard.");
+  } catch (error) {
+    console.error("Failed to copy latest assistant reply:", error);
+    const message = error instanceof Error ? error.message : String(error);
+    setChatStatus(`Copy failed: ${message}`, true);
+  }
+}
+
+updateReplyPreview();
+updateCopyReplyButton();
 
 function setVisionAnalysisVisible(visible) {
   visionAnalysisVisible = Boolean(visible);
@@ -1401,6 +1489,7 @@ async function resetChat() {
         ? "Chat archived to Saved Chats. Fresh conversation ready."
         : "Fresh conversation ready.",
     );
+    setLatestAssistantReply("");
     await loadChatHistories();
   } catch (error) {
     console.error("Failed to reset chat:", error);
@@ -1441,6 +1530,7 @@ async function loadSelectedChatHistory() {
         ? `Loaded chat: ${selectedHistory.preview}`
         : "Loaded saved chat.",
     );
+    setLatestAssistantReply("");
     await loadChatHistories();
   } catch (error) {
     console.error("Failed to load saved chat:", error);
@@ -2910,6 +3000,12 @@ if (generatedGalleryToggleBtn) {
 if (newChatBtn) {
   newChatBtn.addEventListener("click", () => {
     resetChat();
+  });
+}
+
+if (copyReplyBtn) {
+  copyReplyBtn.addEventListener("click", () => {
+    copyLatestAssistantReply();
   });
 }
 

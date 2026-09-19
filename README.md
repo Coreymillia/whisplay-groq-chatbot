@@ -55,12 +55,13 @@ Current as of **2026-07-02**: Google docs clearly show **free vs paid tiers**, b
 
 | Model | Whisplay use | Best current paid-price snapshot | Free / billing note |
 | --- | --- | --- | --- |
-| **Gemini 3.1 Flash Lite Image** | fastest / cheapest photo generation and editing path | about **$0.25 input / $1.50 output per 1M tokens**, with image output priced around **$30 per 1M image tokens** | best fit when you want quick, low-cost edits |
+| **Gemini 3.1 Flash Lite Image** | cheapest Gemini photo generation and editing path | about **$0.25 input / $1.50 output per 1M tokens**, with image output priced around **$30 per 1M image tokens** | best fit when you want quick, low-cost edits |
+| **Imagen 4.0 Fast Generate** | fast generation-only image model | check current Imagen pricing docs for the latest billing rate | generation only; use Gemini image models for photo edits |
 | **Gemini 3.1 Flash Image** | balanced general-purpose photo generation and conversational editing | about **$0.50 input / $3.00 output per 1M tokens**, with image output priced around **$60 per 1M image tokens** | good default choice for most image edits |
 | **Gemini 3 Pro Image** | premium high-fidelity photo editing and generation | about **$2.00 input / $12.00 output per 1M tokens**, with image output priced around **$120 per 1M image tokens** | best for complex, precise, or text-heavy image work |
 | **Gemini 2.5 Flash Image** | legacy fallback Gemini image generation / editing path | about **$0.30 input / $0.039 per image** | still working and kept visible for compatibility and testing |
 
-> Note: the older preview-style Gemini image model IDs were replaced by the current canonical names above. Whisplay still accepts the old saved values as compatibility aliases, but the browser dropdown now shows the current working models.
+> Note: the older preview-style Gemini image model IDs were replaced by the current canonical names above. Whisplay still accepts the old saved values as compatibility aliases, and the browser dropdown now shows the current working models plus Imagen 4.0 Fast Generate.
 
 ### Practical billing notes for this project
 
@@ -97,7 +98,7 @@ Current as of **2026-07-02**: Google docs clearly show **free vs paid tiers**, b
 - **One-button device flow:** long press to talk, double press to open live preview, and voice shortcuts for settings and help
 - **Voice controls:** settings, voice on/off, photo capture, photo browsing, BotNet model cycling, shutdown, and an on-device voice-command cheat sheet
 - **Vision flow:** upload a photo or capture one from the configured camera source, then ask **"what do you see?"**
-- **Gemini image generation:** confirmed working in the current code path with a saved Gemini key; the browser image dropdown now shows **Gemini 3.1 Flash Lite Image**, **Gemini 3.1 Flash Image**, **Gemini 3 Pro Image**, and **Gemini 2.5 Flash Image** for photo generation / editing, with **`gemini-2.5-flash-image`** still retained as the legacy fallback
+- **Gemini image generation:** confirmed working in the current code path with a saved Gemini key; the browser image dropdown now shows **Gemini 3.1 Flash Lite Image**, **Gemini 3.1 Flash Image**, **Gemini 3 Pro Image**, **Gemini 2.5 Flash Image**, and **Imagen 4.0 Fast Generate** as a generation-only option, with **`gemini-2.5-flash-image`** still retained as the legacy fallback
 - **Gemini photo editing on-device:** take a photo, then use either a **voice command on the Pi** or **browser text input** to edit the current photo with Gemini; current-photo edits now generate and display successfully on the device path
 - **Gemini text models in normal chat:** the shared device / browser / ESP32 Agent selector now includes **Gemini 2.5 Flash**, **Gemini 2.5 Flash-Lite**, and **Gemini 2.5 Pro** alongside the existing Groq-hosted text models
 - **Gemini image settings:** the browser Settings panel now includes a **Gemini Image Model** dropdown, a **Gemini Style Preset** dropdown, and a **Gemini photo-edit confirm** toggle for staged edit prompts
@@ -817,7 +818,7 @@ GEMINI_API_KEY=your_gemini_api_key
 # GEMINI_IMAGE_MODEL=gemini-2.5-flash-image
 ```
 
-Gemini image generation in this fork currently defaults to **`gemini-2.5-flash-image`**. You can now switch the Gemini image model in the browser **Settings** panel, and the runtime still falls back to **`GEMINI_IMAGE_MODEL`** in `.env` when no browser override is saved. The current browser-visible photo-edit model lineup is **Gemini 3.1 Flash Lite Image**, **Gemini 3.1 Flash Image**, **Gemini 3 Pro Image**, and **Gemini 2.5 Flash Image**.
+Gemini image generation in this fork currently defaults to **`gemini-2.5-flash-image`**. You can now switch the Gemini image model in the browser **Settings** panel, and the runtime still falls back to **`GEMINI_IMAGE_MODEL`** in `.env` when no browser override is saved. The browser-visible lineup now includes **Gemini 3.1 Flash Lite Image**, **Gemini 3.1 Flash Image**, **Gemini 3 Pro Image**, **Gemini 2.5 Flash Image**, and **Imagen 4.0 Fast Generate**. Imagen 4.0 Fast Generate is generation-only; use a Gemini image model for photo editing.
 
 The browser and device text-model selector now also exposes **Gemini 2.5 Flash**, **Gemini 2.5 Flash-Lite**, and **Gemini 2.5 Pro** for the normal chatbot and the ESP32 Agent workspace. Those text requests use the saved Gemini key when a Gemini model is selected.
 

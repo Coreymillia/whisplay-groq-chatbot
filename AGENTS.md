@@ -10,7 +10,7 @@ Whisplay AI Chatbot is a pocket-sized AI chatbot device built for Raspberry Pi Z
 - Multi-provider ASR (Automatic Speech Recognition): Tencent, Volcengine, OpenAI, Gemini, Whisper, Vosk, local models
 - Multi-provider LLM: OpenAI, Gemini, Claude, Ollama, Qwen, Volcengine Doubao, and more
 - Multi-provider TTS: Google, Volcengine, Piper, espeak-ng, local models
-- Image generation and vision understanding
+- Image generation and vision understanding (Gemini photo-edit models plus Imagen 4.0 Fast Generate for generation-only prompts)
 - RAG (Retrieval-Augmented Generation) with Qdrant vector database
 - Wake word detection for hands-free operation
 - Plugin system for third-party extensions
